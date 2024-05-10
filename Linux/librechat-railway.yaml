@@ -1,0 +1,88 @@
+version: 1.0.8
+cache: true
+
+interface:
+  sidePanel: false
+
+endpoints:
+  custom:
+    # OpenRouter.ai
+    - name: "OpenRouter"
+      apiKey: "${OPENROUTER_KEY}"
+      baseURL: "https://openrouter.ai/api/v1"
+      models:
+        "default": [
+        "openai/gpt-4-turbo",
+        "meta-llama/llama-3-70b-instruct",
+        "anthropic/claude-3-sonnet",
+        "cohere/command-r-plus",
+        "anthropic/claude-3-haiku",
+        "cohere/command-r",
+        "mistralai/mixtral-8x22b-instruct",
+        "google/gemini-pro-vision",
+        "meta-llama/llama-3-8b-instruct:nitro"
+        ]
+        fetch: false
+      titleConvo: true
+      titleModel: "anthropic/claude-3-haiku"
+      summarize: false
+      summaryModel: "anthropic/claude-3-haiku"
+      forcePrompt: false
+      modelDisplayLabel: "OpenRouter"
+
+    - name: "cohere"
+      apiKey: "${COHERE_API_KEY}"
+      baseURL: "https://api.cohere.ai/v1"
+      models:
+        default: [
+          "command-light",
+          "command",
+          "command-r",
+          "command-r-plus"
+          ]
+        fetch: false
+      modelDisplayLabel: "cohere"
+      titleModel: "command"
+      dropParams: ["stop", "user", "frequency_penalty", "presence_penalty", "temperature", "top_p"]
+
+    # groq
+    - name: "groq"
+      apiKey: "${GROQ_API_KEY}"
+      baseURL: "https://api.groq.com/openai/v1/"
+      models:
+        default: [
+          "llama3-70b-8192"
+          ]
+        fetch: false
+      titleConvo: true
+      titleModel: "mixtral-8x7b-32768"
+      modelDisplayLabel: "groq"
+
+    - name: "Perplexity"
+      apiKey: "${PERPLEXITY_API_KEY}"
+      baseURL: "https://api.perplexity.ai/"
+      models:
+        default: [
+          "llama-3-70b-instruct",
+          "mixtral-8x7b-instruct"
+          ]
+        fetch: false # fetching list of models is not supported
+      titleConvo: true
+      titleModel: "mixtral-8x7b-instruct"
+      summarize: false
+      summaryModel: "mixtral-8x7b-instruct"
+      forcePrompt: false
+      dropParams: ["stop", "frequency_penalty"]
+      modelDisplayLabel: "Perplexity"
+
+    - name: "Web Search"
+      # For `apiKey` and `baseURL`, you can use environment variables that you define.
+      # recommended environment variables:
+      apiKey: "${OPENAI_API_KEY}"
+      baseURL: "${SEARCH2AI_URL}"
+      models:
+        default: ["gpt-3.5-turbo-16k"]
+        fetch: true
+      titleConvo: true
+      titleModel: "gpt-3.5-turbo"
+      modelDisplayLabel: "OpenAI"
