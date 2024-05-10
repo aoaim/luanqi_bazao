@@ -6,7 +6,7 @@ interface:
 
 endpoints:
   custom:
-    # OpenRouter.ai
+    # OpenRouter
     - name: "OpenRouter"
       apiKey: "${OPENROUTER_KEY}"
       baseURL: "https://openrouter.ai/api/v1"
@@ -30,7 +30,8 @@ endpoints:
       forcePrompt: false
       modelDisplayLabel: "OpenRouter"
 
-    - name: "cohere"
+    # Cohere
+    - name: "Cohere"
       apiKey: "${COHERE_API_KEY}"
       baseURL: "https://api.cohere.ai/v1"
       models:
@@ -45,8 +46,8 @@ endpoints:
       titleModel: "command"
       dropParams: ["stop", "user", "frequency_penalty", "presence_penalty", "temperature", "top_p"]
 
-    # groq
-    - name: "groq"
+    # Groq
+    - name: "Groq"
       apiKey: "${GROQ_API_KEY}"
       baseURL: "https://api.groq.com/openai/v1/"
       models:
@@ -58,6 +59,7 @@ endpoints:
       titleModel: "mixtral-8x7b-32768"
       modelDisplayLabel: "groq"
 
+    # Perplexity
     - name: "Perplexity"
       apiKey: "${PERPLEXITY_API_KEY}"
       baseURL: "https://api.perplexity.ai/"
@@ -75,13 +77,15 @@ endpoints:
       dropParams: ["stop", "frequency_penalty"]
       modelDisplayLabel: "Perplexity"
 
+    # Search2AI - ChatGPT
     - name: "Web Search"
       apiKey: "${OPENAI_API_KEY}"
       baseURL: "${SEARCH2AI_URL}"
       models:
         default:
         [
-          "gpt-3.5-turbo-16k"
+          "gpt-3.5-turbo-16k",
+          "gpt-4-turbo"
           ]
         fetch: true
       titleConvo: true
