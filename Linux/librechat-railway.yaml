@@ -84,7 +84,7 @@ endpoints:
           "llama-3-70b-instruct",
           "mixtral-8x7b-instruct"
           ]
-        fetch: false # fetching list of models is not supported
+        fetch: false
       titleConvo: true
       titleModel: "mixtral-8x7b-instruct"
       summarize: false
@@ -98,8 +98,7 @@ endpoints:
       apiKey: "${OPENAI_API_KEY}"
       baseURL: "${SEARCH2AI_URL}"
       models:
-        default:
-        [
+        default: [
           "gpt-3.5-turbo-16k",
           "gpt-4-turbo"
           ]
