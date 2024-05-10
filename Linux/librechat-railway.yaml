@@ -76,8 +76,6 @@ endpoints:
       modelDisplayLabel: "Perplexity"
 
     - name: "Web Search"
-      # For `apiKey` and `baseURL`, you can use environment variables that you define.
-      # recommended environment variables:
       apiKey: "${OPENAI_API_KEY}"
       baseURL: "${SEARCH2AI_URL}"
       models:
