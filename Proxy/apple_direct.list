@@ -1,0 +1,103 @@
+## 应当直连的苹果服务 API
+## 参见 https://github.com/geekdada/surge-list/blob/master/surgio-snippet/apple.tpl
+## 最后更新 2023-11-07
+## Surge
+
+#
+# Apple 直连
+#
+# Find My
+USER-AGENT,*com.apple.mobileme.fmip1
+# Weather
+USER-AGENT,*WeatherFoundation*
+DOMAIN,weather-data.apple.com
+# Maps
+USER-AGENT,%E5%9C%B0%E5%9B%BE*
+# Settings
+USER-AGENT,%E8%AE%BE%E7%BD%AE*
+USER-AGENT,com.apple.geod*
+USER-AGENT,com.apple.Maps
+USER-AGENT,FindMyFriends*
+USER-AGENT,FindMyiPhone*
+USER-AGENT,FMDClient*
+USER-AGENT,FMFD*
+USER-AGENT,fmflocatord*
+USER-AGENT,geod*
+USER-AGENT,locationd*
+USER-AGENT,Maps*
+
+#
+# Apple Global CDN
+#
+# iOS App Store
+DOMAIN,iosapps.itunes.apple.com
+# Mac App Store
+DOMAIN,osxapps.itunes.apple.com
+DOMAIN,oscdn.apple.com
+# Update
+DOMAIN,supportdownload.apple.com
+DOMAIN,appldnld.apple.com
+DOMAIN,appldnld.apple.com.edgesuite.net
+DOMAIN,swcdn.apple.com
+DOMAIN,updates-http.cdn-apple.com
+DOMAIN,updates.cdn-apple.com
+# App Store & iTunes Images
+DOMAIN-SUFFIX,mzstatic.com
+# Mac App Store
+PROCESS-NAME,storedownloadd
+# iOS App Store
+USER-AGENT,com.apple.appstored*
+# iTunes
+DOMAIN,aod.itunes.apple.com
+DOMAIN,mvod.itunes.apple.com
+DOMAIN,streamingaudio.itunes.apple.com
+DOMAIN,apptrailers.itunes.apple.com
+# Other
+DOMAIN,download.developer.apple.com
+DOMAIN,downloaddispatch.itunes.apple.com
+DOMAIN,app-site-association.cdn-apple.com
+
+#
+# Apple 其他直连
+#
+# Store
+DOMAIN-SUFFIX,store.apple.com
+# Spotlight
+DOMAIN,api.smoot.apple.com
+DOMAIN,api.smoot.apple.cn
+# Hotspot captive
+DOMAIN,captive.apple.com
+# Apple Pay
+DOMAIN,smp-device-content.apple.com
+DOMAIN-KEYWORD,smp-device
+USER-AGENT,passd*
+USER-AGENT,Wallet*
+# locationd
+DOMAIN,gs-loc.apple.com
+DOMAIN,gs-loc-cn.apple.com
+DOMAIN-SUFFIX,ls.apple.com.akadns.net
+DOMAIN-SUFFIX,ls.apple.com.edgesuite.net
+# Reserve
+DOMAIN,reserve-prime.apple.com
+# Push
+DOMAIN-KEYWORD,push-apple.com.akadns.net
+DOMAIN-SUFFIX,push.apple.com.akadns.net
+DOMAIN-SUFFIX,push.apple.com
+# GeoServices.framework
+DOMAIN-SUFFIX,ls.apple.com
+# Asset Cache Locator Service
+DOMAIN-SUFFIX,lcdn-locator.apple.com
+# Caching Server Registration
+DOMAIN,lcdn-registration.apple.com
+DOMAIN,suconfig.apple.com
+DOMAIN,xp-cdn.apple.com
+# Translation
+# See https://github.com/ripperhe/Bob/issues/405
+DOMAIN,sequoia.apple.com
+DOMAIN,seed-sequoia.siri.apple.com
+# Settings
+DOMAIN,sq-device.apple.com
+# CN specific
+DOMAIN-KEYWORD,-cn.apple.com
+DOMAIN-SUFFIX,icloud.com.cn
+DOMAIN-SUFFIX,apple.com.cn

@@ -1,6 +1,6 @@
-## 应当走代理的苹果服务 API
+## 应当代理的苹果服务 API
 ## 参见 https://github.com/geekdada/surge-list/blob/master/surgio-snippet/apple.tpl
-## 最后更新 2023-01-14
+## 最后更新 2023-11-07
 ## Surge
 
 #
@@ -27,13 +27,33 @@ DOMAIN-SUFFIX,itunes-apple.com.akadns.net
 DOMAIN,apple-relay.apple.com
 
 #
+# Apple Non-China CDN
+#
+# iTunes
+DOMAIN-SUFFIX,hls.itunes.apple.com
+DOMAIN-SUFFIX,hls-amt.itunes.apple.com
+DOMAIN-SUFFIX,audio-ssl.itunes.apple.com
+DOMAIN-SUFFIX,cdn-apple.com
+DOMAIN,cdn.apple-cloudkit.com
+# Developer
+DOMAIN,devimages-cdn.apple.com
+DOMAIN,devstreaming-cdn.apple.com
+DOMAIN,js-cdn.music.apple.com
+DOMAIN,docs-assets.developer.apple.com
+# Other
+DOMAIN-SUFFIX,apple-dns.net
+# OCSP
+DOMAIN-SUFFIX,ocsp.apple.com
+USER-AGENT,com.apple.trustd*
+
+#
 # Apple News
 #
-USER-AGENT,AppleNews*,{{apple_news_rule}}
-DOMAIN-SUFFIX,apple.news,{{apple_news_rule}}
-DOMAIN,news-events.apple.com,{{apple_news_rule}}
-DOMAIN,news-edge.apple.com,{{apple_news_rule}}
-DOMAIN,apple.comscoreresearch.com,{{apple_news_rule}}
+USER-AGENT,AppleNews*
+DOMAIN-SUFFIX,apple.news
+DOMAIN,news-events.apple.com
+DOMAIN,news-edge.apple.com
+DOMAIN,apple.comscoreresearch.com
 
 #
 # Apple 其他
