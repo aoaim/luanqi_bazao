@@ -1,7 +1,11 @@
+## 应当走代理的苹果服务 API
+## 参见 https://github.com/geekdada/surge-list/blob/master/surgio-snippet/apple.tpl
 ## 最后更新 2023-01-14
+## Surge
 
-# 以下参见 https://github.com/geekdada/surge-list/blob/master/surgio-snippet/apple.tpl
+#
 # 一些 com.apple.appstored* 会连接的 API（优先级高）
+#
 DOMAIN,guzzoni.apple.com
 DOMAIN,apps.apple.com
 DOMAIN,xp.apple.com
@@ -16,6 +20,24 @@ DOMAIN,upp.itunes.apple.com
 DOMAIN,beta.music.apple.com
 DOMAIN-KEYWORD,buy.itunes.apple.com
 DOMAIN-SUFFIX,itunes-apple.com.akadns.net
+
+#
+# Apple Intelligence
+#
+DOMAIN,apple-relay.apple.com
+
+#
+# Apple News
+#
+USER-AGENT,AppleNews*,{{apple_news_rule}}
+DOMAIN-SUFFIX,apple.news,{{apple_news_rule}}
+DOMAIN,news-events.apple.com,{{apple_news_rule}}
+DOMAIN,news-edge.apple.com,{{apple_news_rule}}
+DOMAIN,apple.comscoreresearch.com,{{apple_news_rule}}
+
+#
+# Apple 其他
+#
 # iMessage
 DOMAIN-SUFFIX,ess.apple.com
 # Apple Music
@@ -28,7 +50,7 @@ DOMAIN-SUFFIX,aaplimg.com
 DOMAIN-SUFFIX,apple.co
 DOMAIN-SUFFIX,itunes.com
 DOMAIN-SUFFIX,itunes.apple.com
-# DOMAIN-SUFFIX,apple
+DOMAIN-SUFFIX,apple
 DOMAIN,weather-analytics-events.apple.com
 # iCloud 上传和下载
 DOMAIN-SUFFIX,icloud-content.com
@@ -55,12 +77,3 @@ DOMAIN,apps.apple.com
 DOMAIN,books.apple.com
 DOMAIN,itunes.apple.com
 DOMAIN,tv.apple.com
-# > News
-DOMAIN,gateway.icloud.com
-DOMAIN-SUFFIX,apple.news
-DOMAIN,news-assets.apple.com
-DOMAIN,news-client.apple.com
-DOMAIN,news-client-search.apple.com
-DOMAIN,news-edge.apple.com
-DOMAIN,news-events.apple.com
-DOMAIN,apple.comscoreresearch.com
