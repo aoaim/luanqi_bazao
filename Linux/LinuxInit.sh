@@ -1,132 +1,112 @@
 #!/bin/bash
 
-# upgrade
-apt update && apt upgrade -y && apt autoremove -y && apt install openssl net-tools dnsutils nload curl wget lsof nano htop cron haveged vnstat -y
+# Error if not root
+[ "$(id -u)" != "0" ] && { echo "Error: You must be root to run this script"; exit 1; }
 
-# haveged
+# Upgrade and install necessary packages
+apt update && apt upgrade -y && apt autoremove -y
+apt install -y openssl net-tools dnsutils nload curl wget lsof nano htop cron haveged vnstat chrony
+
+# Chrony configuration
+cat > /etc/chrony/chrony.conf <<EOF
+server 0.asia.pool.ntp.org iburst
+server 1.asia.pool.ntp.org iburst
+server 2.asia.pool.ntp.org iburst
+server 3.asia.pool.ntp.org iburst
+driftfile /var/lib/chrony/chrony.drift
+makestep 1.0 3
+rtcsync
+log tracking measurements statistics
+logdir /var/log/chrony
+EOF
+
+# Restart and enable chrony
+systemctl restart chrony
+systemctl enable chrony
+
+# Verify chrony is running
+chronyc tracking
+
+# Timezone
+timedatectl set-timezone Asia/Singapore
+
+# Haveged
 systemctl disable --now haveged
 systemctl enable --now haveged
 
-# vnstat
+# Vnstat
 systemctl enable --now vnstat
 
-# allow ssh root
-# sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/g' /etc/ssh/sshd_config;
-# sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/g' /etc/ssh/sshd_config;
-# systemctl restart sshd
-
-# limits
-cp /etc/security/limits.conf /etc/security/limits.conf.bak
-if [ -f /etc/security/limits.conf ]; then
-  LIMIT='262144'
-  sed -i '/^\(\*\|root\)[[:space:]]*\(hard\|soft\)[[:space:]]*\(nofile\|memlock\)/d' /etc/security/limits.conf
-  echo -ne "*\thard\tmemlock\t${LIMIT}\n*\tsoft\tmemlock\t${LIMIT}\nroot\thard\tmemlock\t${LIMIT}\nroot\tsoft\tmemlock\t${LIMIT}\n*\thard\tnofile\t${LIMIT}\n*\tsoft\tnofile\t${LIMIT}\nroot\thard\tnofile\t${LIMIT}\nroot\tsoft\tnofile\t${LIMIT}\n\n" >>/etc/security/limits.conf
-fi
-if [ -f /etc/systemd/system.conf ]; then
-  sed -i 's/#\?DefaultLimitNOFILE=.*/DefaultLimitNOFILE=262144/' /etc/systemd/system.conf
-fi
-
-# timezone
-# ln -sf /usr/share/zoneinfo/Asia/Singapore /etc/localtime && echo "Asia/Hong_Kong" >/etc/timezone
-
-# systemd-journald
-sed -i 's/^#\?Storage=.*/Storage=volatile/' /etc/systemd/journald.conf
-sed -i 's/^#\?SystemMaxUse=.*/SystemMaxUse=8M/' /etc/systemd/journald.conf
-sed -i 's/^#\?RuntimeMaxUse=.*/RuntimeMaxUse=8M/' /etc/systemd/journald.conf
-systemctl restart systemd-journald
-
-# ssh
-# [ -d ~/.ssh ] || mkdir -p ~/.ssh
-# echo -ne "# chmod 600 ~/.ssh/id_rsa\n\nHost *\n  StrictHostKeyChecking no\n  UserKnownHostsFile /dev/null\n  IdentityFile ~/.ssh/id_rsa\n" > ~/.ssh/config
-
-# nload
-echo -ne 'DataFormat="Human Readable (Byte)"\nTrafficFormat="Human Readable (Byte)"\n' >/etc/nload.conf
-
-# sysctl
-cp /etc/sysctl.conf /etc/sysctl.conf.bak
-cat >/etc/sysctl.conf<<EOF
-#
-# /etc/sysctl.conf - Configuration file for setting system variables
-# See /etc/sysctl.d/ for additional system variables.
-# See sysctl.conf (5) for information.
-#
-
-#kernel.domainname = example.com
-
-# Uncomment the following to stop low-level messages on console
-#kernel.printk = 3 4 1 3
-
-###################################################################
-# Functions previously found in netbase
-#
-
-# Uncomment the next two lines to enable Spoof protection (reverse-path filter)
-# Turn on Source Address Verification in all interfaces to
-# prevent some spoofing attacks
-#net.ipv4.conf.default.rp_filter=1
-#net.ipv4.conf.all.rp_filter=1
-
-# Uncomment the next line to enable TCP/IP SYN cookies
-# See http://lwn.net/Articles/277146/
-# Note: This may impact IPv6 TCP sessions too
-#net.ipv4.tcp_syncookies=1
-
-# Uncomment the next line to enable packet forwarding for IPv4
-#net.ipv4.ip_forward=1
-
-# Uncomment the next line to enable packet forwarding for IPv6
-#  Enabling this option disables Stateless Address Autoconfiguration
-#  based on Router Advertisements for this host
-#net.ipv6.conf.all.forwarding=1
-
-
-###################################################################
-# Additional settings - these settings can improve the network
-# security of the host and prevent against some network attacks
-# including spoofing attacks and man in the middle attacks through
-# redirection. Some network environments, however, require that these
-# settings are disabled so review and enable them as needed.
-#
-# Do not accept ICMP redirects (prevent MITM attacks)
-#net.ipv4.conf.all.accept_redirects = 0
-#net.ipv6.conf.all.accept_redirects = 0
-# _or_
-# Accept ICMP redirects only for gateways listed in our default
-# gateway list (enabled by default)
-# net.ipv4.conf.all.secure_redirects = 1
-#
-# Do not send ICMP redirects (we are not a router)
-#net.ipv4.conf.all.send_redirects = 0
-#
-# Do not accept IP source route packets (we are not a router)
-#net.ipv4.conf.all.accept_source_route = 0
-#net.ipv6.conf.all.accept_source_route = 0
-#
-# Log Martian Packets
-#net.ipv4.conf.all.log_martians = 1
-#
-
-###################################################################
-# Magic system request Key
-# 0=disable, 1=enable all, >1 bitmask of sysrq functions
-# See https://www.kernel.org/doc/html/latest/admin-guide/sysrq.html
-# for what other values do
-#kernel.sysrq=438
-
-net.core.default_qdisc = fq
-net.core.rmem_max = 67108848
-net.core.wmem_max = 67108848
-net.core.somaxconn = 4096
-net.ipv4.tcp_max_syn_backlog = 4096
-net.core.default_qdisc = fq_pie
-net.ipv4.tcp_congestion_control = bbr
-net.ipv4.icmp_echo_ignore_all = 1
-net.ipv4.tcp_rmem = 16384 16777216 536870912
-net.ipv4.tcp_wmem = 16384 16777216 536870912
-net.ipv4.tcp_adv_win_scale = -2
-net.ipv4.tcp_sack = 1
-net.ipv4.tcp_timestamps = 1
-kernel.panic = -1
-vm.swappiness = 0
+# Limits
+[ -e /etc/security/limits.d/*nproc.conf ] && rename nproc.conf nproc.conf_bk /etc/security/limits.d/*nproc.conf
+[ -f /etc/pam.d/common-session ] && [ -z "$(grep 'session required pam_limits.so' /etc/pam.d/common-session)" ] && echo "session required pam_limits.so" >> /etc/pam.d/common-session
+cat >> /etc/security/limits.conf <<EOF
+# End of file
+* soft nofile 1048576
+* hard nofile 1048576
+* soft nproc 1048576
+* hard nproc 1048576
+* soft core 1048576
+* hard core 1048576
+* hard memlock unlimited
+* soft memlock unlimited
+root soft nofile 1048576
+root hard nofile 1048576
+root soft nproc 1048576
+root hard nproc 1048576
+root soft core 1048576
+root hard core 1048576
+root hard memlock unlimited
+root soft memlock unlimited
 EOF
+
+# Sysctl
+cat > /etc/sysctl.conf <<EOF
+fs.file-max = 1048576
+fs.inotify.max_user_instances = 8192
+net.core.somaxconn = 32768
+net.core.netdev_max_backlog = 32768
+net.core.rmem_max = 33554432
+net.core.wmem_max = 33554432
+net.ipv4.udp_rmem_min = 16384
+net.ipv4.udp_wmem_min = 16384
+net.ipv4.tcp_rmem = 4096 87380 33554432
+net.ipv4.tcp_wmem = 4096 16384 33554432
+net.ipv4.tcp_mem = 786432 1048576 26777216
+net.ipv4.udp_mem = 65536 131072 262144
+net.ipv4.tcp_syncookies = 1
+net.ipv4.tcp_fin_timeout = 30
+net.ipv4.tcp_tw_reuse = 1
+net.ipv4.ip_local_port_range = 1024 65000
+net.ipv4.tcp_max_syn_backlog = 16384
+net.ipv4.tcp_max_tw_buckets = 6000
+net.ipv4.route.gc_timeout = 100
+net.ipv4.tcp_syn_retries = 1
+net.ipv4.tcp_synack_retries = 1
+net.ipv4.tcp_timestamps = 0
+net.ipv4.tcp_max_orphans = 131072
+net.ipv4.tcp_no_metrics_save = 1
+net.ipv4.tcp_ecn = 0
+net.ipv4.tcp_frto = 0
+net.ipv4.tcp_mtu_probing = 0
+net.ipv4.tcp_rfc1337 = 0
+net.ipv4.tcp_sack = 1
+net.ipv4.tcp_fack = 1
+net.ipv4.tcp_window_scaling = 1
+net.ipv4.tcp_adv_win_scale = 1
+net.ipv4.tcp_moderate_rcvbuf = 1
+net.ipv4.tcp_keepalive_time = 600
+net.ipv4.tcp_notsent_lowat = 16384
+EOF
+
+# Enable BBR
+modprobe tcp_bbr &>/dev/null
+if grep -wq bbr /proc/sys/net/ipv4/tcp_available_congestion_control; then
+    echo "net.core.default_qdisc = fq" >>/etc/sysctl.conf
+    echo "net.ipv4.tcp_congestion_control = bbr" >>/etc/sysctl.conf
+fi
+
+# Apply sysctl settings
 sysctl -p
+
+echo "Successful kernel optimization"
