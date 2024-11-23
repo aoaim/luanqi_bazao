@@ -1,0 +1,92 @@
+payload:
+  # Apple 直连
+  # Find My
+  # USER-AGENT,*com.apple.mobileme.fmip1  # 此规则Clash不支持，已移除
+  # Weather
+  - DOMAIN,weather-data.apple.com
+  # Maps
+  # USER-AGENT,%E5%9C%B0%E5%9B%BE*  # 此规则Clash不支持，已移除
+  # Settings
+  # USER-AGENT,%E8%AE%BE%E7%BD%AE*  # 此规则Clash不支持，已移除
+  # USER-AGENT,com.apple.geod*  # 此规则Clash不支持，已移除
+  # USER-AGENT,com.apple.Maps  # 此规则Clash不支持，已移除
+  # USER-AGENT,FindMyFriends*  # 此规则Clash不支持，已移除
+  # USER-AGENT,FindMyiPhone*  # 此规则Clash不支持，已移除
+  # USER-AGENT,FMDClient*  # 此规则Clash不支持，已移除
+  # USER-AGENT,FMFD*  # 此规则Clash不支持，已移除
+  # USER-AGENT,fmflocatord*  # 此规则Clash不支持，已移除
+  # USER-AGENT,geod*  # 此规则Clash不支持，已移除
+  # USER-AGENT,locationd*  # 此规则Clash不支持，已移除
+  # USER-AGENT,Maps*  # 此规则Clash不支持，已移除
+
+  # Apple Global CDN
+  # iOS App Store
+  - DOMAIN,iosapps.itunes.apple.com
+  # Mac App Store
+  - DOMAIN,osxapps.itunes.apple.com
+  - DOMAIN,oscdn.apple.com
+  # Update
+  - DOMAIN,supportdownload.apple.com
+  - DOMAIN,appldnld.apple.com
+  - DOMAIN,appldnld.apple.com.edgesuite.net
+  - DOMAIN,swcdn.apple.com
+  - DOMAIN,updates-http.cdn-apple.com
+  - DOMAIN,updates.cdn-apple.com
+  # App Store & iTunes Images
+  - DOMAIN-SUFFIX,mzstatic.com
+  # Mac App Store
+  # PROCESS-NAME,storedownloadd  # 此规则Clash不支持，已移除
+  # iOS App Store
+  # USER-AGENT,com.apple.appstored*  # 此规则Clash不支持，已移除
+  # iTunes
+  - DOMAIN,aod.itunes.apple.com
+  - DOMAIN,mvod.itunes.apple.com
+  - DOMAIN,streamingaudio.itunes.apple.com
+  - DOMAIN,apptrailers.itunes.apple.com
+  # Other
+  - DOMAIN,download.developer.apple.com
+  - DOMAIN,downloaddispatch.itunes.apple.com
+  - DOMAIN,app-site-association.cdn-apple.com
+
+  # Apple 其他直连
+  # Store
+  - DOMAIN-SUFFIX,store.apple.com
+  # Spotlight
+  - DOMAIN,api.smoot.apple.com
+  - DOMAIN,api.smoot.apple.cn
+  # Hotspot captive
+  - DOMAIN,captive.apple.com
+  # Apple Pay
+  - DOMAIN,smp-device-content.apple.com
+  # DOMAIN-KEYWORD,smp-device  # 此规则Clash不支持，已移除
+  # USER-AGENT,passd*  # 此规则Clash不支持，已移除
+  # USER-AGENT,Wallet*  # 此规则Clash不支持，已移除
+  # locationd
+  - DOMAIN,gs-loc.apple.com
+  - DOMAIN,gs-loc-cn.apple.com
+  - DOMAIN-SUFFIX,ls.apple.com.akadns.net
+  - DOMAIN-SUFFIX,ls.apple.com.edgesuite.net
+  # Reserve
+  - DOMAIN,reserve-prime.apple.com
+  # Push
+  - DOMAIN-KEYWORD,push-apple.com.akadns.net
+  - DOMAIN-SUFFIX,push.apple.com.akadns.net
+  - DOMAIN-SUFFIX,push.apple.com
+  # GeoServices.framework
+  - DOMAIN-SUFFIX,ls.apple.com
+  # Asset Cache Locator Service
+  - DOMAIN-SUFFIX,lcdn-locator.apple.com
+  # Caching Server Registration
+  - DOMAIN,lcdn-registration.apple.com
+  - DOMAIN,suconfig.apple.com
+  - DOMAIN,xp-cdn.apple.com
+  # Translation
+  # See https://github.com/ripperhe/Bob/issues/405
+  - DOMAIN,sequoia.apple.com
+  - DOMAIN,seed-sequoia.siri.apple.com
+  # Settings
+  - DOMAIN,sq-device.apple.com
+  # CN specific
+  - DOMAIN-KEYWORD,-cn.apple.com
+  - DOMAIN-SUFFIX,icloud.com.cn
+  - DOMAIN-SUFFIX,apple.com.cn
