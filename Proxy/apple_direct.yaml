@@ -1,23 +1,41 @@
+## 应当直连的苹果服务 API
+## 最后更新 2025-03-19
+## 适用于 Clash
+
+  ## Clash 用法：
+
+  ## AppleDirect:
+    ## type: http
+    ## behavior: classical
+    ## url: https://cdn.jsdelivr.net/gh/aoaim/LuanQiBaZao/Proxy/AppleDirect.yaml
+    ## path: ./surgio_ruleset/appledirect.yaml
+    ## interval: 86400
+
+  ## - RULE-SET,AppleDirect,DIRECT
+
+  ## 参考自 https://blog.royli.dev/2019/better-proxy-rules-for-apple-services
+
 payload:
   # Apple 直连
-  # Find My
-  # USER-AGENT,*com.apple.mobileme.fmip1  # 此规则Clash不支持，已移除
+  # Find
+  # - USER-AGENT,*com.apple.mobileme.fmip1
   # Weather
+  # - USER-AGENT,*WeatherFoundation*
   - DOMAIN,weather-data.apple.com
   # Maps
-  # USER-AGENT,%E5%9C%B0%E5%9B%BE*  # 此规则Clash不支持，已移除
+  # - USER-AGENT,%E5%9C%B0%E5%9B%BE*
   # Settings
-  # USER-AGENT,%E8%AE%BE%E7%BD%AE*  # 此规则Clash不支持，已移除
-  # USER-AGENT,com.apple.geod*  # 此规则Clash不支持，已移除
-  # USER-AGENT,com.apple.Maps  # 此规则Clash不支持，已移除
-  # USER-AGENT,FindMyFriends*  # 此规则Clash不支持，已移除
-  # USER-AGENT,FindMyiPhone*  # 此规则Clash不支持，已移除
-  # USER-AGENT,FMDClient*  # 此规则Clash不支持，已移除
-  # USER-AGENT,FMFD*  # 此规则Clash不支持，已移除
-  # USER-AGENT,fmflocatord*  # 此规则Clash不支持，已移除
-  # USER-AGENT,geod*  # 此规则Clash不支持，已移除
-  # USER-AGENT,locationd*  # 此规则Clash不支持，已移除
-  # USER-AGENT,Maps*  # 此规则Clash不支持，已移除
+  # - USER-AGENT,%E8%AE%BE%E7%BD%AE*
+  # - USER-AGENT,com.apple.geod*
+  # - USER-AGENT,com.apple.Maps
+  # - USER-AGENT,FindMyFriends*
+  # - USER-AGENT,FindMyiPhone*
+  # - USER-AGENT,FMDClient*
+  # - USER-AGENT,FMFD*
+  # - USER-AGENT,fmflocatord*
+  # - USER-AGENT,geod*
+  # - USER-AGENT,locationd*
+  # - USER-AGENT,Maps*
 
   # Apple Global CDN
   # iOS App Store
@@ -35,9 +53,9 @@ payload:
   # App Store & iTunes Images
   - DOMAIN-SUFFIX,mzstatic.com
   # Mac App Store
-  # PROCESS-NAME,storedownloadd  # 此规则Clash不支持，已移除
+  - PROCESS-NAME,storedownloadd
   # iOS App Store
-  # USER-AGENT,com.apple.appstored*  # 此规则Clash不支持，已移除
+  # - USER-AGENT,com.apple.appstored*
   # iTunes
   - DOMAIN,aod.itunes.apple.com
   - DOMAIN,mvod.itunes.apple.com
@@ -58,9 +76,9 @@ payload:
   - DOMAIN,captive.apple.com
   # Apple Pay
   - DOMAIN,smp-device-content.apple.com
-  # DOMAIN-KEYWORD,smp-device  # 此规则Clash不支持，已移除
-  # USER-AGENT,passd*  # 此规则Clash不支持，已移除
-  # USER-AGENT,Wallet*  # 此规则Clash不支持，已移除
+  - DOMAIN-KEYWORD,smp-device
+  # - USER-AGENT,passd*
+  # - USER-AGENT,Wallet*
   # locationd
   - DOMAIN,gs-loc.apple.com
   - DOMAIN,gs-loc-cn.apple.com
@@ -81,7 +99,6 @@ payload:
   - DOMAIN,suconfig.apple.com
   - DOMAIN,xp-cdn.apple.com
   # Translation
-  # See https://github.com/ripperhe/Bob/issues/405
   - DOMAIN,sequoia.apple.com
   - DOMAIN,seed-sequoia.siri.apple.com
   # Settings
