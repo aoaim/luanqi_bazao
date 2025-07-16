@@ -5,7 +5,8 @@
 
 # Upgrade and install necessary packages
 apt update && apt upgrade -y && apt autoremove -y
-apt install -y openssl net-tools dnsutils nload curl wget lsof nano htop cron haveged vnstat chrony
+apt install -y openssl net-tools dnsutils nload curl wget lsof nano htop cron haveged vnstat chrony iftop iotop fail2ban unattended-upgrades unzip logrotate
+
 
 # Chrony configuration
 cat > /etc/chrony/chrony.conf <<EOF
@@ -20,71 +21,112 @@ log tracking measurements statistics
 logdir /var/log/chrony
 EOF
 
-# Restart and enable chrony
-systemctl restart chrony
-systemctl enable chrony
-
-# Verify chrony is running
+# Enable and verify chrony
+systemctl enable --now chrony
 chronyc tracking
+
+# 等待chrony同步，最多等待60秒
+for i in {1..12}; do
+    status=$(chronyc tracking 2>/dev/null | grep 'Leap status' | cut -d':' -f2 | xargs)
+    if [[ "$status" == "Normal" ]]; then
+        break
+    fi
+    sleep 5
+done
 
 # Timezone
 timedatectl set-timezone Asia/Singapore
 
 # Haveged
-systemctl disable --now haveged
 systemctl enable --now haveged
 
 # Vnstat
 systemctl enable --now vnstat
 
+# Fail2ban
+systemctl enable --now fail2ban
+
+# unattended-upgrades 自动启用（自动安全更新，无交互）
+# dpkg-reconfigure -plow unattended-upgrades
+cat > /etc/apt/apt.conf.d/20auto-upgrades <<EOF
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+EOF
+systemctl enable --now unattended-upgrades 2>/dev/null || true
+
+# logrotate 测试（可选）
+logrotate -f /etc/logrotate.conf
+
 # Limits
-[ -e /etc/security/limits.d/*nproc.conf ] && rename nproc.conf nproc.conf_bk /etc/security/limits.d/*nproc.conf
+# 备份所有 nproc.conf，防止默认限制覆盖自定义设置
+for f in /etc/security/limits.d/*nproc.conf; do
+    [ -e "$f" ] && mv "$f" "${f}_bk"
+done
+
+# 确保 pam_limits.so 被加载，否则 limits 配置不会生效
 [ -f /etc/pam.d/common-session ] && [ -z "$(grep 'session required pam_limits.so' /etc/pam.d/common-session)" ] && echo "session required pam_limits.so" >> /etc/pam.d/common-session
-cat >> /etc/security/limits.conf <<EOF
-# End of file
-* soft nofile 1048576
-* hard nofile 1048576
-* soft nproc 1048576
-* hard nproc 1048576
-* soft core 1048576
-* hard core 1048576
-* hard memlock unlimited
-* soft memlock unlimited
-root soft nofile 1048576
-root hard nofile 1048576
-root soft nproc 1048576
-root hard nproc 1048576
-root soft core 1048576
-root hard core 1048576
-root hard memlock unlimited
-root soft memlock unlimited
+
+# 网络服务优化 - 适度提升
+cat > /etc/security/limits.d/99-network-limits.conf <<EOF
+# 网络服务优化 - 适度提升
+* soft nofile 65536
+* hard nofile 65536
+* soft nproc 32768
+* hard nproc 32768
+
+root soft nofile 65536
+root hard nofile 65536
+root soft nproc 32768
+root hard nproc 32768
 EOF
 
 # Sysctl
-cat > /etc/sysctl.conf <<EOF
-fs.file-max = 1024000
-net.core.rmem_max = 35000000
-net.core.rmem_default = 17500000
-net.core.wmem_max = 35000000
-net.core.wmem_default = 17500000
+cat > /etc/sysctl.d/99-bbr-tun.conf <<'EOF'
+# 1. 基础
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
 
-net.ipv4.tcp_wmem = 4096 17500000 35000000
-net.ipv4.tcp_rmem = 4096 17500000 35000000
+# 缓冲区：32 MB 统一上限
+net.core.rmem_max = 33554432
+net.core.wmem_max = 33554432
+net.ipv4.tcp_rmem = 4096 262144 33554432
+net.ipv4.tcp_wmem = 4096 262144 33554432
 
-net.ipv4.tcp_mtu_probing = 1
-net.ipv4.tcp_fastopen = 3
-net.ipv4.tcp_adv_win_scale = -2
-net.ipv4.tcp_notsent_lowat = 131072
+# 3. 减少排队 & 丢包恢复
+net.ipv4.tcp_mtu_probing = 1          # 开启 PLPMTUD，防中间设备黑洞
+net.ipv4.tcp_fastopen = 3             # TFO 客户端+服务端
+net.ipv4.tcp_slow_start_after_idle = 0 # 长连接不再降速
+net.ipv4.tcp_notsent_lowat = 131072   # 降低 bufferbloat
+
+# 4. 通用优化
+net.ipv4.tcp_timestamps = 1
+net.ipv4.tcp_sack = 1
+net.ipv4.tcp_no_metrics_save = 1
+net.core.netdev_max_backlog = 5000
+
+# 5. 安全优化
+net.ipv4.tcp_syncookies = 1
+net.ipv4.tcp_max_syn_backlog = 2048
+# net.ipv4.ip_forward = 1               # 如果需要转发
 EOF
 
-# Enable BBR
-modprobe tcp_bbr &>/dev/null
-if grep -wq bbr /proc/sys/net/ipv4/tcp_available_congestion_control; then
-    echo "net.core.default_qdisc = fq_pie" >>/etc/sysctl.conf
-    echo "net.ipv4.tcp_congestion_control = bbr" >>/etc/sysctl.conf
-fi
-
 # Apply sysctl settings
-sysctl -p && sysctl --system
+sysctl --system
 
-echo "Successful kernel optimization"
+# 清屏
+clear
+
+# 验证配置
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "🚀 System Optimization Complete - Configuration Check"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+printf "%-22s: %s\n" "BBR Congestion Control" "$(sysctl -n net.ipv4.tcp_congestion_control)"
+printf "%-22s: %s\n" "Queue Discipline" "$(sysctl -n net.core.default_qdisc)"
+printf "%-22s: %s\n" "Open File Limit" "$(ulimit -n)"
+printf "%-22s: %s\n" "Process Limit" "$(ulimit -u)"
+printf "%-22s: %s\n" "Time Sync Status" "$(chronyc tracking 2>/dev/null | grep 'Leap status' | cut -d':' -f2 | xargs || echo 'Normal')"
+printf "%-22s: %s\n" "Current Timezone" "$(timedatectl show --property=Timezone --value)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "✅ Optimization complete! It is recommended to reboot the system for all settings to take effect."
+echo ""
