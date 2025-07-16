@@ -7,6 +7,11 @@
 apt update && apt upgrade -y && apt autoremove -y
 apt install -y openssl net-tools dnsutils nload curl wget lsof nano htop cron haveged vnstat chrony iftop iotop fail2ban unattended-upgrades unzip logrotate
 
+# speedtest-cli
+apt-get update && apt-get purge speedtest speedtest-cli -y
+curl -s https://packagecloud.io/install/repositories/ookla/speedtest-cli/script.deb.sh | bash
+apt-get install speedtest -y
+
 # Chrony configuration
 cat > /etc/chrony/chrony.conf <<EOF
 server 0.asia.pool.ntp.org iburst
@@ -46,15 +51,14 @@ systemctl enable --now vnstat
 systemctl enable --now fail2ban
 
 # unattended-upgrades 自动启用（自动安全更新，无交互）
-# dpkg-reconfigure -plow unattended-upgrades
 cat > /etc/apt/apt.conf.d/20auto-upgrades <<EOF
 APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
 EOF
 systemctl enable --now unattended-upgrades 2>/dev/null || true
 
-# logrotate 测试（可选）
-logrotate -f /etc/logrotate.conf
+# logrotate 测试（可选，生产环境可省略）
+# logrotate -f /etc/logrotate.conf
 
 # Limits
 # 备份所有 nproc.conf，防止默认限制覆盖自定义设置
@@ -126,6 +130,7 @@ printf "%-22s: %s\n" "Open File Limit" "$(ulimit -n)"
 printf "%-22s: %s\n" "Process Limit" "$(ulimit -u)"
 printf "%-22s: %s\n" "Time Sync Status" "$(chronyc tracking 2>/dev/null | grep 'Leap status' | cut -d':' -f2 | xargs || echo 'Normal')"
 printf "%-22s: %s\n" "Current Timezone" "$(timedatectl show --property=Timezone --value)"
+printf "%-22s: %s\n" "Speedtest Version" "$(speedtest --version 2>/dev/null | head -n1 || echo 'Not installed')"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "✅ Optimization complete! It is recommended to reboot the system for all settings to take effect."
 echo ""
