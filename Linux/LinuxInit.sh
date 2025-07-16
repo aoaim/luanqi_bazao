@@ -7,7 +7,6 @@
 apt update && apt upgrade -y && apt autoremove -y
 apt install -y openssl net-tools dnsutils nload curl wget lsof nano htop cron haveged vnstat chrony iftop iotop fail2ban unattended-upgrades unzip logrotate
 
-
 # Chrony configuration
 cat > /etc/chrony/chrony.conf <<EOF
 server 0.asia.pool.ntp.org iburst
