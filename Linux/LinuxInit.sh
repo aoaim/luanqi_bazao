@@ -3,6 +3,28 @@
 # Error if not root
 [ "$(id -u)" != "0" ] && { echo "Error: You must be root to run this script"; exit 1; }
 
+# Check if running on Debian-based systems
+if [ ! -f /etc/debian_version ]; then
+    echo "Error: This script is designed for Debian-based systems only"
+    exit 1
+fi
+
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    case "$ID" in
+        debian)
+            echo "✓ Running on Debian $(cat /etc/debian_version)"
+            ;;
+        ubuntu)
+            echo "✓ Running on Ubuntu $VERSION_ID"
+            ;;
+        *)
+            echo "Error: This script supports Debian and Ubuntu only (detected: $PRETTY_NAME)"
+            exit 1
+            ;;
+    esac
+fi
+
 # Upgrade and install necessary packages
 apt update && apt upgrade -y && apt autoremove -y
 apt install -y openssl net-tools dnsutils nload curl wget lsof nano htop cron haveged vnstat chrony iftop iotop fail2ban unattended-upgrades unzip logrotate
