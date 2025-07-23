@@ -171,23 +171,77 @@ printf "%-22s: %s\n" "OS Version" "$(lsb_release -ds 2>/dev/null || grep PRETTY_
 printf "%-22s: %s\n" "Kernel Version" "$(uname -r)"
 printf "%-22s: %s\n" "Uptime" "$(uptime -p | cut -d' ' -f2-)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Package Install Status:"
-for pkg in openssl net-tools dnsutils nload curl wget lsof nano htop cron haveged vnstat chrony iftop iotop fail2ban unattended-upgrades unzip logrotate speedtest; do
+
+# 函数：检查服务状态
+check_service_status() {
+    local service_name=$1
+    if systemctl is-active --quiet "$service_name" 2>/dev/null; then
+        echo "Running"
+    elif systemctl is-enabled --quiet "$service_name" 2>/dev/null; then
+        echo "Enabled (Not Running)"
+    else
+        echo "Inactive"
+    fi
+}
+
+# 函数：检查包安装状态
+check_package_status() {
+    local pkg=$1
+    local service_name=$2
+
     if [ "$pkg" = "speedtest" ]; then
         if command -v speedtest &>/dev/null; then
-            ver=$(speedtest --version 2>/dev/null | grep -o 'Speedtest by Ookla [0-9.]\+')
-            printf "  %-20s: Installed (%s)\n" "$pkg" "$ver"
+            ver=$(speedtest --version 2>/dev/null | grep -o 'Speedtest by Ookla [0-9.]\+' | head -1)
+            printf "  %-20s: Installed (%s)\n" "$pkg" "${ver:-Unknown Version}"
         else
             printf "  %-20s: Not Installed\n" "$pkg"
         fi
     else
         if dpkg -s "$pkg" &>/dev/null; then
-            printf "  %-20s: Installed\n" "$pkg"
+            if [ -n "$service_name" ]; then
+                status=$(check_service_status "$service_name")
+                printf "  %-20s: Installed | Service: %s\n" "$pkg" "$status"
+            else
+                printf "  %-20s: Installed\n" "$pkg"
+            fi
         else
             printf "  %-20s: Not Installed\n" "$pkg"
         fi
     fi
+}
+
+echo "Package Install Status & Service Status:"
+
+# 定义包和对应的服务名
+declare -A package_services=(
+    ["cron"]="cron"
+    ["haveged"]="haveged" 
+    ["vnstat"]="vnstat"
+    ["chrony"]="chrony"
+    ["fail2ban"]="fail2ban"
+)
+
+# 工具类软件（无服务）
+tools="openssl net-tools dnsutils nload curl wget lsof nano htop iftop iotop unattended-upgrades unzip logrotate speedtest"
+
+# 检查有服务的软件包
+for pkg in "${!package_services[@]}"; do
+    check_package_status "$pkg" "${package_services[$pkg]}"
 done
+
+# 检查工具类软件包
+for pkg in $tools; do
+    check_package_status "$pkg" ""
+done
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# 额外的服务状态检查
+echo "Key Services Status:"
+printf "  %-20s: %s\n" "SSH" "$(check_service_status ssh)"
+printf "  %-20s: %s\n" "Network Manager" "$(check_service_status NetworkManager || check_service_status networking)"
+printf "  %-20s: %s\n" "UFW Firewall" "$(check_service_status ufw)"
+
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "✅ Optimization complete! It is recommended to reboot the system for all settings to take effect."
 echo ""
