@@ -149,6 +149,110 @@ disk_size=$(lsblk -b -dn -o SIZE "$disk_device" 2>/dev/null | awk '{printf "%.2f
 # 清屏
 clear
 
+# 获取CPU缓存信息
+get_cpu_cache_info() {
+    local l1d_cache_b=$(lscpu -B 2>/dev/null | grep -oP "(?<=L1d cache:).*(?=)" | sed -e 's/^[ ]*//g')
+    local l1i_cache_b=$(lscpu -B 2>/dev/null | grep -oP "(?<=L1i cache:).*(?=)" | sed -e 's/^[ ]*//g')
+    local l2_cache_b=$(lscpu -B 2>/dev/null | grep -oP "(?<=L2 cache:).*(?=)" | sed -e 's/^[ ]*//g')
+    local l3_cache_b=$(lscpu -B 2>/dev/null | grep -oP "(?<=L3 cache:).*(?=)" | sed -e 's/^[ ]*//g')
+
+    # L1缓存计算 (L1d + L1i)
+    if [ -n "$l1d_cache_b" ] && [ -n "$l1i_cache_b" ]; then
+        local l1_total_b=$(echo "$l1d_cache_b $l1i_cache_b" | awk '{printf "%d\n",$1+$2}')
+        local l1_total_k=$(echo "$l1_total_b" | awk '{printf "%.2f\n",$1/1024}')
+        local l1_total_k_int=$(echo "$l1_total_b" | awk '{printf "%d\n",$1/1024}')
+        if [ "$l1_total_k_int" -ge "1024" ]; then
+            local l1_cache=$(echo "$l1_total_k" | awk '{printf "%.2f MB\n",$1/1024}')
+        else
+            local l1_cache=$(echo "$l1_total_k" | awk '{printf "%.2f KB\n",$1}')
+        fi
+    else
+        local l1_cache="N/A"
+    fi
+
+    # L2缓存计算
+    if [ -n "$l2_cache_b" ]; then
+        local l2_k=$(echo "$l2_cache_b" | awk '{printf "%.2f\n",$1/1024}')
+        local l2_k_int=$(echo "$l2_cache_b" | awk '{printf "%d\n",$1/1024}')
+        if [ "$l2_k_int" -ge "1024" ]; then
+            local l2_cache=$(echo "$l2_k" | awk '{printf "%.2f MB\n",$1/1024}')
+        else
+            local l2_cache=$(echo "$l2_k" | awk '{printf "%.2f KB\n",$1}')
+        fi
+    else
+        local l2_cache="N/A"
+    fi
+
+    # L3缓存计算
+    if [ -n "$l3_cache_b" ]; then
+        local l3_k=$(echo "$l3_cache_b" | awk '{printf "%.2f\n",$1/1024}')
+        local l3_k_int=$(echo "$l3_cache_b" | awk '{printf "%d\n",$1/1024}')
+        if [ "$l3_k_int" -ge "1024" ]; then
+            local l3_cache=$(echo "$l3_k" | awk '{printf "%.2f MB\n",$1/1024}')
+        else
+            local l3_cache=$(echo "$l3_k" | awk '{printf "%.2f KB\n",$1}')
+        fi
+    else
+        local l3_cache="N/A"
+    fi
+
+    echo "L1: $l1_cache / L2: $l2_cache / L3: $l3_cache"
+}
+
+# 获取内存使用信息
+get_memory_usage_detailed() {
+    local memtotal_kib=$(awk '/MemTotal/{print $2}' /proc/meminfo | head -n1)
+    local memfree_kib=$(awk '/MemFree/{print $2}' /proc/meminfo | head -n1)
+    local buffers_kib=$(awk '/Buffers/{print $2}' /proc/meminfo | head -n1)
+    local cached_kib=$(awk '/Cached/{print $2}' /proc/meminfo | head -n1)
+
+    local memfree_total_kib=$(echo "$memfree_kib $buffers_kib $cached_kib" | awk '{printf $1+$2+$3}')
+    local memused_kib=$(echo "$memtotal_kib $memfree_total_kib" | awk '{printf $1-$2}')
+
+    local memused_mib=$(echo "$memused_kib" | awk '{printf "%.2f",$1/1024}')
+    local memtotal_gib=$(echo "$memtotal_kib" | awk '{printf "%.2f",$1/1048576}')
+
+    if [ "$(echo "$memused_kib" | awk '{printf "%d",$1}')" -lt "1048576" ]; then
+        echo "$memused_mib MiB / $memtotal_gib GiB"
+    else
+        local memused_gib=$(echo "$memused_kib" | awk '{printf "%.2f",$1/1048576}')
+        echo "$memused_gib GiB / $memtotal_gib GiB"
+    fi
+}
+
+# 获取交换分区信息
+get_swap_usage_detailed() {
+    local swaptotal_kib=$(awk '/SwapTotal/{print $2}' /proc/meminfo | head -n1)
+
+    if [ "$swaptotal_kib" -eq "0" ]; then
+        echo "[ no swap partition or swap file detected ]"
+    else
+        local swapfree_kib=$(awk '/SwapFree/{print $2}' /proc/meminfo | head -n1)
+        local swapused_kib=$(echo "$swaptotal_kib $swapfree_kib" | awk '{printf $1-$2}')
+
+        local swapused_mib=$(echo "$swapused_kib" | awk '{printf "%.2f",$1/1024}')
+        local swaptotal_mib=$(echo "$swaptotal_kib" | awk '{printf "%.2f",$1/1024}')
+
+        echo "$swapused_mib MiB / $swaptotal_mib MiB"
+    fi
+}
+
+# 获取磁盘使用信息
+get_disk_usage_detailed() {
+    local disktotal_kib=$(df -x tmpfs / | grep -oE "[0-9]{4,}" | awk 'NR==1 {print $1}')
+    local diskused_kib=$(df -x tmpfs / | grep -oE "[0-9]{4,}" | awk 'NR==2 {print $1}')
+
+    local diskused_gib=$(echo "$diskused_kib" | awk '{printf "%.2f",$1/1048576}')
+    local disktotal_gib=$(echo "$disktotal_kib" | awk '{printf "%.2f",$1/1048576}')
+
+    echo "$diskused_gib GiB / $disktotal_gib GiB"
+}
+
+# 获取启动磁盘
+get_boot_disk() {
+    df -x tmpfs / | awk "NR>1" | sed ":a;N;s/\\n//g;ta" | awk '{print $1}'
+}
+
 # 输出验证配置
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -161,15 +265,19 @@ printf "%-22s: %s\n" "Process Limit" "$(ulimit -u)"
 printf "%-22s: %s\n" "Time Sync Status" "$(chronyc tracking 2>/dev/null | grep 'Leap status' | cut -d':' -f2 | xargs || echo 'Normal')"
 printf "%-22s: %s\n" "Current Timezone" "$(timedatectl show --property=Timezone --value)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-printf "%-22s: %s\n" "CPU Model" "$(awk -F: '/model name/ {print $2; exit}' /proc/cpuinfo | xargs)"
-printf "%-22s: %s\n" "CPU Cores" "$(nproc)"
-printf "%-22s: %s\n" "CPU MHz" "$(awk -F: '/cpu MHz/ {print $2; exit}' /proc/cpuinfo | xargs)"
-printf "%-22s: %s\n" "Total RAM" "$(free -h | awk '/^Mem:/ {print $2}')"
-printf "%-22s: %s\n" "Total Swap" "$(free -h | awk '/^Swap:/ {print $2}')"
-printf "%-22s: %s\n" "Disk Size" "$disk_size"
-printf "%-22s: %s\n" "OS Version" "$(lsb_release -ds 2>/dev/null || grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '\"')"
+
+# 系统硬件信息
+printf "%-22s: %s\n" "CPU Model Name" "$(lscpu -B 2>/dev/null | grep -oP -m1 "(?<=Model name:).*(?=)" | sed -e 's/^[ ]*//g')"
+printf "%-22s: %s\n" "CPU Cache Size" "$(get_cpu_cache_info)"
+printf "%-22s: %s vCPU(s)\n" "CPU Specifications" "$(nproc)"
+printf "%-22s: %s\n" "Memory Usage" "$(get_memory_usage_detailed)"
+printf "%-22s: %s\n" "Swap Usage" "$(get_swap_usage_detailed)"
+printf "%-22s: %s\n" "Disk Usage" "$(get_disk_usage_detailed)"
+printf "%-22s: %s\n" "Boot Disk" "$(get_boot_disk)"
+printf "%-22s: %s (%s)\n" "OS Release" "$(lsb_release -ds 2>/dev/null || grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '\"')" "$(uname -m)"
 printf "%-22s: %s\n" "Kernel Version" "$(uname -r)"
 printf "%-22s: %s\n" "Uptime" "$(uptime -p | cut -d' ' -f2-)"
+
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # 函数：检查服务状态
@@ -215,7 +323,7 @@ echo "Package Install Status & Service Status:"
 # 定义包和对应的服务名
 declare -A package_services=(
     ["cron"]="cron"
-    ["haveged"]="haveged" 
+    ["haveged"]="haveged"
     ["vnstat"]="vnstat"
     ["chrony"]="chrony"
     ["fail2ban"]="fail2ban"
