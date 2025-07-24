@@ -213,11 +213,11 @@ function getNetworkInfo(retryTimes = 5, retryInterval = 1000) {
         $done({
             title: getSSID() ?? getCellularInfo(),
             content:
-                `IP Adress: \n` +
+                // `IP Adress: \n` +
                 getIP() +
-                `節點 IP:  ${info.query}\n` +
-                `節點位置： ${info.isp}\n` +
-                `節點位置： ${getFlagEmoji(info.countryCode)} | ${info.country} - ${info.city}`,
+                `節點 IP: ${info.query}\n` +
+                `節點 ISP：${info.isp}\n` +
+                `節點位置：${getFlagEmoji(info.countryCode)} ${info.country} - ${info.city}`,
             icon: getSSID() ? 'wifi' : 'simcard',
             'icon-color': getSSID() ? '#005CAF' : '#F9BF45',
         });
