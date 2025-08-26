@@ -31,8 +31,18 @@ apt install -y openssl net-tools dnsutils nload curl wget lsof nano htop cron ha
 
 # speedtest-cli
 apt-get update && apt-get purge speedtest speedtest-cli -y
-curl -s https://packagecloud.io/install/repositories/ookla/speedtest-cli/script.deb.sh | bash
-apt-get install speedtest -y
+
+if [ "$ID" = "debian" ]; then
+    # Debian: 使用官方仓库安装
+    curl -s https://packagecloud.io/install/repositories/ookla/speedtest-cli/script.deb.sh | bash
+    apt-get install speedtest -y
+elif [ "$ID" = "ubuntu" ]; then
+    # Ubuntu: 直接下载deb包安装
+    wget -O speedtest.deb "https://packagecloud.io/ookla/speedtest-cli/packages/debian/trixie/speedtest_1.2.0.84-1.ea6b6773cf_amd64.deb/download.deb?distro_version_id=221"
+    dpkg -i speedtest.deb
+    apt-get install -f -y
+    rm -f speedtest.deb
+fi
 
 # Chrony configuration
 cat > /etc/chrony/chrony.conf <<EOF
