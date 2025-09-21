@@ -24,28 +24,28 @@ DOMAIN,apple-relay.apple.com
 
 # Apple Non-China CDN
 # iTunes
-DOMAIN-SUFFIX,hls.itunes.apple.com
-DOMAIN-SUFFIX,hls-amt.itunes.apple.com
-DOMAIN-SUFFIX,audio-ssl.itunes.apple.com
-DOMAIN-SUFFIX,cdn-apple.com
-DOMAIN,cdn.apple-cloudkit.com
+DOMAIN-SUFFIX,hls.itunes.apple.com,{{ default_rule }}
+DOMAIN-SUFFIX,hls-amt.itunes.apple.com,{{ default_rule }}
+DOMAIN-SUFFIX,audio-ssl.itunes.apple.com,{{ default_rule }}
+DOMAIN-SUFFIX,cdn-apple.com,{{ default_rule }}
+DOMAIN,cdn.apple-cloudkit.com,{{ default_rule }}
 # Developer
-DOMAIN,devimages-cdn.apple.com
-DOMAIN,devstreaming-cdn.apple.com
-DOMAIN,js-cdn.music.apple.com
-DOMAIN,docs-assets.developer.apple.com
+DOMAIN,devimages-cdn.apple.com,{{ default_rule }}
+DOMAIN,devstreaming-cdn.apple.com,{{ default_rule }}
+DOMAIN,js-cdn.music.apple.com,{{ default_rule }}
+DOMAIN,docs-assets.developer.apple.com,{{ default_rule }}
 # Other
-DOMAIN-SUFFIX,apple-dns.net
+DOMAIN-SUFFIX,apple-dns.net,{{ default_rule }}
 # OCSP
-DOMAIN-SUFFIX,ocsp.apple.com
-USER-AGENT,com.apple.trustd*
+DOMAIN-SUFFIX,ocsp.apple.com,{{ default_rule }}
+USER-AGENT,com.apple.trustd*,{{ default_rule }}
 
 # Apple News
-USER-AGENT,AppleNews*
-DOMAIN-SUFFIX,apple.news
-DOMAIN,news-events.apple.com
-DOMAIN,news-edge.apple.com
-DOMAIN,apple.comscoreresearch.com
+USER-AGENT,AppleNews*,{{apple_news_rule}}
+DOMAIN-SUFFIX,apple.news,{{apple_news_rule}}
+DOMAIN,news-events.apple.com,{{apple_news_rule}}
+DOMAIN,news-edge.apple.com,{{apple_news_rule}}
+DOMAIN,apple.comscoreresearch.com,{{apple_news_rule}}
 
 # Apple 其他
 # iMessage
