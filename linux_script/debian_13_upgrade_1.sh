@@ -59,9 +59,12 @@ echo "  2. Upgrade all packages to latest Debian 12 versions"
 echo "  3. Change sources from bookworm to trixie"
 echo "  4. Upgrade to Debian 13 (trixie)"
 echo ""
-read -p "Do you want to continue? (yes/no): " confirm
+read -p "Do you want to continue? (y/yes): " confirm
 
-if [ "$confirm" != "yes" ]; then
+# Convert to lowercase for comparison
+confirm_lower=$(echo "$confirm" | tr '[:upper:]' '[:lower:]')
+
+if [ "$confirm_lower" != "y" ] && [ "$confirm_lower" != "yes" ]; then
     echo "Upgrade cancelled."
     exit 0
 fi

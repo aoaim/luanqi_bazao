@@ -388,9 +388,12 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 echo "⚠️  It is recommended to reboot the system for all settings to take effect."
 echo ""
-read -p "Would you like to reboot now? (y/n): " reboot_now
+read -p "Would you like to reboot now? (y/yes): " reboot_now
 
-if [ "$reboot_now" = "y" ] || [ "$reboot_now" = "Y" ]; then
+# Convert to lowercase for comparison
+reboot_now_lower=$(echo "$reboot_now" | tr '[:upper:]' '[:lower:]')
+
+if [ "$reboot_now_lower" = "y" ] || [ "$reboot_now_lower" = "yes" ]; then
     echo ""
     echo "Rebooting system..."
     reboot

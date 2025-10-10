@@ -144,9 +144,12 @@ echo "  - BBR network optimization"
 echo "  - Security hardening (fail2ban, chrony)"
 echo "  - System limits and performance tuning"
 echo ""
-read -p "Run system optimization script now? (yes/no): " run_optimization
+read -p "Run system optimization script now? (y/yes): " run_optimization
 
-if [ "$run_optimization" = "yes" ]; then
+# Convert to lowercase for comparison
+run_optimization_lower=$(echo "$run_optimization" | tr '[:upper:]' '[:lower:]')
+
+if [ "$run_optimization_lower" = "y" ] || [ "$run_optimization_lower" = "yes" ]; then
     echo ""
     echo "Downloading and running optimization script..."
     bash <(curl -fsSL https://raw.githubusercontent.com/aoaim/luanqi_bazao/main/linux_script/init_linux.sh)
