@@ -379,10 +379,8 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "Security Status:"
 ssh_status=$(systemctl is-active ssh 2>/dev/null || echo 'inactive')
 fail2ban_status=$(systemctl is-active fail2ban 2>/dev/null || echo 'inactive')
-bbr_status=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo 'unknown')
 printf "  %-20s: %s\n" "SSH Service" "$ssh_status"
 printf "  %-20s: %s\n" "Fail2ban Service" "$fail2ban_status"
-printf "  %-20s: %s\n" "BBR Status" "$bbr_status"
 set -e
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "✅ Optimization complete!"
