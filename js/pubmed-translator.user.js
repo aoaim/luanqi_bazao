@@ -146,7 +146,7 @@
         // 【标题翻译提供商】
         // 免费：'google', 'microsoft'
         // 付费：'deepl', 'niutrans'
-        // 大模型：'openai', 'gemini', 'openrouter', 'lmrouter', 'groq', 'cerebras', 'deepseek', 'siliconflow'
+        // 大模型：'openai', 'gemini', 'openrouter', 'lmrouter', 'deepseek', 'siliconflow'
         titleProvider: 'microsoft',
 
         // 【摘要翻译开关】
@@ -180,7 +180,7 @@
             temperature: 0.3,
         },
 
-        // Google Gemini：https://aistudio.google.com/
+        // Google AI Studio (Gemini)：https://aistudio.google.com/
         gemini: {
             apiKey: '',
             model: 'gemini-2.5-flash',
@@ -190,28 +190,14 @@
         // OpenRouter：https://openrouter.ai/
         openrouter: {
             apiKey: '',
-            model: 'google/gemini-2.5-flash',
+            model: 'openai/gpt-5-mini',
             temperature: 0.3,
         },
 
         // LMRouter：https://lmrouter.com/
         lmrouter: {
             apiKey: '',
-            model: 'google/gemini-2.5-flash',
-            temperature: 0.3,
-        },
-
-        // Groq：https://console.groq.com/
-        groq: {
-            apiKey: '',
-            model: 'openai/gpt-oss-120b',
-            temperature: 0.3,
-        },
-
-        // Cerebras：https://cloud.cerebras.ai/
-        cerebras: {
-            apiKey: '',
-            model: 'gpt-oss-120b',
+            model: 'deepseek/deepseek-v3.2-exp',
             temperature: 0.3,
         },
 
@@ -225,15 +211,7 @@
         // 硅基流动：https://siliconflow.cn/
         siliconflow: {
             apiKey: '',
-            model: 'THUDM/glm-4-9b-chat',
-            temperature: 0.3,
-        },
-
-        // OpenAI 兼容接口
-        'openai-compatible': {
-            apiKey: '',
-            model: '',
-            baseURL: '',
+            model: 'deepseek-ai/DeepSeek-V3.2-Exp',
             temperature: 0.3,
         },
 
@@ -246,6 +224,22 @@
 
         targetLanguage: 'zh-CN',
         translationStyle: '简体中文',
+
+        // ========== 高级配置：大模型 Prompt ==========
+        
+        // 【System Prompt】定义模型的角色和行为
+        // 提示：可以根据翻译需求自定义，比如：
+        // - 更专业的医学术语翻译
+        // - 保留特定格式
+        // - 添加领域知识
+        llmSystemPrompt: 'You are a professional medical and biomedical academic translation assistant. Translate English text into Simplified Chinese with precision, maintaining scientific rigor and professional terminology. Output ONLY the translation result without any explanations or additional content.',
+        
+        // 【User Prompt】翻译指令模板
+        // 提示：{text} 会被替换为实际要翻译的文本
+        // 可以添加额外要求，比如：
+        // - 'Translate and explain technical terms: {text}'
+        // - 'Translate concisely: {text}'
+        llmUserPrompt: 'Translate the following English text into Simplified Chinese:\n\n{text}',
     };
 
     // ╔══════════════════════════════════════════════════════════════════════════════╗
@@ -321,6 +315,7 @@
     /**
      * 翻译队列管理器
      * 实现并发控制和延迟控制，避免触发 API 速率限制
+     * 策略：每个渠道先测试一个请求，成功后再开启并发
      * 
      * @class TranslationQueue
      * @description 管理翻译请求的队列，控制并发数量和请求间隔
@@ -331,11 +326,12 @@
             this.delay = delay;
             this.queue = [];
             this.activeCount = 0;
+            this.providerTested = {}; // 记录每个提供商是否已测试成功
         }
 
-        async add(translateFunc) {
+        async add(translateFunc, type = 'title', provider = 'unknown') {
             return new Promise((resolve, reject) => {
-                this.queue.push({ translateFunc, resolve, reject });
+                this.queue.push({ translateFunc, resolve, reject, type, provider });
                 this.process();
             });
         }
@@ -343,13 +339,39 @@
         async process() {
             // 填满所有可用的并发槽位
             while (this.activeCount < this.maxConcurrent && this.queue.length > 0) {
-                const { translateFunc, resolve, reject } = this.queue.shift();
+                const { translateFunc, resolve, reject, type, provider } = this.queue.shift();
+                
+                // 检查该类型的翻译是否已停止
+                if (scriptStopped[type]) {
+                    reject(new Error(`${type === 'title' ? '标题' : '摘要'}翻译已停止`));
+                    continue;
+                }
+                
+                // 检查该提供商是否需要测试
+                const providerKey = `${type}_${provider}`;
+                const needTest = !this.providerTested[providerKey];
+                
+                // 如果需要测试且还有其他任务在执行，等待
+                if (needTest && this.activeCount > 0) {
+                    // 将任务放回队列前端
+                    this.queue.unshift({ translateFunc, resolve, reject, type, provider });
+                    break;
+                }
+                
                 this.activeCount++;
 
                 // 立即执行任务（不阻塞循环）
                 (async () => {
                     try {
                         const result = await translateFunc();
+                        
+                        // 标记该提供商测试成功
+                        if (needTest) {
+                            this.providerTested[providerKey] = true;
+                            console.log(`%c[队列] ${type === 'title' ? '标题' : '摘要'}翻译（${provider}）测试成功，开启并发模式`,
+                                'color: #4CAF50; font-weight: bold');
+                        }
+                        
                         resolve(result);
                     } catch (error) {
                         reject(error);
@@ -364,15 +386,52 @@
                 })();
             }
         }
+
+        /**
+         * 清空指定类型的所有待处理任务
+         */
+        clearType(type) {
+            const remainingQueue = [];
+            let clearedCount = 0;
+            
+            while (this.queue.length > 0) {
+                const task = this.queue.shift();
+                if (task.type === type) {
+                    // 拒绝该类型的任务
+                    task.reject(new Error(`${type === 'title' ? '标题' : '摘要'}翻译已停止`));
+                    clearedCount++;
+                } else {
+                    // 保留其他类型的任务
+                    remainingQueue.push(task);
+                }
+            }
+            this.queue = remainingQueue;
+            
+            if (clearedCount > 0) {
+                console.log(`%c[队列] 已清空 ${clearedCount} 个${type === 'title' ? '标题' : '摘要'}翻译任务，剩余 ${this.queue.length} 个任务`,
+                    'color: #FF9800; font-weight: bold');
+            }
+        }
     }
 
     // 创建翻译队列实例
     const translationQueue = new TranslationQueue(CONFIG.maxConcurrent, CONFIG.requestDelay);
 
-    // 失败计数器
-    const failureCount = {};
+    // 失败计数器（分离标题和摘要）
+    const failureCount = {
+        title: {},    // 标题翻译失败计数：{ provider: count }
+        abstract: {}  // 摘要翻译失败计数：{ provider: count }
+    };
     const MAX_FAILURES = 3;
-    let scriptStopped = false;
+    // 停止标志（分离标题和摘要）
+    const scriptStopped = {
+        title: false,     // 标题翻译是否停止
+        abstract: false   // 摘要翻译是否停止
+    };
+    let alertShown = {
+        title: false,     // 标题错误弹窗是否已显示
+        abstract: false   // 摘要错误弹窗是否已显示
+    };
 
     /**
      * 检测文本是否主要是中文
@@ -613,11 +672,8 @@
                 'gemini': 'https://generativelanguage.googleapis.com/v1beta/openai',
                 'openrouter': 'https://openrouter.ai/api/v1',
                 'lmrouter': 'https://api.lmrouter.com/openai/v1',
-                'groq': 'https://api.groq.com/openai/v1',
-                'cerebras': 'https://api.cerebras.ai/v1',
                 'deepseek': 'https://api.deepseek.com',
-                'siliconflow': 'https://api.siliconflow.cn/v1',
-                'openai-compatible': config.baseURL || ''
+                'siliconflow': 'https://api.siliconflow.cn/v1'
             };
 
             const baseURL = baseURLMap[provider];
@@ -626,14 +682,19 @@
                 return;
             }
 
+            // 使用配置的 prompt，支持 {text} 占位符
+            const systemPrompt = CONFIG.llmSystemPrompt;
+            const userPromptTemplate = CONFIG.llmUserPrompt;
+            const userPrompt = userPromptTemplate.replace('{text}', text);
+
             const messages = [
                 {
                     role: 'system',
-                    content: 'You are a professional medical and biomedical academic translation assistant. Translate English text into Simplified Chinese with precision, maintaining scientific rigor and professional terminology. Output ONLY the translation result without any explanations or additional content.'
+                    content: systemPrompt
                 },
                 {
                     role: 'user',
-                    content: `Translate the following English text into Simplified Chinese:\n\n${text}`
+                    content: userPrompt
                 }
             ];
 
@@ -680,9 +741,9 @@
      * @param {string} type - 翻译类型：'title' 或 'abstract'
      */
     function translate(text, type = 'title') {
-        // 检查脚本是否已停止
-        if (scriptStopped) {
-            return Promise.reject('脚本已因连续失败而停止');
+        // 检查对应类型的翻译是否已停止
+        if (scriptStopped[type]) {
+            return Promise.reject(`${type === 'title' ? '标题' : '摘要'}翻译已因连续失败而停止，请检查配置`);
         }
 
         // 根据类型选择提供商
@@ -704,7 +765,7 @@
         // 选择对应的翻译函数
         let translateFunc;
 
-        const llmProviders = ['openai', 'gemini', 'openrouter', 'lmrouter', 'groq', 'cerebras', 'deepseek', 'siliconflow', 'openai-compatible'];
+        const llmProviders = ['openai', 'gemini', 'openrouter', 'lmrouter', 'deepseek', 'siliconflow'];
 
         if (llmProviders.includes(provider)) {
             // 使用通用大模型翻译函数
@@ -731,10 +792,13 @@
         }
 
         // 通过队列管理器执行翻译，并记录结果
-        return translationQueue.add(translateFunc)
+        return translationQueue.add(translateFunc, type, provider)
             .then(result => {
-                // 翻译成功，重置该提供商的失败计数
-                failureCount[provider] = 0;
+                // 重置对应渠道和类型的失败计数
+                if (!failureCount[type][provider]) {
+                    failureCount[type][provider] = 0;
+                }
+                failureCount[type][provider] = 0;
 
                 console.log(`%c[翻译成功] %c${result}`,
                     'color: #4CAF50; font-weight: bold',
@@ -742,21 +806,38 @@
                 return result;
             })
             .catch(error => {
-                // 增加失败计数
-                failureCount[provider] = (failureCount[provider] || 0) + 1;
+                // 如果翻译已停止，直接抛出错误，不增加计数
+                if (scriptStopped[type]) {
+                    throw error;
+                }
+                
+                // 为每个类型和提供商单独计数
+                if (!failureCount[type][provider]) {
+                    failureCount[type][provider] = 0;
+                }
+                failureCount[type][provider]++;
 
-                console.error(`%c[翻译失败] %c${provider} 翻译失败（${failureCount[provider]}/${MAX_FAILURES}）：%c${error}`,
+                console.error(`%c[翻译失败] %c${typeText}翻译（${provider}）失败（${failureCount[type][provider]}/${MAX_FAILURES}）：%c${error}`,
                     'color: #f44336; font-weight: bold',
                     'color: #2196F3',
                     'color: #f44336');
 
                 // 检查是否达到最大失败次数
-                if (failureCount[provider] >= MAX_FAILURES) {
-                    scriptStopped = true;
-                    console.error(`%c[严重错误] %c${provider} 连续失败 ${MAX_FAILURES} 次，脚本已停止运行`,
+                if (failureCount[type][provider] >= MAX_FAILURES && !alertShown[type]) {
+                    // 立即停止该类型的翻译
+                    scriptStopped[type] = true;
+                    alertShown[type] = true;
+                    
+                    // 清空队列中该类型的所有待处理任务
+                    translationQueue.clearType(type);
+                    
+                    const message = `${typeText}翻译（${provider}）连续失败 ${MAX_FAILURES} 次，已停止。请检查配置后刷新页面重试。`;
+                    console.error(`%c[严重错误] %c${message}`,
                         'color: #f44336; font-weight: bold; font-size: 14px',
                         'color: #f44336; font-size: 14px');
-                    alert(`翻译服务 ${provider} 连续失败 ${MAX_FAILURES} 次，脚本已停止运行。\n\n请检查：\n1. API Key 是否正确\n2. 网络连接是否正常\n3. API 额度是否充足\n\n刷新页面后脚本将重新启动。`);
+                    
+                    // 立即同步弹窗（只弹一次）
+                    alert(`⚠️ PubMed 翻译脚本错误\n\n${message}\n\n✓ ${typeText}翻译已停止\n${type === 'title' ? '✓ 摘要翻译继续运行' : '✓ 标题翻译继续运行'}\n\n可能原因：\n1. API Key 配置错误\n2. 网络连接问题\n3. API 额度不足\n4. 服务商接口异常`);
                 }
 
                 throw error;
@@ -800,8 +881,8 @@
             return;
         }
 
-        // 检查脚本是否已停止
-        if (scriptStopped) {
+        // 检查摘要翻译是否已停止
+        if (scriptStopped.abstract) {
             return;
         }
 
@@ -917,8 +998,8 @@
      * 为标题元素添加翻译
      */
     async function addTranslation(titleElement, getTextFunc, createTranslationFunc) {
-        // 检查脚本是否已停止
-        if (scriptStopped) {
+        // 检查标题翻译是否已停止
+        if (scriptStopped.title) {
             return;
         }
 
@@ -1070,30 +1151,57 @@
             });
         }
 
+        // 判断标题和摘要是否使用同一渠道
+        const titleProvider = CONFIG.titleProvider;
+        const abstractProvider = CONFIG.abstractProvider || CONFIG.titleProvider;
+        const useSameProvider = (titleProvider === abstractProvider);
+
         // 翻译所有标题（并发）
         await Promise.all(titleElements.map(item =>
             addTranslation(item.element, item.getText, item.createTranslation)
         ));
 
-        // 标题全部翻译完成后，再翻译摘要
+        // 处理摘要翻译
         if (CONFIG.translateAbstract) {
             const abstractElement = document.querySelector('div.abstract#abstract');
             if (abstractElement) {
-                await addAbstractTranslation(
-                    abstractElement,
-                    (el) => {
-                        const clone = el.cloneNode(true);
-                        const title = clone.querySelector('h2.title');
-                        if (title) title.remove();
-                        const keywords = clone.querySelector('p strong.sub-title');
-                        if (keywords && keywords.textContent.includes('Keywords')) {
-                            keywords.parentElement.remove();
+                // 如果使用同一渠道，等标题翻译完成后再翻译摘要
+                // 如果使用不同渠道，可以与标题翻译并行
+                if (useSameProvider) {
+                    // 标题已经翻译完成，现在翻译摘要
+                    await addAbstractTranslation(
+                        abstractElement,
+                        (el) => {
+                            const clone = el.cloneNode(true);
+                            const title = clone.querySelector('h2.title');
+                            if (title) title.remove();
+                            const keywords = clone.querySelector('p strong.sub-title');
+                            if (keywords && keywords.textContent.includes('Keywords')) {
+                                keywords.parentElement.remove();
+                            }
+                            const existingTranslation = clone.querySelector('.abstract-translation-zh');
+                            if (existingTranslation) existingTranslation.remove();
+                            return clone.textContent.trim();
                         }
-                        const existingTranslation = clone.querySelector('.abstract-translation-zh');
-                        if (existingTranslation) existingTranslation.remove();
-                        return clone.textContent.trim();
-                    }
-                );
+                    );
+                } else {
+                    // 不同渠道，可以立即开始摘要翻译（与标题并行）
+                    addAbstractTranslation(
+                        abstractElement,
+                        (el) => {
+                            const clone = el.cloneNode(true);
+                            const title = clone.querySelector('h2.title');
+                            if (title) title.remove();
+                            const keywords = clone.querySelector('p strong.sub-title');
+                            if (keywords && keywords.textContent.includes('Keywords')) {
+                                keywords.parentElement.remove();
+                            }
+                            const existingTranslation = clone.querySelector('.abstract-translation-zh');
+                            if (existingTranslation) existingTranslation.remove();
+                            return clone.textContent.trim();
+                        }
+                    );
+                }
             }
         }
     }
@@ -1271,17 +1379,13 @@
             'google', 'microsoft',
             'deepl', 'niutrans',
             'openai', 'gemini', 'openrouter', 'lmrouter',
-            'groq', 'cerebras',
-            'deepseek', 'siliconflow',
-            'openai-compatible'
+            'deepseek', 'siliconflow'
         ];
 
         const apiKeyProviders = [
             'deepl', 'niutrans',
             'openai', 'gemini', 'openrouter', 'lmrouter',
-            'groq', 'cerebras',
-            'deepseek', 'siliconflow',
-            'openai-compatible'
+            'deepseek', 'siliconflow'
         ];
 
         // 验证标题提供商
@@ -1291,15 +1395,6 @@
             const config = CONFIG[CONFIG.titleProvider];
             if (!config || !config.apiKey || config.apiKey.trim() === '') {
                 errors.push(`${CONFIG.titleProvider} 需要配置 API Key`);
-            }
-            // 额外验证 openai-compatible 的 baseURL
-            if (CONFIG.titleProvider === 'openai-compatible') {
-                if (!config.baseURL || config.baseURL.trim() === '') {
-                    errors.push(`${CONFIG.titleProvider} 需要配置 baseURL`);
-                }
-                if (!config.model || config.model.trim() === '') {
-                    errors.push(`${CONFIG.titleProvider} 需要配置 model`);
-                }
             }
         }
 
@@ -1311,15 +1406,6 @@
                 const config = CONFIG[CONFIG.abstractProvider];
                 if (!config || !config.apiKey || config.apiKey.trim() === '') {
                     errors.push(`${CONFIG.abstractProvider} 需要配置 API Key`);
-                }
-                // 额外验证 openai-compatible 的 baseURL
-                if (CONFIG.abstractProvider === 'openai-compatible') {
-                    if (!config.baseURL || config.baseURL.trim() === '') {
-                        errors.push(`${CONFIG.abstractProvider} 需要配置 baseURL（摘要翻译）`);
-                    }
-                    if (!config.model || config.model.trim() === '') {
-                        errors.push(`${CONFIG.abstractProvider} 需要配置 model（摘要翻译）`);
-                    }
                 }
             }
         }
@@ -1394,14 +1480,11 @@
         'deepl': 'DeepL 翻译',
         'niutrans': '小牛翻译',
         'openai': 'OpenAI',
-        'gemini': 'Google Gemini',
+        'gemini': 'Google AI Studio (Gemini)',
         'openrouter': 'OpenRouter',
         'lmrouter': 'LMRouter',
-        'groq': 'Groq',
-        'cerebras': 'Cerebras',
         'deepseek': 'DeepSeek',
-        'siliconflow': '硅基流动',
-        'openai-compatible': 'OpenAI 兼容接口'
+        'siliconflow': '硅基流动'
     };
 
     const titleProviderName = providerNameMap[CONFIG.titleProvider] || CONFIG.titleProvider;
@@ -1417,7 +1500,7 @@
     console.log(`  并发数量：${CONFIG.maxConcurrent}`);
     console.log(`  请求延迟：${CONFIG.requestDelay}ms`);
 
-    const allLlmProviders = ['openai', 'gemini', 'openrouter', 'lmrouter', 'groq', 'cerebras', 'deepseek', 'siliconflow', 'openai-compatible'];
+    const allLlmProviders = ['openai', 'gemini', 'openrouter', 'lmrouter', 'deepseek', 'siliconflow'];
     const usedProviders = [CONFIG.titleProvider, CONFIG.abstractProvider].filter(p => allLlmProviders.includes(p));
 
     if (usedProviders.length > 0) {

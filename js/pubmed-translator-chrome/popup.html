@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PubMed 文献标题翻译 - 设置</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔬 PubMed 文献标题翻译</h1>
+            <p class="version">v1.0</p>
+        </div>
+
+        <div class="section">
+            <h2>基础设置</h2>
+            
+            <div class="form-group">
+                <label for="titleProvider">标题翻译提供商</label>
+                <select id="titleProvider">
+                    <optgroup label="免费服务">
+                        <option value="google">Google 翻译</option>
+                        <option value="microsoft">Microsoft 翻译</option>
+                    </optgroup>
+                    <optgroup label="付费服务（需要 API Key）">
+                        <option value="deepl">DeepL 翻译</option>
+                        <option value="niutrans">小牛翻译</option>
+                    </optgroup>
+                    <optgroup label="大模型（需要 API Key）">
+                        <option value="openai">OpenAI</option>
+                        <option value="gemini">Google AI Studio (Gemini)</option>
+                        <option value="openrouter">OpenRouter</option>
+                        <option value="lmrouter">LMRouter</option>
+                        <option value="deepseek">DeepSeek</option>
+                        <option value="siliconflow">硅基流动</option>
+                    </optgroup>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" id="translateAbstract">
+                    翻译摘要（默认关闭）
+                </label>
+            </div>
+
+                        <div class="form-group">
+                <label for="abstractProvider">摘要翻译提供商</label>
+                <select id="abstractProvider">
+                    <optgroup label="免费服务">
+                        <option value="google">Google 翻译</option>
+                        <option value="microsoft">Microsoft 翻译</option>
+                    </optgroup>
+                    <optgroup label="付费服务（需要 API Key）">
+                        <option value="deepl">DeepL 翻译</option>
+                        <option value="niutrans">小牛翻译</option>
+                    </optgroup>
+                    <optgroup label="大模型（需要 API Key）">
+                        <option value="openai">OpenAI</option>
+                        <option value="gemini">Google AI Studio (Gemini)</option>
+                        <option value="openrouter">OpenRouter</option>
+                        <option value="lmrouter">LMRouter</option>
+                        <option value="deepseek">DeepSeek</option>
+                        <option value="siliconflow">硅基流动</option>
+                    </optgroup>
+                </select>
+            </div>
+        </div>
+
+        <div class="section api-section">
+            <h2 class="collapsible" data-target="api-configs">
+                <span class="collapse-icon">▶</span> API 配置
+            </h2>
+            <div id="api-configs" class="collapsible-content" style="display: none;">
+            <p class="hint">根据选择的翻译提供商填写相应的 API Key</p>
+
+            <!-- DeepL -->
+            <div class="api-config" id="deepl-config">
+                <h3>DeepL</h3>
+                <div class="form-group">
+                    <label for="deepl-apiKey">API Key</label>
+                    <input type="password" id="deepl-apiKey" placeholder="输入 DeepL API Key">
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="deepl-useFreeApi">
+                        使用免费版 API
+                    </label>
+                </div>
+            </div>
+
+            <!-- 小牛翻译 -->
+            <div class="api-config" id="niutrans-config">
+                <h3>小牛翻译</h3>
+                <div class="form-group">
+                    <label for="niutrans-apiKey">API Key</label>
+                    <input type="password" id="niutrans-apiKey" placeholder="输入小牛翻译 API Key">
+                </div>
+            </div>
+
+            <!-- OpenAI -->
+            <div class="api-config" id="openai-config">
+                <h3>OpenAI</h3>
+                <div class="form-group">
+                    <label for="openai-apiKey">API Key</label>
+                    <input type="password" id="openai-apiKey" placeholder="输入 OpenAI API Key">
+                </div>
+                <div class="form-group">
+                    <label for="openai-model">模型</label>
+                    <input type="text" id="openai-model" placeholder="gpt-4o-mini">
+                </div>
+                <div class="form-group">
+                    <label for="openai-temperature">Temperature</label>
+                    <input type="number" id="openai-temperature" step="0.1" min="0" max="2" placeholder="0.3">
+                </div>
+            </div>
+
+            <!-- Google AI Studio (Gemini) -->
+            <div class="api-config" id="gemini-config">
+                <h3>Google AI Studio (Gemini)</h3>
+                <div class="form-group">
+                    <label for="gemini-apiKey">API Key</label>
+                    <input type="password" id="gemini-apiKey" placeholder="输入 Google AI Studio API Key">
+                </div>
+                <div class="form-group">
+                    <label for="gemini-model">模型</label>
+                    <input type="text" id="gemini-model" placeholder="gemini-2.0-flash-exp">
+                </div>
+                <div class="form-group">
+                    <label for="gemini-temperature">Temperature</label>
+                    <input type="number" id="gemini-temperature" step="0.1" min="0" max="2" placeholder="0.3">
+                </div>
+            </div>
+
+            <!-- OpenRouter -->
+            <div class="api-config" id="openrouter-config">
+                <h3>OpenRouter</h3>
+                <div class="form-group">
+                    <label for="openrouter-apiKey">API Key</label>
+                    <input type="password" id="openrouter-apiKey" placeholder="输入 OpenRouter API Key">
+                </div>
+                <div class="form-group">
+                    <label for="openrouter-model">模型</label>
+                    <input type="text" id="openrouter-model" placeholder="google/gemini-2.0-flash-exp:free">
+                </div>
+                <div class="form-group">
+                    <label for="openrouter-temperature">Temperature</label>
+                    <input type="number" id="openrouter-temperature" step="0.1" min="0" max="2" placeholder="0.3">
+                </div>
+            </div>
+
+            <!-- LMRouter -->
+            <div class="api-config" id="lmrouter-config">
+                <h3>LMRouter</h3>
+                <div class="form-group">
+                    <label for="lmrouter-apiKey">API Key</label>
+                    <input type="password" id="lmrouter-apiKey" placeholder="输入 LMRouter API Key">
+                </div>
+                <div class="form-group">
+                    <label for="lmrouter-model">模型</label>
+                    <input type="text" id="lmrouter-model" placeholder="google/gemini-2.0-flash-exp">
+                </div>
+                <div class="form-group">
+                    <label for="lmrouter-temperature">Temperature</label>
+                    <input type="number" id="lmrouter-temperature" step="0.1" min="0" max="2" placeholder="0.3">
+                </div>
+            </div>
+
+            <!-- DeepSeek -->
+            <div class="api-config" id="deepseek-config">
+                <h3>DeepSeek</h3>
+                <div class="form-group">
+                    <label for="deepseek-apiKey">API Key</label>
+                    <input type="password" id="deepseek-apiKey" placeholder="输入 DeepSeek API Key">
+                </div>
+                <div class="form-group">
+                    <label for="deepseek-model">模型</label>
+                    <input type="text" id="deepseek-model" placeholder="deepseek-chat">
+                </div>
+                <div class="form-group">
+                    <label for="deepseek-temperature">Temperature</label>
+                    <input type="number" id="deepseek-temperature" step="0.1" min="0" max="2" placeholder="1.3">
+                </div>
+            </div>
+
+            <!-- 硅基流动 -->
+            <div class="api-config" id="siliconflow-config">
+                <h3>硅基流动</h3>
+                <div class="form-group">
+                    <label for="siliconflow-apiKey">API Key</label>
+                    <input type="password" id="siliconflow-apiKey" placeholder="输入硅基流动 API Key">
+                </div>
+                <div class="form-group">
+                    <label for="siliconflow-model">模型</label>
+                    <input type="text" id="siliconflow-model" placeholder="THUDM/glm-4-9b-chat">
+                </div>
+                <div class="form-group">
+                    <label for="siliconflow-temperature">Temperature</label>
+                    <input type="number" id="siliconflow-temperature" step="0.1" min="0" max="2" placeholder="0.3">
+                </div>
+            </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2 class="collapsible" data-target="advanced-settings">
+                <span class="collapse-icon">▶</span> 高级设置
+            </h2>
+            <div id="advanced-settings" class="collapsible-content" style="display: none;">
+            <div class="form-group">
+                <label for="maxConcurrent">最大并发数</label>
+                <input type="number" id="maxConcurrent" min="1" max="10" placeholder="2">
+            </div>
+            <div class="form-group">
+                <label for="requestDelay">请求延迟（毫秒）</label>
+                <input type="number" id="requestDelay" min="0" placeholder="500">
+            </div>
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" id="cacheEnabled">
+                    启用翻译缓存（减少 API 调用，节省费用）
+                </label>
+            </div>
+            <div class="form-group">
+                <label for="cacheDuration">缓存有效期（天）</label>
+                <input type="number" id="cacheDuration" min="1" max="365" placeholder="7">
+                <small style="color: #666; display: block; margin-top: 4px;">
+                    缓存会在指定天数后自动过期并清理
+                </small>
+            </div>
+            <div class="form-group">
+                <button id="clearCacheBtn" class="btn btn-secondary" style="width: 100%;">
+                    🗑️ 清空翻译缓存
+                </button>
+                <div id="cacheStats" style="margin-top: 10px; font-size: 12px; color: #666;"></div>
+            </div>
+            
+            <div class="section-divider"></div>
+            
+            <h3 style="margin-top: 15px; margin-bottom: 8px;">🤖 大模型 Prompt 配置</h3>
+            <p class="hint" style="margin-bottom: 10px;">
+                仅对大模型翻译服务（OpenAI、Google AI Studio (Gemini)、OpenRouter、LMRouter、DeepSeek、硅基流动）生效。可以自定义翻译风格、添加术语要求等。
+            </p>
+            
+            <div class="form-group">
+                <label for="llmSystemPrompt">
+                    系统提示词（System Prompt）
+                    <span class="label-hint">定义AI的角色和基本要求</span>
+                </label>
+                <textarea id="llmSystemPrompt" class="prompt-textarea" rows="4" placeholder="例如：你是专业的医学翻译助手，精通生物医学领域的学术翻译..."></textarea>
+            </div>
+            
+            <div class="form-group">
+                <label for="llmUserPrompt">
+                    用户提示词（User Prompt）
+                    <span class="label-hint">翻译指令模板，使用 {text} 表示待翻译内容</span>
+                </label>
+                <textarea id="llmUserPrompt" class="prompt-textarea" rows="3" placeholder="例如：将以下英文翻译成简体中文：&#10;&#10;{text}"></textarea>
+                <small style="color: #666; display: block; margin-top: 4px;">
+                    💡 提示：使用 <code>{text}</code> 占位符表示待翻译的文本，程序会自动替换
+                </small>
+            </div>
+            
+            <div class="form-group">
+                <button id="resetPromptsBtn" class="btn btn-secondary" style="width: 100%;">
+                    🔄 恢复默认 Prompt
+                </button>
+            </div>
+            </div>
+        </div>
+
+        <div class="actions">
+            <button id="saveBtn" class="btn btn-primary">保存设置</button>
+            <button id="resetBtn" class="btn btn-secondary">恢复默认</button>
+        </div>
+
+        <div class="footer">
+            <p>Build by Miao and Claude Sonnet 4.5 with ♥</p>
+            <p class="links">
+                <a href="https://github.com/aoaim/luanqi_bazao/js/pubmed-translator-chrome" target="_blank">GitHub</a> |
+                <a href="https://github.com/aoaim/luanqi_bazao/issues" target="_blank">反馈问题</a>
+            </p>
+        </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script src="popup.js"></script>
+</body>
+</html>

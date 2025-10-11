@@ -1,0 +1,66 @@
+{
+  "manifest_version": 3,
+  "name": "PubMed 文献标题翻译",
+  "version": "1.0",
+  "description": "自动翻译 PubMed、Europe PMC、Semantic Scholar、Google Scholar 等学术网站上的论文标题和摘要为中文",
+  "author": "Miao",
+  "icons": {
+    "16": "icons/pubmed_icon_16.png",
+    "48": "icons/pubmed_icon_48.png",
+    "128": "icons/pubmed_icon_128.png"
+  },
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://pubmed.ncbi.nlm.nih.gov/*",
+    "https://europepmc.org/*",
+    "https://www.semanticscholar.org/*",
+    "https://scholar.google.com/*",
+    "https://scholar.google.co.uk/*",
+    "https://scholar.google.co.jp/*",
+    "https://scholar.google.co.kr/*",
+    "https://scholar.google.com.hk/*",
+    "https://scholar.google.com.tw/*",
+    "https://translate.googleapis.com/*",
+    "https://edge.microsoft.com/*",
+    "https://api.cognitive.microsofttranslator.com/*",
+    "https://api-free.deepl.com/*",
+    "https://api.deepl.com/*",
+    "https://api.niutrans.com/*",
+    "https://api.openai.com/*",
+    "https://generativelanguage.googleapis.com/*",
+    "https://openrouter.ai/*",
+    "https://api.lmrouter.com/*",
+    "https://api.deepseek.com/*",
+    "https://api.siliconflow.cn/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://pubmed.ncbi.nlm.nih.gov/*",
+        "https://europepmc.org/*",
+        "https://www.semanticscholar.org/*",
+        "https://scholar.google.com/*",
+        "https://scholar.google.co.uk/*",
+        "https://scholar.google.co.jp/*",
+        "https://scholar.google.co.kr/*",
+        "https://scholar.google.com.hk/*",
+        "https://scholar.google.com.tw/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/pubmed_icon_16.png",
+      "48": "icons/pubmed_icon_48.png",
+      "128": "icons/pubmed_icon_128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}
