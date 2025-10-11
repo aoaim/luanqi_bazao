@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![PubMed Translator](icons/pubmed_icon_128.png)
+![PubMed Translator](icons/pubmed_icon.png)
 
 **自动翻译 PubMed、Europe PMC、Semantic Scholar、Google Scholar 上的论文标题和摘要为中文**
 
