@@ -1,12 +1,15 @@
 # AdGuard to Sing-Box
 
-将 AdGuard 规则转换为 Sing-Box 使用的 `.srs` 规则集。生成好的文件在 `proxy_filter/sing-box` 中，由 GitHub Actions 定期更新。
+- Converts the AdGuard DNS and Anti-AD lists into Sing-Box `.srs` rule sets (approach inspired by `zacred0rryn/srs-custom`).
+- GitHub Actions workflow: `.github/workflows/adguard2singbox.yml` (cron `0 0 */2 * *`, plus manual dispatch).
+- Output files: `proxy_filter/sing-box/AdGuardDNSFilter.srs` and `proxy_filter/sing-box/CHN_anti-AD.srs`.
+- Source URLs:
+	- `AdGuardDNSFilter`: https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt
+	- `CHN_anti-AD`: https://anti-ad.net/adguard.txt
 
-## 数据来源
+## Manual Run
 
-1. https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt
-2. https://anti-ad.net/adguard.txt
-
-## 手动运行
-
-如果需要在本地转换，可参考工作流步骤：下载最新的 sing-box 二进制，并执行 `sing-box rule-set convert <源文件> --output <目标.srs> --type adguard`。
+1. Download the current sing-box release used in the workflow and extract the binary.
+2. Fetch the source lists into a working directory as `<name>.txt`.
+3. Convert each file with `sing-box rule-set convert <file.txt> --output <file.srs> --type adguard`.
+4. Copy the resulting `.srs` files into `proxy_filter/sing-box/`.

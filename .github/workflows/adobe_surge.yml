@@ -2,9 +2,12 @@ name: Fetch and Convert Adobe Surge Rules
 
 on:
   workflow_dispatch:
-# push:
-    # branches:
-      # - main
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/adobe_surge.yml'
+      - 'rule_generator/adobe_block_host_surge/**'
   schedule:
     - cron: '0 0 */2 * *'
 

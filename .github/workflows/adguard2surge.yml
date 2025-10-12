@@ -2,9 +2,12 @@ name: Fetch and Convert AdGuard to Surge
 
 on:
   workflow_dispatch:
-# push:
-    # branches:
-      # - main
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/adguard2surge.yml'
+      - 'rule_generator/adguard2surge/**'
   schedule:
     - cron: '0 0 */2 * *'
 

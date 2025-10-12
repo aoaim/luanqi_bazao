@@ -1,57 +1,17 @@
-# Adobe Block Host Surge Generator
+# Adobe Block Host → Surge
 
-This package converts Adobe host lists from an upstream GitHub source into Surge-compatible rules. It lives inside the `rule_generator` workspace so that we can add other converters alongside it.
+- Pulls the Adobe host block list from `Ruddernation-Designs/Adobe-URL-Block-List`.
+- Source URL: https://raw.githubusercontent.com/Ruddernation-Designs/Adobe-URL-Block-List/master/hosts
+- Converts entries to Surge `DOMAIN-SUFFIX` rules and writes `proxy_filter/surge/adobe.list`.
+- GitHub Actions workflow: `.github/workflows/adobe_surge.yml` (cron `0 0 */2 * *`, plus manual dispatch).
+- Minimal TypeScript project with one service (`surgeConverter.ts`) and utilities for fetching hosts.
 
-## Features
+## Manual Run
 
-- Fetches host entries from a GitHub URL.
-- Converts the fetched host entries into Surge rule format.
-- Automatically updates the Surge rules file with new entries.
-
-## Project Structure
-
-```
-rule_generator/adobe_block_host_surge
-├── .github
-│   └── workflows
-│       └── convert.yml
-├── src
-│   ├── index.ts
-│   ├── services
-│   │   └── surgeConverter.ts
-│   └── utils
-│       └── fetchHosts.ts
-├── scripts
-│   └── updateRules.ts
-├── package.json
-├── tsconfig.json
-└── README.md
-```
-
-## Installation
-
-1. Install the dependencies:
-   ```
-   npm install
-   ```
-
-## Usage
-
-To run the conversion process and update the Surge rules, execute the following command:
-```
+```bash
+cd rule_generator/adobe_block_host_surge
+npm install
 npm run update:adobe
 ```
 
-This will fetch the host entries from the specified GitHub URL, convert them into Surge rules, and write the result to `proxy_filter/surge/adobe.list` at the repository root.
-
-## GitHub Actions
-
-The project includes a GitHub Actions workflow defined in `.github/workflows/convert.yml` that runs nightly (and on manual dispatch) to refresh `proxy_filter/surge/adobe.list` and auto-commit the result.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a pull request or open an issue for any suggestions or improvements.
-
-## License
-
-This project is licensed under the MIT License.
+Commit the updated `proxy_filter/surge/adobe.list` if new domains are pulled.
