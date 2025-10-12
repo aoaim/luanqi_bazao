@@ -2,7 +2,7 @@ name: Fetch and Convert AdGuard to Sing-box SRS
 
 on:
   workflow_dispatch:
-  # push:
+# push:
     # branches:
       # - main
   schedule:
@@ -11,11 +11,17 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: rule-updates-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   main:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Download and Set Up sing-box
         run: |
@@ -49,7 +55,8 @@ jobs:
           if git status --porcelain proxy_filter/sing-box/AdGuardDNSFilter.srs proxy_filter/sing-box/CHN_anti-AD.srs | grep -q .; then
             git add proxy_filter/sing-box/AdGuardDNSFilter.srs proxy_filter/sing-box/CHN_anti-AD.srs
             git commit -m 'actions: Update AdGuard SRS rule sets'
-            git push
+            git pull --rebase origin main
+            git push origin HEAD:main
           else
             echo 'No changes to commit'
           fi

@@ -2,7 +2,7 @@ name: Update Adobe Surge Rules
 
 on:
   workflow_dispatch:
-  # push:
+# push:
     # branches:
       # - main
   schedule:
@@ -11,12 +11,18 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: rule-updates-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   update:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -31,8 +37,17 @@ jobs:
         working-directory: rule_generator/adobe_block_host_surge
         run: npm run update:adobe
 
-      - name: Commit updated rules
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: 'chore: update Adobe Surge rules'
-          file_pattern: proxy_filter/surge/adobe.list
+      - name: Commit and push changes
+        run: |
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git status --porcelain proxy_filter/surge/adobe.list | grep -q .; then
+            git add proxy_filter/surge/adobe.list
+            git commit -m 'chore: update Adobe Surge rules'
+            git pull --rebase origin main
+            git push origin HEAD:main
+          else
+            echo 'No changes to commit'
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -2,7 +2,7 @@ name: Fetch and Convert AdGuard to Surge TXT
 
 on:
   workflow_dispatch:
-  # push:
+# push:
     # branches:
       # - main
   schedule:
@@ -10,6 +10,10 @@ on:
 
 permissions:
   contents: write
+
+concurrency:
+  group: rule-updates-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   generate-rules:
@@ -21,6 +25,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -49,7 +55,8 @@ jobs:
               proxy_filter/surge/base-filter.txt \
               proxy_filter/surge/dns-filter.txt
             git commit -m 'actions: Update AdGuard Surge domain sets'
-            git push
+            git pull --rebase origin main
+            git push origin HEAD:main
           else
             echo 'No changes to commit'
           fi
