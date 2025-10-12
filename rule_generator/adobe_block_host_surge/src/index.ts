@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import { fetchHosts, DEFAULT_SOURCE } from './utils/fetchHosts';
 import { convertToSurgeRules } from './services/surgeConverter';
 
-const OUTPUT_PATH = path.resolve(__dirname, '../../../proxy_filter/adobe.list');
+const OUTPUT_PATH = path.resolve(__dirname, '../../../proxy_filter/surge/adobe.list');
 
 const buildFileContent = (rules: string[], source: string): string => {
     const header = [

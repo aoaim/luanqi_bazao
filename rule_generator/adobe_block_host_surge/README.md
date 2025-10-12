@@ -42,11 +42,11 @@ To run the conversion process and update the Surge rules, execute the following 
 npm run update:adobe
 ```
 
-This will fetch the host entries from the specified GitHub URL, convert them into Surge rules, and write the result to `proxy_filter/adobe.list` at the repository root.
+This will fetch the host entries from the specified GitHub URL, convert them into Surge rules, and write the result to `proxy_filter/surge/adobe.list` at the repository root.
 
 ## GitHub Actions
 
-The project includes a GitHub Actions workflow defined in `.github/workflows/convert.yml` that runs nightly (and on manual dispatch) to refresh `proxy_filter/adobe.list` and auto-commit the result.
+The project includes a GitHub Actions workflow defined in `.github/workflows/convert.yml` that runs nightly (and on manual dispatch) to refresh `proxy_filter/surge/adobe.list` and auto-commit the result.
 
 ## Contributing
 

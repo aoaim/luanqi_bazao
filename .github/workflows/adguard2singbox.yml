@@ -2,11 +2,14 @@ name: Fetch and Convert AdGuard to Sing-box SRS
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
+  # push:
+    # branches:
+      # - main
   schedule:
     - cron: '0 0 */2 * *'
+
+permissions:
+  contents: write
 
 jobs:
   main:
