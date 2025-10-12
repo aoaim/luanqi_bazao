@@ -1,4 +1,4 @@
-name: Fetch and Convert AdGuard to Surge TXT
+name: Fetch and Convert AdGuard to Surge
 
 on:
   workflow_dispatch:

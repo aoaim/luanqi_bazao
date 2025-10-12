@@ -1,4 +1,4 @@
-name: Fetch and Convert AdGuard to Sing-box SRS
+name: Fetch and Convert AdGuard to Sing-box
 
 on:
   workflow_dispatch:

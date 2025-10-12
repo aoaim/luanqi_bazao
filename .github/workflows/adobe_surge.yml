@@ -1,4 +1,4 @@
-name: Update Adobe Surge Rules
+name: Fetch and Convert Adobe Surge Rules
 
 on:
   workflow_dispatch:
