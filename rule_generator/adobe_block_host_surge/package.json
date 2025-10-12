@@ -1,0 +1,29 @@
+{
+  "name": "adobe-block-host-surge",
+  "version": "1.0.0",
+  "description": "A tool to convert host entries from a GitHub list into Surge rules.",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "ts-node src/index.ts",
+    "update:adobe": "ts-node scripts/updateRules.ts"
+  },
+  "dependencies": {
+    "axios": "^1.7.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.25",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aoaim/luanqi_bazao"
+  },
+  "keywords": [
+    "surge",
+    "hosts",
+    "converter"
+  ],
+  "author": "aoaim",
+  "license": "MIT"
+}

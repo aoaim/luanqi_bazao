@@ -1,0 +1,54 @@
+name: Fetch and Convert AdGuard to Sing-box SRS
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '0 0 */2 * *'
+
+jobs:
+  main:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download and Set Up sing-box
+        run: |
+          mkdir -p tmp/convert
+          wget -O sing-box.tar.gz https://github.com/SagerNet/sing-box/releases/download/v1.12.9/sing-box-1.12.9-linux-amd64.tar.gz
+          tar zxvf sing-box.tar.gz && rm sing-box.tar.gz
+          cp sing-box-1.12.9-linux-amd64/sing-box tmp/convert/
+          rm -r sing-box-1.12.9-linux-amd64
+
+      - name: Fetch AdGuard DNS Filter Lists
+        run: |
+          wget -O tmp/convert/AdGuardDNSFilter.txt https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt
+          wget -O tmp/convert/CHN_anti-AD.txt https://anti-ad.net/adguard.txt
+
+      - name: Convert with sing-box
+        run: |
+          cd tmp/convert
+          for file in *.txt; do
+            ./sing-box rule-set convert "$file" --output "${file%.txt}.srs" --type adguard
+          done
+          cd ../..
+          mkdir -p proxy_filter/sing-box/
+          rm -f proxy_filter/sing-box/AdGuardDNSFilter.srs proxy_filter/sing-box/CHN_anti-AD.srs
+          cp tmp/convert/*.srs proxy_filter/sing-box/
+          rm -r tmp
+
+      - name: Commit and push changes
+        run: |
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git status --porcelain proxy_filter/sing-box/AdGuardDNSFilter.srs proxy_filter/sing-box/CHN_anti-AD.srs | grep -q .; then
+            git add proxy_filter/sing-box/AdGuardDNSFilter.srs proxy_filter/sing-box/CHN_anti-AD.srs
+            git commit -m 'actions: Update AdGuard SRS rule sets'
+            git push
+          else
+            echo 'No changes to commit'
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

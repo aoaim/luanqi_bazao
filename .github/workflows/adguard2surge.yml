@@ -1,0 +1,54 @@
+name: Fetch and Convert AdGuard to Surge TXT
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '0 0 */2 * *'
+
+jobs:
+  generate-rules:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rule_generator/adguard2surge
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run generate-rules script
+        run: npm run gen-domain-set
+
+      - name: Commit and push changes
+        working-directory: .
+        run: |
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git status --porcelain \
+            proxy_filter/surge/tracking-protection-filter.txt \
+            proxy_filter/surge/chinese-filter.txt \
+            proxy_filter/surge/base-filter.txt \
+            proxy_filter/surge/dns-filter.txt | grep -q .; then
+            git add \
+              proxy_filter/surge/tracking-protection-filter.txt \
+              proxy_filter/surge/chinese-filter.txt \
+              proxy_filter/surge/base-filter.txt \
+              proxy_filter/surge/dns-filter.txt
+            git commit -m 'actions: Update AdGuard Surge domain sets'
+            git push
+          else
+            echo 'No changes to commit'
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

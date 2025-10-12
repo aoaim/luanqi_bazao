@@ -1,0 +1,32 @@
+name: Update Adobe Surge Rules
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: rule_generator/adobe_block_host_surge
+        run: npm install
+
+      - name: Generate adobe.list
+        working-directory: rule_generator/adobe_block_host_surge
+        run: npm run update:adobe
+
+      - name: Commit updated rules
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: 'chore: update Adobe Surge rules'
+          file_pattern: proxy_filter/surge/adobe.list
