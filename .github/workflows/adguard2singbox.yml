@@ -12,7 +12,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: rule-updates-${{ github.ref }}
+  group: rule-updates-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
