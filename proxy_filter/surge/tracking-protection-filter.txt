@@ -4,6 +4,9 @@
 .ib.snssdk.com
 .xlog.snssdk.com
 .log.snssdk.com
+.analysis.chatglm.cn
+.ping.pdst.fm
+.api.sae.systems
 .analytics.metriko.app
 .stats.fluorescent.co
 .wurflcloud.com
@@ -70405,6 +70408,10 @@
 .tagman.britishairways.com
 .ct.pinterest.com
 .incoming.telemetry.mozilla.org
+.haystack.wavve.com
+.user-event-log.aminer.cn
+.pixel.dashfi.dev
+.c.quackr.io
 .xstat.gazeta.bo
 .stats.avito.ru
 .nr-beacon.movingimage.com
@@ -75196,6 +75203,7 @@
 .kidpowers.com
 .kindasingle.com
 .kindhush.com
+.kindlereunion.com
 .kitetuning.com
 .kittycatking.com
 .knewpenny.com
