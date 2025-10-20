@@ -32,9 +32,8 @@
 
     /**
      * ╔══════════════════════════════════════════════════════════════════════════════╗
-     * ║                          PubMed 文献标题翻译 v1.0                            ║
-     * ║                       PubMed Academic Title Translator                       ║
-     * ║                   Build by Miao and Claude Sonnet 4.5 with ♥                 ║
+     * ║                              PubMed 文献标题翻译                             ║
+     * ║                         PubMed Academic Title Translator                     ║
      * ╚══════════════════════════════════════════════════════════════════════════════╝
      * ╔══════════════════════════════════════════════════════════════════════════════╗
      * ║                            使用说明（新手必读）                              ║
@@ -1453,9 +1452,7 @@
     // ==================== 初始化 ====================
 
     // 输出启动信息
-    console.log('%cPubMed 文献标题翻译 v1.0', 'color: #4CAF50; font-size: 16px; font-weight: bold');
-    console.log('%cPubMed Academic Title Translator', 'color: #2196F3; font-size: 12px');
-    console.log('%cBuild by Miao and Claude Sonnet 4.5 with ♥', 'color: #FF5722; font-size: 12px');
+    console.log('%cPubMed 文献标题翻译', 'color: #4CAF50; font-size: 16px; font-weight: bold');
     console.log('');
 
     // 验证配置

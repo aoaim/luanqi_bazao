@@ -6,10 +6,12 @@
 
 **自动翻译 PubMed、Europe PMC、Semantic Scholar、Google Scholar 上的论文标题和摘要为中文**
 
-[![Version](https://img.shields.io/badge/version-1.0-blue.svg)](https://github.com/aoaim/luanqi_bazao)
-[![License](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
-[![Chrome](https://img.shields.io/badge/Chrome-Extension-orange.svg)](https://www.google.com/chrome/)
-[![Code with AI](https://img.shields.io/badge/Code%20with-AI-blue)](https://github.com/aoaim/luanqi_bazao)
+![Version](https://img.shields.io/badge/version-1.1-blue.svg)
+![License](https://img.shields.io/badge/license-GPLv3-blue.svg)
+[![Chrome](https://img.shields.io/badge/Chrome-Extension-orange.svg)](https://chromewebstore.google.com/detail/pubmed-%E6%96%87%E7%8C%AE%E6%A0%87%E9%A2%98%E7%BF%BB%E8%AF%91/aoeidpgdnbdfpnboeegpgiibohiobofm)
+[![Edge](https://img.shields.io/badge/Edge-Extension-blue.svg)](https://microsoftedge.microsoft.com/addons/detail/pubmed-%E6%96%87%E7%8C%AE%E6%A0%87%E9%A2%98%E7%BF%BB%E8%AF%91/khhfedaibklffdkbmeejcfnlgmddapog)
+[![Firefox](https://img.shields.io/badge/Firefox-Add--on-red.svg)](https://addons.mozilla.org/en-US/firefox/addon/pubmed-%E6%96%87%E7%8C%AE%E6%A0%87%E9%A2%98%E7%BF%BB%E8%AF%91/)
+![Code with AI](https://img.shields.io/badge/Code%20with-AI-blue)
 
 </div>
 
@@ -17,14 +19,13 @@
 
 ## 📖 简介
 
-PubMed 文献标题翻译是一款专为医学科研人员设计的 Chrome 浏览器扩展，能够在查询文献时自动将英文的论文标题和摘要翻译成简体中文，大幅提升文献查阅效率。
+PubMed 文献标题翻译是一款专为医学科研人员设计的浏览器扩展，支持 Chrome、Firefox、Edge 等现代浏览器，能够在查询文献时自动将英文的论文标题和摘要翻译成简体中文，大幅提升文献查阅效率。
 
 ### ✨ 主要特性
 
 - 🚀 **自动翻译**：无需手动操作，打开页面即可自动翻译
 - 🌐 **多网站支持**：支持 PubMed、Europe PMC、Semantic Scholar、Google Scholar 主流学术搜索引擎
-- 🔄 **多翻译引擎**：内置多种翻译服务，包括免费和付费选项
-- 🤖 **AI 大模型支持**：支持 OpenAI、Google AI Studio (Gemini)、DeepSeek 等大语言模型
+- 🔄 **多翻译引擎**：内置多种翻译服务，包括免费和付费选项，同时支持 OpenAI、Gemini、DeepSeek 等大语言模型
 - 💾 **智能缓存**：翻译结果本地缓存，避免重复翻译
 - ⚙️ **灵活配置**：可视化设置界面，轻松切换翻译服务
 
@@ -62,23 +63,30 @@ PubMed 文献标题翻译是一款专为医学科研人员设计的 Chrome 浏�
 
 ### 安装方法
 
-> **💡 提示**：本项目同时提供 **Chrome 扩展版本**（推荐）和 **用户脚本版本**。
+> **💡 提示**：本项目同时提供 **浏览器扩展版本**（推荐）和 **用户脚本版本**。
 > 
-> - **Chrome 扩展版**：功能完整，配置方便，推荐 Chrome 用户使用
-> - **用户脚本版**：适用于 Safari、Firefox 等其他浏览器，需配合脚本管理器使用
+> - **浏览器扩展版**：功能完整，配置方便，支持 Chrome、Firefox、Edge 等现代浏览器
+> - **用户脚本版**：适用于 Safari 等其他浏览器，需配合脚本管理器使用
 >   - 📜 [查看用户脚本版本](https://github.com/aoaim/luanqi_bazao/blob/main/js/pubmed-translator.user.js)
 
 ---
 
-#### 方法一：Chrome 应用商店安装
-> 待上架...
+#### 方法一：官方商店安装（推荐）
 
-#### 方法二：开发者模式安装（Chrome/Edge 和其他 Chromium 内核浏览器）
+**Chrome Web Store**：📦 [PubMed 文献标题翻译](https://chromewebstore.google.com/detail/pubmed-%E6%96%87%E7%8C%AE%E6%A0%87%E9%A2%98%E7%BF%BB%E8%AF%91/aoeidpgdnbdfpnboeegpgiibohiobofm)
+
+**Microsoft Edge Add-ons**：📦 [PubMed 文献标题翻译](https://microsoftedge.microsoft.com/addons/detail/pubmed-%E6%96%87%E7%8C%AE%E6%A0%87%E9%A2%98%E7%BF%BB%E8%AF%91/khhfedaibklffdkbmeejcfnlgmddapog)
+
+**Firefox Add-ons**：🦊 [PubMed 文献标题翻译](https://addons.mozilla.org/en-US/firefox/addon/pubmed-%E6%96%87%E7%8C%AE%E6%A0%87%E9%A2%98%E7%BF%BB%E8%AF%91/)
+
+#### 方法二：开发者模式安装（仅用于开发测试）
+
+**Chrome/Edge/Chromium 浏览器：**
 
 1. **下载扩展文件**
    - 下载 `js/pubmed-translator-chrome` 路径的项目文件放到你喜欢的地方
 
-2. **打开 Chrome 扩展管理页面**
+2. **打开扩展管理页面**
    - 在地址栏输入：`chrome://extensions/`
    - 或点击：菜单 → 更多工具 → 扩展程序
 
@@ -93,12 +101,30 @@ PubMed 文献标题翻译是一款专为医学科研人员设计的 Chrome 浏�
    - 扩展图标会出现在浏览器工具栏
    - 首次使用建议先配置翻译服务
 
-#### 方法三：用户脚本安装（Safari / Firefox / 其他浏览器）
+**Firefox 浏览器：**
+
+1. **下载扩展文件**
+   - 下载 `js/pubmed-translator-chrome` 路径的项目文件放到你喜欢的地方
+
+2. **打开 Firefox 扩展管理页面**
+   - 在地址栏输入：`about:debugging#/runtime/this-firefox`
+   - 或点击：菜单 → 扩展和主题 → 管理您的扩展
+
+3. **临时加载扩展**
+   - 点击"临时载入附加组件"
+   - 选择 `pubmed-translator-chrome` 文件夹中的 `manifest.json` 文件
+
+4. **完成安装**
+   - 扩展图标会出现在浏览器工具栏
+   - 首次使用建议先配置翻译服务
+
+> **注意**：在 Firefox 中临时加载的扩展在浏览器重启后会被移除，需要重新加载。
+
+#### 方法三：用户脚本安装（Safari 等其他浏览器）
 
 1. **安装脚本管理器**
    - Safari：安装 [Userscripts](https://apps.apple.com/app/userscripts/id1463298887)
-   - Firefox：安装 [Violentmonkey](https://addons.mozilla.org/firefox/addon/violentmonkey/)
-   - 其他浏览器：安装对应的 [Violentmonkey](https://violentmonkey.github.io/)
+   - 其他浏览器：安装 [Violentmonkey](https://violentmonkey.github.io/)
 
 2. **安装用户脚本**
    - 访问：[pubmed-translator.user.js](https://github.com/aoaim/luanqi_bazao/blob/main/js/pubmed-translator.user.js)
@@ -173,24 +199,32 @@ PubMed 文献标题翻译是一款专为医学科研人员设计的 Chrome 浏�
 
 ```
 pubmed-translator-chrome/
-├── manifest.json          # 扩展配置文件
-├── background.js          # 后台服务 Worker
-├── content.js             # 内容脚本（主要逻辑）
-├── popup.html             # 设置页面 HTML
-├── popup.css              # 设置页面样式
-├── popup.js               # 设置页面逻辑
-├── icons/                 # 图标资源
+├── manifest.json              # Chromium (MV3) 主 manifest
+├── manifest.firefox.json      # Firefox (MV2) 专用 manifest
+├── background.js              # 后台 Service Worker / 脚本
+├── browser-polyfill.js        # WebExtension Polyfill，统一 browser.* API
+├── content.js                 # 内容脚本（页面翻译核心逻辑）
+├── popup.html                 # 设置弹窗 HTML
+├── popup.css                  # 设置弹窗样式
+├── popup.js                   # 设置弹窗交互脚本
+├── icons/                     # 扩展图标资源
 │   ├── pubmed_icon.svg
 │   ├── pubmed_icon_16.png
 │   ├── pubmed_icon_48.png
 │   └── pubmed_icon_128.png
-└── README.md              # 项目说明文档
+├── LICENSE                    # 组件级授权声明
+└── README.md                  # 扩展使用与开发文档
 ```
 
 ### 核心功能模块
 
+#### 0. 跨浏览器兼容层（Cross-Browser Layer）
+- 统一通过 `browser-polyfill.js` 提供 Promise 风格的 WebExtension API
+- 在 Chrome Service Worker 中注入 polyfill 并回退到 `chrome.*`，保证 `browser.*` 始终可用
+- 所有配置与缓存读写改用 Promise 语法，兼容 Firefox 原生实现
+
 #### 1. 配置管理（Configuration）
-- 使用 Chrome Storage API 持久化存储配置
+- 使用 WebExtension Storage API 持久化存储配置
 - 支持配置导入/导出
 - 配置变更实时同步
 
@@ -212,7 +246,7 @@ pubmed-translator-chrome/
 - **用户通知**：在服务熔断时，会通过弹窗明确告知用户哪个环节出现问题，引导用户检查 API Key、网络连接或服务商配置，方便快速定位和解决问题。
 
 #### 5. 缓存系统（Cache System）
-- 本地存储：使用 Chrome Storage API
+- 本地存储：使用 WebExtension Storage API
 - 自动过期：可配置缓存时长
 - 智能清理：自动清理过期缓存
 
@@ -262,31 +296,25 @@ pubmed-translator-chrome/
 
 ---
 
-## 🤝 参与贡献
-
-我们热烈欢迎并感谢所有形式的贡献！如果您有兴趣参与，可以通过以下方式：
-
-- **💡 提交功能建议**：如果您有好的想法，欢迎通过 [GitHub Issues](https://github.com/aoaim/luanqi_bazao/issues) 提交。
-- **🐛 报告 Bug**：发现问题？请在 Issue 中详细描述复现步骤。
-- **🛠️ 提交代码**：
-  - 修复已知 Bug。
-  - 增加对新的学术网站的支持。
-  - 集成新的翻译引擎或 AI 大模型。
-- **📖 完善文档**：改进 README 或其他说明文档。
-
-在提交 Pull Request 之前，建议您先创建一个 Issue 来讨论您的想法。
-
----
-
 ## 🙏 致谢
 
-- 感谢所有提供免费和付费 API 的翻译服务商。
-- 感谢各大 AI 平台提供的强大模型支持。
-- 感谢 VS Code 和 Github Copilot，以及 Copilot 背后强大的 Claude Sonnnet 4.5。
+感谢 Github Copilot 和 VS Code。
 
 ---
 
 ## 📝 更新日志
+
+### v1.1 (2025-10-20)
+
+- 🔄 **跨浏览器兼容**：使用 WebExtension Polyfill 实现统一 API，支持 Chrome、Edge、Firefox (109+)
+- 📦 **单一代码库**：所有浏览器共享相同源代码，差异仅在 manifest 配置（MV3 for Chromium，MV2 for Firefox）
+- ✅ **向后兼容**：Chrome 用户不受任何影响，所有功能正常工作
+
+**技术改进**
+- 将所有 `chrome.*` API 替换为标准 `browser.*` API
+- 在 manifest.json 中添加 Firefox 特定配置与数据收集声明
+- 引入 browser-polyfill.js 确保跨浏览器兼容性
+- 增加 manifest.firefox.json 支持 MV2 后台页面
 
 ### v1.0 (2025-10-11)
 
@@ -311,10 +339,3 @@ pubmed-translator-chrome/
 如有问题或建议，请通过以下方式联系：
 
 - 📧 GitHub Issues: [提交 Issue](https://github.com/aoaim/luanqi_bazao/issues)
-
----
-
-
-Made with ❤️ by Miao and Claude Sonnet 4.5
-
-</div>

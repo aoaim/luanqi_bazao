@@ -1,12 +1,24 @@
 /**
  * ╔══════════════════════════════════════════════════════════════════════════════╗
- * ║                          PubMed 文献标题翻译 v1.0                            ║
+ * ║                            PubMed 文献标题翻译                               ║
  * ║                         Background Service Worker                            ║
- * ║                   Build by Miao and Claude Sonnet 4.5 with ♥                 ║
  * ╚══════════════════════════════════════════════════════════════════════════════╝
  */
 
-chrome.runtime.onInstalled.addListener(() => {
+// 确保在不同浏览器环境中可用
+if (typeof importScripts === 'function') {
+    try {
+        importScripts('browser-polyfill.js');
+    } catch (error) {
+        console.warn('加载 browser-polyfill.js 失败：', error);
+    }
+}
+
+if (typeof globalThis.browser === 'undefined' && typeof chrome !== 'undefined') {
+    globalThis.browser = chrome;
+}
+
+browser.runtime.onInstalled.addListener(() => {
     console.log('PubMed 文献标题翻译插件已安装');
 });
 
@@ -14,7 +26,7 @@ chrome.runtime.onInstalled.addListener(() => {
  * 处理来自 content script 的请求
  * 在 background script 中发起请求可以绕过 CORS 限制
  */
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'makeRequest') {
         handleRequest(request.url, request.options)
             .then(data => sendResponse({ data: data }))

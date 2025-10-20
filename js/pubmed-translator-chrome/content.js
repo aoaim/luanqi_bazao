@@ -1,13 +1,16 @@
 /**
  * ╔══════════════════════════════════════════════════════════════════════════════╗
- * ║                          PubMed 文献标题翻译 v1.0                            ║
+ * ║                            PubMed 文献标题翻译                               ║
  * ║                       PubMed Academic Title Translator                       ║
- * ║                   Build by Miao and Claude Sonnet 4.5 with ♥                 ║
  * ╚══════════════════════════════════════════════════════════════════════════════╝
  */
 
 (function () {
     'use strict';
+
+    if (typeof window.browser === 'undefined' && typeof window.chrome !== 'undefined') {
+        window.browser = window.chrome;
+    }
 
     // ╔══════════════════════════════════════════════════════════════════════════════╗
     // ║                          配置管理 | Configuration                            ║
@@ -43,14 +46,15 @@
 
     // 从 Chrome Storage 加载配置
     async function loadConfig() {
-        return new Promise((resolve) => {
-            chrome.storage.sync.get('translatorConfig', (result) => {
-                if (result.translatorConfig) {
-                    CONFIG = { ...DEFAULT_CONFIG, ...result.translatorConfig };
-                }
-                resolve(CONFIG);
-            });
-        });
+        try {
+            const result = await browser.storage.sync.get('translatorConfig');
+            if (result && result.translatorConfig) {
+                CONFIG = { ...DEFAULT_CONFIG, ...result.translatorConfig };
+            }
+        } catch (error) {
+            console.error('配置加载失败：', error);
+        }
+        return CONFIG;
     }
 
     // ╔══════════════════════════════════════════════════════════════════════════════╗
@@ -75,7 +79,7 @@
             if (this.initialized) return;
             
             try {
-                const result = await chrome.storage.local.get('translationCache');
+                const result = await browser.storage.local.get('translationCache');
                 if (result.translationCache) {
                     // 加载到内存缓存
                     Object.entries(result.translationCache).forEach(([key, value]) => {
@@ -161,7 +165,7 @@
                     cacheObject[key] = value;
                 });
                 
-                await chrome.storage.local.set({ translationCache: cacheObject });
+                await browser.storage.local.set({ translationCache: cacheObject });
                 console.log('%c[缓存] 已保存翻译到缓存', 'color: #2196F3');
             } catch (error) {
                 console.error('缓存保存失败：', error);
@@ -179,7 +183,7 @@
                 this.memoryCache.forEach((value, key) => {
                     cacheObject[key] = value;
                 });
-                await chrome.storage.local.set({ translationCache: cacheObject });
+                await browser.storage.local.set({ translationCache: cacheObject });
             } catch (error) {
                 console.error('缓存删除失败：', error);
             }
@@ -209,7 +213,7 @@
                 this.memoryCache.forEach((value, key) => {
                     cacheObject[key] = value;
                 });
-                await chrome.storage.local.set({ translationCache: cacheObject });
+                await browser.storage.local.set({ translationCache: cacheObject });
             }
         }
 
@@ -218,7 +222,7 @@
          */
         async clear() {
             this.memoryCache.clear();
-            await chrome.storage.local.remove('translationCache');
+            await browser.storage.local.remove('translationCache');
             console.log('%c[缓存] 已清空所有缓存', 'color: #f44336; font-weight: bold');
         }
 
@@ -247,7 +251,7 @@
     const translationCache = new TranslationCache();
 
     // 监听 Chrome Storage 变化，处理缓存被清除的情况
-    chrome.storage.onChanged.addListener((changes, areaName) => {
+    browser.storage.onChanged.addListener((changes, areaName) => {
         if (areaName === 'local' && changes.translationCache) {
             // 如果缓存被删除（newValue 为 undefined），重置缓存管理器
             if (changes.translationCache.newValue === undefined) {
@@ -449,7 +453,7 @@
     async function makeRequest(url, options = {}) {
         try {
             // 通过 background script 发起请求以绕过 CORS
-            const response = await chrome.runtime.sendMessage({
+            const response = await browser.runtime.sendMessage({
                 action: 'makeRequest',
                 url: url,
                 options: {
@@ -1099,8 +1103,7 @@
     // ╚══════════════════════════════════════════════════════════════════════════════╝
 
     async function init() {
-        console.log('%cPubMed 文献标题翻译 v1.0', 'color: #4CAF50; font-size: 16px; font-weight: bold');
-        console.log('%c插件版 | Chrome Extension', 'color: #2196F3; font-size: 12px');
+        console.log('%cPubMed 文献标题翻译', 'color: #4CAF50; font-size: 16px; font-weight: bold');
 
         await loadConfig();
         translationQueue = new TranslationQueue(CONFIG.maxConcurrent, CONFIG.requestDelay);

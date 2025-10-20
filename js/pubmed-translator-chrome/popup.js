@@ -1,3 +1,7 @@
+if (typeof window.browser === 'undefined' && typeof window.chrome !== 'undefined') {
+    window.browser = window.chrome;
+}
+
 // 默认配置
 const DEFAULT_CONFIG = {
     titleProvider: 'microsoft',
@@ -38,8 +42,9 @@ function showToast(message, isError = false) {
 }
 
 // 加载配置到界面
-function loadConfig() {
-    chrome.storage.sync.get('translatorConfig', (result) => {
+async function loadConfig() {
+    try {
+        const result = await browser.storage.sync.get('translatorConfig');
         const config = result.translatorConfig || DEFAULT_CONFIG;
 
         // 基础设置
@@ -82,13 +87,16 @@ function loadConfig() {
         
         // 加载缓存统计
         loadCacheStats();
-    });
+    } catch (error) {
+        console.error('加载配置失败：', error);
+        showToast('加载配置失败：' + error.message, true);
+    }
 }
 
 // 加载缓存统计信息
 async function loadCacheStats() {
     try {
-        const result = await chrome.storage.local.get('translationCache');
+        const result = await browser.storage.local.get('translationCache');
         const cacheCount = result.translationCache ? Object.keys(result.translationCache).length : 0;
         const statsDiv = document.getElementById('cacheStats');
         statsDiv.textContent = `当前缓存：${cacheCount} 条翻译记录`;
@@ -98,7 +106,7 @@ async function loadCacheStats() {
 }
 
 // 保存配置
-function saveConfig() {
+async function saveConfig() {
     const config = {};
 
     // 基础设置
@@ -153,10 +161,13 @@ function saveConfig() {
     }
 
     // 保存到 Chrome Storage
-    chrome.storage.sync.set({ translatorConfig: config }, () => {
+    try {
+        await browser.storage.sync.set({ translatorConfig: config });
         showToast('设置已保存！');
         console.log('配置已保存：', config);
-    });
+    } catch (error) {
+        showToast('保存失败：' + error.message, true);
+    }
 }
 
 // 验证配置
@@ -189,12 +200,15 @@ function validateConfig(config) {
 }
 
 // 恢复默认设置
-function resetConfig() {
+async function resetConfig() {
     if (confirm('确定要恢复默认设置吗？')) {
-        chrome.storage.sync.set({ translatorConfig: DEFAULT_CONFIG }, () => {
-            loadConfig();
+        try {
+            await browser.storage.sync.set({ translatorConfig: DEFAULT_CONFIG });
+            await loadConfig();
             showToast('已恢复默认设置！');
-        });
+        } catch (error) {
+            showToast('恢复默认设置失败：' + error.message, true);
+        }
     }
 }
 
@@ -223,7 +237,7 @@ function initCollapsible() {
 async function clearCache() {
     if (confirm('确定要清空所有翻译缓存吗？此操作不可恢复。')) {
         try {
-            await chrome.storage.local.remove('translationCache');
+            await browser.storage.local.remove('translationCache');
             showToast('缓存已清空！');
             loadCacheStats();
         } catch (error) {
