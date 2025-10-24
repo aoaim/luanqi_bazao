@@ -1,11 +1,15 @@
 #!/bin/bash
 
 # 严格模式：任何命令失败都会中断脚本
-set -e  # 命令返回非零退出码时退出
-set -u  # 使用未定义变量时退出
-set -o pipefail  # 管道中任何命令失败都会导致整个管道失败
+set -e
+set -u
+set -o pipefail
 
-# 错误处理函数
+SCRIPT_VERSION="1.0.0"
+MARKER_FILE="/var/lib/init_linux_run.marker"
+BACKUP_DIR="/root/init_linux_backups"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+
 error_exit() {
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "❌ Error occurred at line $1"
@@ -13,97 +17,164 @@ error_exit() {
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     exit 1
 }
-
-# 捕获错误并显示行号
 trap 'error_exit $LINENO' ERR
 
-# Error if not root
-[ "$(id -u)" != "0" ] && { echo "Error: You must be root to run this script"; exit 1; }
-
-# Check if running on Debian 12 or 13 only
-if [ ! -f /etc/debian_version ]; then
-    echo "Error: This script is designed for Debian systems only"
+if [ "$(id -u)" != "0" ]; then
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "❌ Error: You must be root to run this script"
+    echo "💡 Please run with: sudo bash $0"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     exit 1
 fi
 
+if [ -f "$MARKER_FILE" ]; then
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "⚠️  This script has already been run on: $(cat "$MARKER_FILE")"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    read -p "Do you want to continue anyway? This may overwrite existing configurations. (yes/no): " continue_run
+    if [ "$continue_run" != "yes" ]; then
+        echo "Exiting..."
+        exit 0
+    fi
+    echo "Continuing with reconfiguration..."
+fi
+
+# 仅允许 Debian 13 amd64
 if [ -f /etc/os-release ]; then
     . /etc/os-release
     if [ "$ID" != "debian" ]; then
         echo "Error: This script only supports Debian (detected: $PRETTY_NAME)"
         exit 1
     fi
-    # Get Debian major version
     DEBIAN_VERSION=$(cat /etc/debian_version | cut -d. -f1)
-    if [ "$DEBIAN_VERSION" != "12" ] && [ "$DEBIAN_VERSION" != "13" ]; then
-        echo "Error: This script only supports Debian 12 and 13 (detected: Debian $DEBIAN_VERSION)"
+    ARCH=$(uname -m)
+    if [ "$DEBIAN_VERSION" != "13" ]; then
+        echo "Error: This script only supports Debian 13 (detected: Debian $DEBIAN_VERSION)"
         exit 1
     fi
-    echo "✓ Running on Debian $DEBIAN_VERSION"
+    if [ "$ARCH" != "x86_64" ] && [ "$ARCH" != "amd64" ]; then
+        echo "Error: This script only supports amd64 architecture (detected: $ARCH)"
+        exit 1
+    fi
+    echo "✓ Running on Debian 13 amd64"
 fi
 
-# upgrade and install necessary packages
+mkdir -p "$BACKUP_DIR"
+echo "✓ Backup directory created: $BACKUP_DIR"
+
+backup_file() {
+    local file="$1"
+    if [ -f "$file" ]; then
+        cp "$file" "${BACKUP_DIR}/$(basename "$file").${TIMESTAMP}.bak"
+        echo "  Backed up: $file"
+    fi
+}
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "📦 Updating system and installing packages..."
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 apt update && apt upgrade -y && apt autoremove -y
-apt install -y openssl net-tools dnsutils nload curl wget lsof nano htop cron haveged vnstat chrony iftop iotop fail2ban unattended-upgrades unzip logrotate
+apt install -y openssl gnupg net-tools dnsutils nload curl wget lsof nano htop cron haveged vnstat chrony iftop iotop fail2ban unattended-upgrades unzip logrotate
 
-# speedtest-cli
-curl -s https://packagecloud.io/install/repositories/ookla/speedtest-cli/script.deb.sh | bash
-apt-get install speedtest -y
+echo "Configuring unattended-upgrades..."
+if dpkg -l | grep -q "^ii.*unattended-upgrades"; then
+    echo "✓ unattended-upgrades installed successfully"
+    echo unattended-upgrades unattended-upgrades/enable_auto_updates boolean true | debconf-set-selections
+    dpkg-reconfigure -f noninteractive unattended-upgrades
+    if [ -f /etc/apt/apt.conf.d/20auto-upgrades ]; then
+        echo "✓ Auto-updates configuration created"
+    fi
+    if systemctl is-enabled apt-daily.timer >/dev/null 2>&1; then
+        echo "✓ apt-daily.timer is enabled"
+    fi
+    if systemctl is-enabled apt-daily-upgrade.timer >/dev/null 2>&1; then
+        echo "✓ apt-daily-upgrade.timer is enabled"
+    fi
+    echo "✓ Unattended-upgrades configured and enabled"
+else
+    echo "⚠️  Warning: unattended-upgrades installation could not be verified"
+fi
 
-# helix-editor
-echo "Fetching latest Helix editor release..."
-LATEST_HELIX_URL=$(curl -s https://api.github.com/repos/helix-editor/helix/releases/latest | grep -oP '"browser_download_url":\s*"\K[^"]*amd64\.deb')
-
-if [ -z "$LATEST_HELIX_URL" ]; then
-    echo "❌ Failed to fetch latest Helix release URL"
+# speedtest-cli 仅支持 Debian 13 amd64，直接下载安装
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "📡 Installing speedtest-cli (Ookla official deb)..."
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+SPEEDTEST_DEB_URL="https://packagecloud.io/ookla/speedtest-cli/packages/debian/trixie/speedtest_1.2.0.84-1.ea6b6773cf_amd64.deb/download.deb?distro_version_id=221"
+wget --content-disposition "$SPEEDTEST_DEB_URL" -O speedtest.deb
+if [ -s speedtest.deb ]; then
+    dpkg -i speedtest.deb || apt-get install -f -y
+    rm -f speedtest.deb
+    echo "✓ Speedtest-cli installed"
+else
+    echo "❌ Failed to download speedtest deb package"
     exit 1
 fi
 
-echo "Downloading Helix from: $LATEST_HELIX_URL"
-wget -O helix.deb "$LATEST_HELIX_URL"
-
-if [ ! -f helix.deb ]; then
-    echo "❌ Failed to download Helix"
-    exit 1
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "📝 Installing Helix editor..."
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+HELIX_INSTALLED=false
+for attempt in 1 2 3; do
+    echo "Attempt $attempt: Fetching latest Helix editor release..."
+    LATEST_HELIX_URL=$(curl -s --max-time 10 https://api.github.com/repos/helix-editor/helix/releases/latest 2>/dev/null | grep -m1 '"browser_download_url".*amd64\.deb"' | cut -d'"' -f4 || true)
+    if [ -n "$LATEST_HELIX_URL" ]; then
+        echo "Downloading Helix from: $LATEST_HELIX_URL"
+        if wget -q --timeout=30 -O helix.deb "$LATEST_HELIX_URL" 2>/dev/null && [ -f helix.deb ] && [ -s helix.deb ]; then
+            if dpkg -i helix.deb 2>/dev/null; then
+                apt-get install -f -y
+                rm -f helix.deb
+                HELIX_INSTALLED=true
+                echo "✓ Helix editor installed successfully"
+                break
+            else
+                echo "⚠️  Failed to install downloaded package, retrying..."
+                rm -f helix.deb
+            fi
+        else
+            echo "⚠️  Download failed, retrying..."
+            rm -f helix.deb
+        fi
+    else
+        echo "⚠️  Failed to fetch release URL, retrying..."
+    fi
+    sleep 2
+done
+if [ "$HELIX_INSTALLED" = false ]; then
+    echo "⚠️  Warning: Could not install Helix editor from GitHub"
+    echo "ℹ️  You can install it manually later from: https://helix-editor.com"
 fi
-
-dpkg -i helix.deb
-apt-get install -f -y
-rm -f helix.deb
-echo "✓ Helix editor installed successfully"
-
-# helix alias 替代 vi/vim
-cat > /etc/profile.d/helix-alias.sh <<'EOF'
-# Helix aliases to replace vi/vim
+if [ "$HELIX_INSTALLED" = true ]; then
+    cat > /etc/profile.d/helix-alias.sh <<'EOF'
 alias vi='hx'
 alias vim='hx'
 EOF
+    chmod 644 /etc/profile.d/helix-alias.sh
+    echo "✓ Helix aliased to vi/vim"
+fi
 
-chmod 644 /etc/profile.d/helix-alias.sh
-echo "✓ Helix aliased to vi/vim"
-
-# eza
-echo "Installing eza..."
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "📁 Installing eza..."
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 mkdir -p /etc/apt/keyrings
-wget -qO- https://raw.githubusercontent.com/eza-community/eza/main/deb.asc | gpg --dearmor -o /etc/apt/keyrings/gierens.gpg
+wget -qO- https://raw.githubusercontent.com/eza-community/eza/main/deb.asc | gpg --batch --yes --dearmor -o /etc/apt/keyrings/gierens.gpg
 echo "deb [signed-by=/etc/apt/keyrings/gierens.gpg] http://deb.gierens.de stable main" | tee /etc/apt/sources.list.d/gierens.list
 chmod 644 /etc/apt/keyrings/gierens.gpg /etc/apt/sources.list.d/gierens.list
 apt update
 apt install -y eza
-
-# eza alias 替代 ls
 cat > /etc/profile.d/eza-alias.sh <<'EOF'
-# Eza aliases to replace ls
 alias ls='eza'
 alias ll='eza -lh --icons --git'
 alias la='eza -lah --icons --git'
 alias lt='eza -lh --icons --git --tree'
 alias l='eza -lah --icons --git'
 EOF
-
 chmod 644 /etc/profile.d/eza-alias.sh
 echo "✓ Eza installed and aliased to ls"
 
-# Chrony configuration
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "⏰ Configuring time synchronization..."
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+backup_file /etc/chrony/chrony.conf
 cat > /etc/chrony/chrony.conf <<EOF
 server 0.asia.pool.ntp.org iburst
 server 1.asia.pool.ntp.org iburst
@@ -115,53 +186,43 @@ rtcsync
 log tracking measurements statistics
 logdir /var/log/chrony
 EOF
-
-# Enable and verify chrony
 systemctl enable --now chrony
-chronyc tracking
-
-# 等待chrony同步，最多等待60秒
+sleep 2
+chronyc tracking || true
+echo "Waiting for time synchronization..."
 for i in {1..12}; do
-    status=$(chronyc tracking 2>/dev/null | grep 'Leap status' | cut -d':' -f2 | xargs || true)
+    status=$(chronyc tracking 2>/dev/null | grep 'Leap status' | cut -d':' -f2 | xargs || echo "Unknown")
     if [[ "$status" == "Normal" ]]; then
+        echo "✓ Time synchronized"
         break
     fi
     sleep 5
 done
-
-# Timezone
 timedatectl set-timezone Asia/Singapore
-
-# Haveged
+echo "✓ Timezone set to Asia/Singapore"
 systemctl enable --now haveged
-
-# Vnstat
+echo "✓ Haveged enabled"
 systemctl enable --now vnstat
-
-# Fail2ban
+echo "✓ Vnstat enabled"
 systemctl enable --now fail2ban
+echo "✓ Fail2ban enabled"
 
-# logrotate 测试（可选，生产环境可省略）
-# logrotate -f /etc/logrotate.conf
-
-# limits
-# 备份所有 nproc.conf，防止默认限制覆盖自定义设置
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "🔧 Configuring system limits..."
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 for f in /etc/security/limits.d/*nproc.conf; do
     if [ -e "$f" ]; then
+        backup_file "$f"
         mv "$f" "${f}_bk"
     fi
 done
-
-# 确保 pam_limits.so 被加载，否则 limits 配置不会生效
 if [ -f /etc/pam.d/common-session ]; then
     if ! grep -q 'session required pam_limits.so' /etc/pam.d/common-session; then
+        backup_file /etc/pam.d/common-session
         echo "session required pam_limits.so" >> /etc/pam.d/common-session
     fi
 fi
-
-# 网络服务优化 - 适度提升
 cat > /etc/security/limits.d/99-network-limits.conf <<EOF
-# 网络服务优化 - 适度提升
 * soft nofile 65536
 * hard nofile 65536
 * soft nproc 32768
@@ -172,227 +233,144 @@ root hard nofile 65536
 root soft nproc 32768
 root hard nproc 32768
 EOF
+echo "✓ System limits configured"
 
-# sysctl
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "⚙️  Configuring kernel parameters..."
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 if [ -f /etc/sysctl.conf ]; then
+    backup_file /etc/sysctl.conf
     mv /etc/sysctl.conf /etc/sysctl.conf.bak
 fi
-
 cat > /etc/sysctl.d/999-bbr-sysctl.conf <<'EOF'
-# 1. 队列算法与拥塞控制
 net.core.default_qdisc = fq_pie
 net.ipv4.tcp_congestion_control = bbr
-
-# 2. Socket 缓冲区（16 MB 上限，自动调整）
 net.core.rmem_max = 16777216
 net.core.wmem_max = 16777216
 net.ipv4.tcp_rmem = 4096 131072 16777216
 net.ipv4.tcp_wmem = 4096 131072 16777216
-
-# 3. 延迟与丢包优化
-net.ipv4.tcp_mtu_probing = 1          # PLPMTUD，防黑洞
-net.ipv4.tcp_fastopen = 3             # TFO 客户端+服务端
-net.ipv4.tcp_slow_start_after_idle = 0 # 长连接不降速
-net.ipv4.tcp_notsent_lowat = 16384    # 降低缓冲延迟
-
-# 4. 通用 TCP 调优
+net.ipv4.tcp_mtu_probing = 1
+net.ipv4.tcp_fastopen = 3
+net.ipv4.tcp_slow_start_after_idle = 0
+net.ipv4.tcp_notsent_lowat = 16384
 net.ipv4.tcp_timestamps = 1
 net.ipv4.tcp_sack = 1
 net.ipv4.tcp_no_metrics_save = 1
 net.core.netdev_max_backlog = 2048
 net.ipv4.tcp_window_scaling = 1
-
-# 5. 安全加固
 net.ipv4.tcp_syncookies = 1
 net.ipv4.tcp_max_syn_backlog = 2048
 net.core.somaxconn = 4096
-# net.ipv4.ip_forward = 1   # 如果需要转发
-
-# 防 IP/ARP 欺骗 & 广播 ICMP
 net.ipv4.conf.all.rp_filter = 1
 net.ipv4.conf.default.rp_filter = 1
 net.ipv4.conf.all.arp_ignore = 1
 net.ipv4.conf.all.arp_announce = 2
 net.ipv4.icmp_echo_ignore_broadcasts = 1
 net.ipv4.icmp_ignore_bogus_error_responses = 1
-
-# 6. 端口回收与范围
 net.ipv4.tcp_fin_timeout = 10
 net.ipv4.ip_local_port_range = 1024 65535
-
-# 7. 崩溃与异常处理
 kernel.panic = 10
 kernel.core_pattern = core_%e
 vm.panic_on_oom = 1
 EOF
+sysctl --system >/dev/null 2>&1 || true
+echo "✓ Kernel parameters configured"
 
-# Apply sysctl settings
-sysctl --system
-
-# 检测磁盘大小
-root_disk=$(df / --output=source | tail -1)
-disk_device=$(lsblk -no pkname "$root_disk" 2>/dev/null | head -n1)
-if [ -n "$disk_device" ]; then
-    disk_device="/dev/$disk_device"
-else
-    disk_device="$root_disk"
-fi
-disk_size=$(lsblk -b -dn -o SIZE "$disk_device" 2>/dev/null | awk '{printf "%.2f GB", $1/1024/1024/1024}')
-
-# 清屏
-clear
-
-# 获取CPU缓存信息
 get_cpu_cache_info() {
-    local l1d_cache_b=$(lscpu -B 2>/dev/null | grep -oP "(?<=L1d cache:).*(?=)" | sed -e 's/^[ ]*//g')
-    local l1i_cache_b=$(lscpu -B 2>/dev/null | grep -oP "(?<=L1i cache:).*(?=)" | sed -e 's/^[ ]*//g')
-    local l2_cache_b=$(lscpu -B 2>/dev/null | grep -oP "(?<=L2 cache:).*(?=)" | sed -e 's/^[ ]*//g')
-    local l3_cache_b=$(lscpu -B 2>/dev/null | grep -oP "(?<=L3 cache:).*(?=)" | sed -e 's/^[ ]*//g')
-
-    # L1缓存计算 (L1d + L1i)
-    if [ -n "$l1d_cache_b" ] && [ -n "$l1i_cache_b" ]; then
-        local l1_total_b=$(echo "$l1d_cache_b $l1i_cache_b" | awk '{printf "%d\n",$1+$2}')
-        local l1_total_k=$(echo "$l1_total_b" | awk '{printf "%.2f\n",$1/1024}')
-        local l1_total_k_int=$(echo "$l1_total_b" | awk '{printf "%d\n",$1/1024}')
-        if [ "$l1_total_k_int" -ge "1024" ]; then
-            local l1_cache=$(echo "$l1_total_k" | awk '{printf "%.2f MB\n",$1/1024}')
-        else
-            local l1_cache=$(echo "$l1_total_k" | awk '{printf "%.2f KB\n",$1}')
-        fi
+    set +e
+    local cache_info=$(lscpu 2>/dev/null | grep -i cache | head -3 | awk -F: '{print $2}' | xargs | tr '\n' ' ' || echo "N/A")
+    if [ -z "$cache_info" ] || [ "$cache_info" = "N/A" ]; then
+        echo "N/A"
     else
-        local l1_cache="N/A"
+        echo "$cache_info"
     fi
-
-    # L2缓存计算
-    if [ -n "$l2_cache_b" ]; then
-        local l2_k=$(echo "$l2_cache_b" | awk '{printf "%.2f\n",$1/1024}')
-        local l2_k_int=$(echo "$l2_cache_b" | awk '{printf "%d\n",$1/1024}')
-        if [ "$l2_k_int" -ge "1024" ]; then
-            local l2_cache=$(echo "$l2_k" | awk '{printf "%.2f MB\n",$1/1024}')
-        else
-            local l2_cache=$(echo "$l2_k" | awk '{printf "%.2f KB\n",$1}')
-        fi
-    else
-        local l2_cache="N/A"
-    fi
-
-    # L3缓存计算
-    if [ -n "$l3_cache_b" ]; then
-        local l3_k=$(echo "$l3_cache_b" | awk '{printf "%.2f\n",$1/1024}')
-        local l3_k_int=$(echo "$l3_cache_b" | awk '{printf "%d\n",$1/1024}')
-        if [ "$l3_k_int" -ge "1024" ]; then
-            local l3_cache=$(echo "$l3_k" | awk '{printf "%.2f MB\n",$1/1024}')
-        else
-            local l3_cache=$(echo "$l3_k" | awk '{printf "%.2f KB\n",$1}')
-        fi
-    else
-        local l3_cache="N/A"
-    fi
-
-    echo "L1: $l1_cache / L2: $l2_cache / L3: $l3_cache"
+    set -e
 }
-
-# 获取内存使用信息
 get_memory_usage_detailed() {
-    local memtotal_kib=$(awk '/MemTotal/{print $2}' /proc/meminfo | head -n1)
-    local memfree_kib=$(awk '/MemFree/{print $2}' /proc/meminfo | head -n1)
-    local buffers_kib=$(awk '/Buffers/{print $2}' /proc/meminfo | head -n1)
-    local cached_kib=$(awk '/Cached/{print $2}' /proc/meminfo | head -n1)
-
-    local memfree_total_kib=$(echo "$memfree_kib $buffers_kib $cached_kib" | awk '{printf $1+$2+$3}')
-    local memused_kib=$(echo "$memtotal_kib $memfree_total_kib" | awk '{printf $1-$2}')
-
-    local memused_mib=$(echo "$memused_kib" | awk '{printf "%.2f",$1/1024}')
-    local memtotal_gib=$(echo "$memtotal_kib" | awk '{printf "%.2f",$1/1048576}')
-
-    if [ "$(echo "$memused_kib" | awk '{printf "%d",$1}')" -lt "1048576" ]; then
-        echo "$memused_mib MiB / $memtotal_gib GiB"
-    else
-        local memused_gib=$(echo "$memused_kib" | awk '{printf "%.2f",$1/1048576}')
-        echo "$memused_gib GiB / $memtotal_gib GiB"
-    fi
+    set +e
+    local mem_info=$(free -h 2>/dev/null | awk 'NR==2{printf "%s / %s", $3, $2}' || echo "N/A")
+    echo "$mem_info"
+    set -e
 }
-
-# 获取交换分区信息
 get_swap_usage_detailed() {
-    local swaptotal_kib=$(awk '/SwapTotal/{print $2}' /proc/meminfo | head -n1)
-
-    if [ "$swaptotal_kib" -eq "0" ]; then
-        echo "[ no swap partition or swap file detected ]"
+    set +e
+    local swap_total=$(awk '/SwapTotal/{print $2}' /proc/meminfo 2>/dev/null | head -n1)
+    if [ -z "$swap_total" ] || [ "$swap_total" = "0" ]; then
+        if swapon --show 2>/dev/null | grep -q "/"; then
+            local swap_info=$(free -h 2>/dev/null | awk 'NR==3{printf "%s / %s", $3, $2}')
+            echo "$swap_info"
+        else
+            echo "No swap detected"
+        fi
     else
-        local swapfree_kib=$(awk '/SwapFree/{print $2}' /proc/meminfo | head -n1)
-        local swapused_kib=$(echo "$swaptotal_kib $swapfree_kib" | awk '{printf $1-$2}')
-
-        local swapused_mib=$(echo "$swapused_kib" | awk '{printf "%.2f",$1/1024}')
-        local swaptotal_mib=$(echo "$swaptotal_kib" | awk '{printf "%.2f",$1/1024}')
-
-        echo "$swapused_mib MiB / $swaptotal_mib MiB"
+        local swap_info=$(free -h 2>/dev/null | awk 'NR==3{printf "%s / %s", $3, $2}')
+        echo "$swap_info"
     fi
+    set -e
 }
-
-# 获取磁盘使用信息
 get_disk_usage_detailed() {
-    local disktotal_kib=$(df -x tmpfs / | grep -oE "[0-9]{4,}" | awk 'NR==1 {print $1}')
-    local diskused_kib=$(df -x tmpfs / | grep -oE "[0-9]{4,}" | awk 'NR==2 {print $1}')
-
-    local diskused_gib=$(echo "$diskused_kib" | awk '{printf "%.2f",$1/1048576}')
-    local disktotal_gib=$(echo "$disktotal_kib" | awk '{printf "%.2f",$1/1048576}')
-
-    echo "$diskused_gib GiB / $disktotal_gib GiB"
+    set +e
+    local disk_info=$(df -h / 2>/dev/null | awk 'NR==2{printf "%s / %s (%s used)", $3, $2, $5}' || echo "N/A")
+    echo "$disk_info"
+    set -e
 }
-
-# 获取启动磁盘
 get_boot_disk() {
-    df -x tmpfs / | awk "NR>1" | sed ":a;N;s/\\n//g;ta" | awk '{print $1}'
+    set +e
+    local root_dev=$(df / 2>/dev/null | awk 'NR==2{print $1}')
+    if [[ "$root_dev" == /dev/mapper/* ]]; then
+        local real_dev=$(readlink -f "$root_dev" 2>/dev/null || echo "$root_dev")
+        echo "$real_dev"
+    else
+        echo "$root_dev"
+    fi
+    set -e
 }
 
-# 输出验证配置
+clear
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "🚀 System Optimization Complete - Configuration Check"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-printf "%-22s: %s\n" "BBR Congestion Control" "$(sysctl -n net.ipv4.tcp_congestion_control)"
-printf "%-22s: %s\n" "Queue Discipline" "$(sysctl -n net.core.default_qdisc)"
-printf "%-22s: %s\n" "Open File Limit" "$(ulimit -n)"
-printf "%-22s: %s\n" "Process Limit" "$(ulimit -u)"
+set +e
+printf "%-22s: %s\n" "BBR Congestion Control" "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo 'N/A')"
+printf "%-22s: %s\n" "Queue Discipline" "$(sysctl -n net.core.default_qdisc 2>/dev/null || echo 'N/A')"
+printf "%-22s: %s\n" "Open File Limit" "$(ulimit -n 2>/dev/null || echo 'N/A')"
+printf "%-22s: %s\n" "Process Limit" "$(ulimit -u 2>/dev/null || echo 'N/A')"
 printf "%-22s: %s\n" "Time Sync Status" "$(chronyc tracking 2>/dev/null | grep 'Leap status' | cut -d':' -f2 | xargs 2>/dev/null || echo 'Checking...')"
-printf "%-22s: %s\n" "Current Timezone" "$(timedatectl show --property=Timezone --value)"
+printf "%-22s: %s\n" "Current Timezone" "$(timedatectl show --property=Timezone --value 2>/dev/null || echo 'N/A')"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-# 系统硬件信息
-printf "%-22s: %s\n" "CPU Model Name" "$(lscpu -B 2>/dev/null | grep -oP -m1 "(?<=Model name:).*(?=)" | sed -e 's/^[ ]*//g' || echo 'Unknown')"
-printf "%-22s: %s\n" "CPU Cache Size" "$(get_cpu_cache_info)"
-printf "%-22s: %s vCPU(s)\n" "CPU Specifications" "$(nproc)"
+printf "%-22s: %s\n" "CPU Model Name" "$(lscpu 2>/dev/null | grep 'Model name' | cut -d':' -f2 | xargs || echo 'Unknown')"
+printf "%-22s: %s\n" "CPU Cache" "$(get_cpu_cache_info)"
+printf "%-22s: %s vCPU(s)\n" "CPU Cores" "$(nproc 2>/dev/null || echo 'N/A')"
 printf "%-22s: %s\n" "Memory Usage" "$(get_memory_usage_detailed)"
 printf "%-22s: %s\n" "Swap Usage" "$(get_swap_usage_detailed)"
 printf "%-22s: %s\n" "Disk Usage" "$(get_disk_usage_detailed)"
 printf "%-22s: %s\n" "Boot Disk" "$(get_boot_disk)"
-printf "%-22s: %s (%s)\n" "OS Release" "$(lsb_release -ds 2>/dev/null || (grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '\"'))" "$(uname -m)"
-printf "%-22s: %s\n" "Kernel Version" "$(uname -r)"
-printf "%-22s: %s\n" "Uptime" "$(uptime -p | cut -d' ' -f2-)"
-
+printf "%-22s: %s (%s)\n" "OS Release" "$(lsb_release -ds 2>/dev/null || grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '\"' || echo 'Unknown')" "$(uname -m 2>/dev/null || echo 'N/A')"
+printf "%-22s: %s\n" "Kernel Version" "$(uname -r 2>/dev/null || echo 'N/A')"
+printf "%-22s: %s\n" "Uptime" "$(uptime -p 2>/dev/null | cut -d' ' -f2- || echo 'N/A')"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-# 安全检查（临时禁用 set -e 以允许状态检查失败）
-set +e
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "Security Status:"
 ssh_status=$(systemctl is-active ssh 2>/dev/null || echo 'inactive')
 fail2ban_status=$(systemctl is-active fail2ban 2>/dev/null || echo 'inactive')
+unattended_upgrades_timer=$(systemctl is-active apt-daily-upgrade.timer 2>/dev/null || echo 'inactive')
 printf "  %-20s: %s\n" "SSH Service" "$ssh_status"
 printf "  %-20s: %s\n" "Fail2ban Service" "$fail2ban_status"
+printf "  %-20s: %s\n" "Auto-updates Timer" "$unattended_upgrades_timer"
 set -e
+
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "✅ Optimization complete!"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
+echo "📋 Backup files saved to: $BACKUP_DIR"
+echo ""
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Script version: $SCRIPT_VERSION" > "$MARKER_FILE"
 echo "⚠️  It is recommended to reboot the system for all settings to take effect."
 echo ""
 read -p "Would you like to reboot now? (y/yes): " reboot_now
-
-# Convert to lowercase for comparison
 reboot_now_lower=$(echo "$reboot_now" | tr '[:upper:]' '[:lower:]')
-
 if [ "$reboot_now_lower" = "y" ] || [ "$reboot_now_lower" = "yes" ]; then
     echo ""
     echo "Rebooting system..."
