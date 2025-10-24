@@ -29,24 +29,50 @@ if [ ! -f /etc/debian_version ]; then
     exit 1
 fi
 
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+
 # 检查是否为 Debian 13
 if [ -f /etc/os-release ]; then
     . /etc/os-release
-    if [ "$ID" != "debian" ]; then
-        echo "❌ Error: This script only supports Debian (detected: $PRETTY_NAME)"
+    if [ "${ID,,}" != "debian" ]; then
+        echo "❌ Error: This script only supports Debian (detected: ${PRETTY_NAME:-unknown})"
         exit 1
     fi
-    
-    # 获取 Debian 主版本号
-    DEBIAN_VERSION=$(cat /etc/debian_version | cut -d. -f1)
-    
-    if [ "$DEBIAN_VERSION" != "13" ]; then
-        echo "❌ Error: This script only supports Debian 13 (detected: Debian $DEBIAN_VERSION)"
+
+    CODENAME="${VERSION_CODENAME:-}"
+    VERSION_ID_MAJOR=""
+    if [ -n "${VERSION_ID:-}" ]; then
+        VERSION_ID_MAJOR="${VERSION_ID%%[!0-9]*}"
+        VERSION_ID_MAJOR="${VERSION_ID_MAJOR%%/*}"
+    fi
+    if [ -z "$VERSION_ID_MAJOR" ]; then
+        if [ -f /etc/debian_version ]; then
+            VERSION_ID_MAJOR="$(cut -d. -f1 /etc/debian_version 2>/dev/null | cut -d/ -f1)"
+        fi
+    fi
+
+    if [ -z "$VERSION_ID_MAJOR" ]; then
+        echo "❌ Error: Unable to determine Debian major version."
+        echo "   This script only supports Debian 13 (trixie)."
+        exit 1
+    fi
+
+    if [ "$VERSION_ID_MAJOR" != "13" ]; then
+        echo "❌ Error: This script only supports Debian 13 (detected: ${PRETTY_NAME:-Debian $VERSION_ID_MAJOR})"
         echo "   This script modernizes Debian 13 (trixie) sources"
         exit 1
     fi
-    
-    echo "✓ Running on Debian 13 (trixie)"
+
+    if [ -n "$CODENAME" ] && [ "$CODENAME" != "trixie" ]; then
+        echo "❌ Error: This script only supports the trixie release (detected codename: $CODENAME)"
+        echo "   This script modernizes Debian 13 (trixie) sources"
+        exit 1
+    fi
+
+    DISPLAY_VERSION="${VERSION_ID_MAJOR:-unknown}"
+    DISPLAY_CODENAME="${CODENAME:-unknown}"
+    echo "✓ Running on Debian ${DISPLAY_VERSION} (${DISPLAY_CODENAME})"
 fi
 
 echo ""
@@ -63,8 +89,8 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "Step 1/3: Cleaning up old packages and cache..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-apt autoremove -y
-apt clean
+apt-get autoremove -y
+apt-get clean
 echo "✓ Cleanup complete"
 
 # 步骤 2: 现代化 APT 源 (转换为 deb822 格式)
@@ -117,7 +143,7 @@ fi
 # 更新包列表以验证配置
 echo ""
 echo "Updating package lists to verify configuration..."
-apt update
+apt-get update
 
 # 完成
 echo ""
