@@ -4,6 +4,10 @@
 .ib.snssdk.com
 .xlog.snssdk.com
 .log.snssdk.com
+.events.api.gamma.app
+.pirsch.io
+.d2g2u2795e3fzw.cloudfront.net
+.mobiexchange.com
 .tryzens-analytics.com
 .turbotargeting.io
 .inetstats.org
@@ -1972,7 +1976,7 @@
 .adku.co
 .adku.com
 .admantx.com
-.admitad.com
+.ad.admitad.com
 .adobetag.com
 .adoftheyear.com
 .adrta.com
@@ -68906,6 +68910,9 @@
 .tagman.britishairways.com
 .ct.pinterest.com
 .incoming.telemetry.mozilla.org
+.z.cdn.protect-ad.com
+.sb1.mangataro.org
+.ins.oberpfalzmedien.de
 .hbrcv.adobe.com
 .hbrt.adobe.com
 .leo.tridge.com
@@ -68935,7 +68942,6 @@
 .log-gateway.zoom.us
 .upsell.alphwidget.com
 .4hfvbao1ea.execute-api.ap-northeast-2.amazonaws.com
-.static.alphwidget.com
 .error-analytics-sessions-production.shopifysvc.com
 .analytics.pesktop.com
 .cloudmetrics.xenforo.com
