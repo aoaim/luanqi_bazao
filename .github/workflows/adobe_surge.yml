@@ -9,10 +9,7 @@ on:
       - '.github/workflows/adobe_surge.yml'
       - 'rule_generator/adobe_block_host_surge/**'
   schedule:
-    # 每天上午9点运行
-    - cron: '0 9 * * *'
-    # 每天下午5点运行
-    - cron: '0 17 * * *'
+    - cron: '0 0 * * *'
 
 permissions:
   contents: write
