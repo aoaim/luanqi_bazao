@@ -38,6 +38,72 @@ psk=${psk:-${default_psk}}
 # 交互式询问是否开启 obfs，默认为不开启
 read -p "Enable obfs (traffic obfuscation)? [y/N]: " enable_obfs
 
+# 交互式选择 DNS
+echo "Select a public DNS provider (default: Google):"
+echo "  1) Google"
+echo "     8.8.8.8,8.8.4.4,2001:4860:4860::8888,2001:4860:4860::8844"
+echo "  2) Cloudflare"
+echo "     1.1.1.1,1.0.0.1,2606:4700:4700::1111,2606:4700:4700::1001"
+echo "  3) Cloudflare Malware Protection"
+echo "     1.1.1.2,1.0.0.2,2606:4700:4700::1112,2606:4700:4700::1002"
+echo "  4) Cloudflare Family"
+echo "     1.1.1.3,1.0.0.3,2606:4700:4700::1113,2606:4700:4700::1003"
+echo "  5) Quad9"
+echo "     9.9.9.9,149.112.112.112,2620:fe::fe,2620:fe::9"
+echo "  6) Quad9 Secured"
+echo "     9.9.9.11,149.112.112.11,2620:fe::11,2620:fe::fe:11"
+echo "  7) Custom DNS"
+
+while true; do
+    read -p "Enter the DNS option number [1]: " dns_choice
+    dns_choice=${dns_choice:-1}
+    case "$dns_choice" in
+        1)
+            dns_label="Google"
+            dns_servers="8.8.8.8,8.8.4.4,2001:4860:4860::8888,2001:4860:4860::8844"
+            break
+            ;;
+        2)
+            dns_label="Cloudflare"
+            dns_servers="1.1.1.1,1.0.0.1,2606:4700:4700::1111,2606:4700:4700::1001"
+            break
+            ;;
+        3)
+            dns_label="Cloudflare Malware Protection"
+            dns_servers="1.1.1.2,1.0.0.2,2606:4700:4700::1112,2606:4700:4700::1002"
+            break
+            ;;
+        4)
+            dns_label="Cloudflare Family"
+            dns_servers="1.1.1.3,1.0.0.3,2606:4700:4700::1113,2606:4700:4700::1003"
+            break
+            ;;
+        5)
+            dns_label="Quad9"
+            dns_servers="9.9.9.9,149.112.112.112,2620:fe::fe,2620:fe::9"
+            break
+            ;;
+        6)
+            dns_label="Quad9 Secured"
+            dns_servers="9.9.9.11,149.112.112.11,2620:fe::11,2620:fe::fe:11"
+            break
+            ;;
+        7)
+            read -p "Enter custom DNS addresses (comma separated): " custom_dns
+            if [[ -z "$custom_dns" ]]; then
+                echo "Custom DNS cannot be empty. Please try again."
+                continue
+            fi
+            dns_label="Custom DNS"
+            dns_servers="$custom_dns"
+            break
+            ;;
+        *)
+            echo "Invalid choice. Please enter a number between 1 and 7."
+            ;;
+    esac
+done
+
 # 确保配置文件目录存在
 mkdir -p /etc/snell
 
@@ -55,7 +121,7 @@ if [[ "$enable_obfs" =~ ^[Yy]$ ]]; then
 listen = 0.0.0.0:${port}
 psk = ${psk}
 ipv6 = true
-dns = 8.8.8.8,8.8.4.4,2001:4860:4860::8888,2001:4860:4860::8844
+dns = ${dns_servers}
 obfs = http
 host = ${host}
 EOF
@@ -67,7 +133,7 @@ else
 listen = 0.0.0.0:${port}
 psk = ${psk}
 ipv6 = true
-dns = 8.8.8.8,8.8.4.4,2001:4860:4860::8888,2001:4860:4860::8844
+dns = ${dns_servers}
 EOF
     echo "Configuration file created (obfs disabled)."
 fi
@@ -112,6 +178,7 @@ echo "Snell server installation complete!"
 echo "Your configuration is:"
 echo "Port: ${port}"
 echo "PSK: ${psk}"
+echo "Public DNS: ${dns_servers} (${dns_label})"
 if [[ "$enable_obfs" =~ ^[Yy]$ ]]; then
     echo "Obfs: http"
     echo "Host: ${host}"
