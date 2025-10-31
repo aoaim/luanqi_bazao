@@ -1,14 +1,15 @@
 import path from 'path';
 import { promises as fs } from 'fs';
-import { fetchHosts, DEFAULT_SOURCE } from './utils/fetchHosts';
+import { fetchHosts, DEFAULT_SOURCES } from './utils/fetchHosts';
 import { convertToSurgeRules } from './services/surgeConverter';
 
 const OUTPUT_PATH = path.resolve(__dirname, '../../../proxy_filter/surge/adobe.list');
 
-const buildFileContent = (rules: string[], source: string): string => {
+const buildFileContent = (rules: string[], sources: string[]): string => {
     const header = [
         '## Adobe domains converted for Surge',
-        `## Source: ${source}`,
+        '## Sources:',
+        ...sources.map((source) => `## - ${source}`),
         `## Updated: ${new Date().toISOString()}`,
         '',
     ];
@@ -18,15 +19,16 @@ const buildFileContent = (rules: string[], source: string): string => {
 
 export const generateAdobeSurgeList = async (
     outputPath: string = OUTPUT_PATH,
-    sourceUrl: string = DEFAULT_SOURCE,
+    sourceUrls: string | string[] = DEFAULT_SOURCES,
 ): Promise<void> => {
-    const hosts = await fetchHosts(sourceUrl);
+    const sources = Array.isArray(sourceUrls) ? sourceUrls : [sourceUrls];
+    const hosts = await fetchHosts(sourceUrls);
     if (!hosts.length) {
         throw new Error('No hosts retrieved from upstream source.');
     }
 
     const rules = convertToSurgeRules(hosts);
-    const fileContent = buildFileContent(rules, sourceUrl);
+    const fileContent = buildFileContent(rules, sources);
 
     await fs.mkdir(path.dirname(outputPath), { recursive: true });
     await fs.writeFile(outputPath, fileContent, 'utf8');

@@ -1,7 +1,9 @@
 # Adobe Block Host → Surge
 
-- Pulls the Adobe host block list from `Ruddernation-Designs/Adobe-URL-Block-List`.
-- Source URL: https://raw.githubusercontent.com/Ruddernation-Designs/Adobe-URL-Block-List/master/hosts
+- Pulls the Adobe host block lists from `Ruddernation-Designs/Adobe-URL-Block-List` and `ignaciocastro/a-dove-is-dumb`.
+- Source URLs:
+  - https://raw.githubusercontent.com/Ruddernation-Designs/Adobe-URL-Block-List/master/hosts
+  - https://raw.githubusercontent.com/ignaciocastro/a-dove-is-dumb/main/list.txt
 - Converts entries to Surge `DOMAIN-SUFFIX` rules and writes `proxy_filter/surge/adobe.list`.
 - GitHub Actions workflow: `.github/workflows/adobe_surge.yml` (cron `0 0 */2 * *`, plus manual dispatch).
 - Minimal TypeScript project with one service (`surgeConverter.ts`) and utilities for fetching hosts.
