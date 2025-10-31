@@ -30,6 +30,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Sync with remote main
+        run: git pull --rebase origin main
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -50,7 +53,6 @@ jobs:
           if git status --porcelain proxy_filter/surge/adobe.list | grep -q .; then
             git add proxy_filter/surge/adobe.list
             git commit -m 'chore: update Adobe Surge rules'
-            git pull --rebase origin main
             git push origin HEAD:main
           else
             echo 'No changes to commit'
