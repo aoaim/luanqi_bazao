@@ -2,7 +2,7 @@
 ## Sources:
 ## - https://raw.githubusercontent.com/Ruddernation-Designs/Adobe-URL-Block-List/master/hosts
 ## - https://raw.githubusercontent.com/ignaciocastro/a-dove-is-dumb/main/list.txt
-## Updated: 2025-11-12T00:22:51.781Z
+## Updated: 2025-11-13T00:22:37.693Z
 DOMAIN,00nllmoilmti.p5jr3.adobestats.io
 DOMAIN,017sxef5kv.adobestats.io
 DOMAIN,019n8v7a8f.adobestats.io
@@ -2220,6 +2220,7 @@ DOMAIN,o434ox4isvz3.bmysp.hstatic.io
 DOMAIN,o48fz57wyn.xwk4b.adobestats.io
 DOMAIN,o4pbge7x5l.adobestats.io
 DOMAIN,o59bbrvc8o.adobestats.io
+DOMAIN,o5x6ypq0.lqn0m.adobestats.io
 DOMAIN,o6pk3ypjcf.adobestats.io
 DOMAIN,o6vsta97a0.adobestats.io
 DOMAIN,o75l4dlkbh.adobestats.io
@@ -2706,6 +2707,7 @@ DOMAIN,tj1kes3nf6.adobestats.io
 DOMAIN,tji9h3hh8.4cbdo.adobestats.io
 DOMAIN,tkbm1g14jp.adobestats.io
 DOMAIN,tkmfwzu7k441.4p4bv.adobestats.io
+DOMAIN,tkpumjs1.xwk4b.adobestats.io
 DOMAIN,tl4dwofj834.jyqfm.adobestats.io
 DOMAIN,tl4yshbzlir.6u13v.adobestats.io
 DOMAIN,tl9tbprvc2v.xwk4b.adobestats.io
@@ -3224,6 +3226,7 @@ DOMAIN,yhtq821vih.adobestats.io
 DOMAIN,yhxcdjy2st.adobestats.io
 DOMAIN,yivozmqj6.lqn0m.adobestats.io
 DOMAIN,yj1mifm2n4.adobestats.io
+DOMAIN,yj3tzfbsva.adobestats.io
 DOMAIN,yj8yx3y8zo.adobestats.io
 DOMAIN,yjbtkf2yu.iwl5c.adobestats.io
 DOMAIN,yjgqzfsojb.adobestats.io
