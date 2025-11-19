@@ -95,8 +95,6 @@ if [ "$AUTO_YES" = false ]; then
     echo "   • Install essential packages (curl, wget, git, etc.)"
     echo "   • Install unattended-upgrades (automatic security updates)"
     echo "   • Install speedtest-cli (network speed testing)"
-    echo "   • Install Docker & Docker Compose (container platform)"
-    echo "   • Install Watchtower (auto-update Docker containers)"
     echo "   • Install Helix editor (modern terminal editor)"
     echo "   • Install Eza (modern ls replacement)"
     echo ""
@@ -111,6 +109,8 @@ if [ "$AUTO_YES" = false ]; then
     echo "   • Set up color prompt and command shortcuts"
     echo ""
     echo -e "${RED}❌ What will NOT be executed automatically:${RESET}"
+    echo "   • Won't install Docker & Docker Compose (default: no)"
+    echo "   • Won't install Watchtower (depends on Docker)"
     echo "   • Won't apply aggressive network & kernel optimization (too risky for general use)"
     echo "   • Won't delete any user data or system files"
     echo "   • Won't overwrite configs (backups created in $BACKUP_DIR)"
@@ -499,23 +499,22 @@ else
             head -n1 | \
             awk '{print $2}' || echo "unknown")
         print_success "Found latest version: $SPEEDTEST_VERSION_INFO"
+        
+        echo "Downloading speedtest-cli..."
+        wget -q --show-progress "$SPEEDTEST_DEB_URL" -O speedtest.deb
+        if [ -s speedtest.deb ]; then
+            echo "Installing speedtest-cli..."
+            dpkg -i speedtest.deb || apt-get install -f -y
+            rm -f speedtest.deb
+            SPEEDTEST_VERSION=$(speedtest --version 2>/dev/null | grep -oP 'Ookla \K[0-9.]+' | head -n1 || echo "N/A")
+            echo "✓ Speedtest-cli installed: v$SPEEDTEST_VERSION"
+        else
+            echo "❌ Failed to download speedtest deb package"
+            rm -f speedtest.deb
+            print_error "Failed to install speedtest-cli"
+        fi
     else
-        print_warning "Could not fetch latest version, using fallback version..."
-        SPEEDTEST_DEB_URL="https://packagecloud.io/ookla/speedtest-cli/packages/debian/trixie/speedtest_1.2.0.84-1.ea6b6773cf_amd64.deb/download.deb?distro_version_id=221"
-    fi
-    
-    echo "Downloading speedtest-cli..."
-    wget -q --show-progress "$SPEEDTEST_DEB_URL" -O speedtest.deb
-    if [ -s speedtest.deb ]; then
-        echo "Installing speedtest-cli..."
-        dpkg -i speedtest.deb || apt-get install -f -y
-        rm -f speedtest.deb
-        SPEEDTEST_VERSION=$(speedtest --version 2>/dev/null | grep -oP 'Ookla \K[0-9.]+' | head -n1 || echo "N/A")
-        echo "✓ Speedtest-cli installed: v$SPEEDTEST_VERSION"
-    else
-        echo "❌ Failed to download speedtest deb package"
-        rm -f speedtest.deb
-        exit 1
+        print_error "Could not fetch latest version from repository. Skipping installation."
     fi
     else
         echo "⏭️  Skipping speedtest-cli installation"
@@ -825,9 +824,9 @@ else
         fi
     fi
     
-    backup_file /etc/security/limits.conf
-    # nofile: max open files, nproc: max processes
-    cat > /etc/security/limits.conf <<'EOF'
+    # Use drop-in file instead of overwriting limits.conf
+    mkdir -p /etc/security/limits.d
+    cat > /etc/security/limits.d/99-optimization.conf <<'EOF'
 * soft nofile unlimited
 * hard nofile unlimited
 * soft nproc unlimited
@@ -838,8 +837,9 @@ root soft nproc unlimited
 root hard nproc unlimited
 EOF
     
-    backup_file /etc/systemd/system.conf
-    cat > /etc/systemd/system.conf <<'EOF'
+    # Use drop-in file instead of overwriting system.conf
+    mkdir -p /etc/systemd/system.conf.d
+    cat > /etc/systemd/system.conf.d/99-optimization.conf <<'EOF'
 [Manager]
 DefaultCPUAccounting=yes
 DefaultIOAccounting=yes
@@ -850,13 +850,15 @@ DefaultLimitCORE=infinity
 DefaultLimitNPROC=infinity
 DefaultLimitNOFILE=infinity
 EOF
-    print_success "System limits configured (unlimited nofile and nproc)"
+    print_success "System limits configured (drop-in file created)"
     
     # === 2. Journald Configuration ===
     echo ""
     print_info "Configuring journald log limits..."
-    backup_file /etc/systemd/journald.conf
-    cat > /etc/systemd/journald.conf <<'EOF'
+    
+    # Use drop-in file instead of overwriting journald.conf
+    mkdir -p /etc/systemd/journald.conf.d
+    cat > /etc/systemd/journald.conf.d/99-optimization.conf <<'EOF'
 [Journal]
 SystemMaxUse=384M
 SystemMaxFileSize=128M
@@ -869,7 +871,7 @@ MaxFileSec=259200
 ForwardToSyslog=no
 EOF
     systemctl restart systemd-journald
-    print_success "Journald configured with size limits"
+    print_success "Journald configured with size limits (drop-in file created)"
     
     # === 3. Entropy and Random Number Generation ===
     echo ""
