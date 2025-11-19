@@ -381,10 +381,8 @@ echo "  • iftop        - Display bandwidth usage per connection"
 echo "  • vnstat       - Network traffic statistics daemon"
 echo "  • iotop        - Display I/O usage by processes"
 echo ""
-if [ "$AUTO_YES" = true ]; then
-    install_monitoring_lower="no"
-    echo "Auto-yes mode: Skipping optional monitoring tools installation"
-else
+install_monitoring_lower="no"
+if [ "$AUTO_YES" = false ]; then
     echo -e "${CYAN}${BOLD}>>> Do you want to install these monitoring tools? (y/yes, default: no):${RESET} "
     read install_monitoring
     install_monitoring_lower=$(echo "$install_monitoring" | tr '[:upper:]' '[:lower:]')
@@ -531,8 +529,8 @@ if [ "$DOCKER_ALREADY_INSTALLED" = true ]; then
     DOCKER_VERSION=$(docker --version 2>/dev/null | grep -oP 'Docker version \K[0-9.]+' || echo "N/A")
 else
     if [ "$AUTO_YES" = true ]; then
-        install_docker_lower="yes"
-        echo "Auto-yes mode: Installing Docker..."
+        install_docker_lower="no"
+        echo "Auto-yes mode: Skipping Docker installation"
     else
         echo -e "${CYAN}${BOLD}>>> Do you want to install Docker? (y/yes):${RESET} "
         read install_docker
