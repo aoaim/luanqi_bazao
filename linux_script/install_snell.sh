@@ -483,7 +483,8 @@ show_installed_menu() {
     echo "  2) Uninstall Snell"
     echo "  3) Modify Port"
     echo "  4) Modify Password (PSK)"
-    echo "  5) Restart Service"
+    echo "  5) Show Current Configuration"
+    echo "  6) Restart Service"
     echo "  0) Exit"
     echo "=========================================="
 }
@@ -537,7 +538,7 @@ if [ -n "$installed_version" ]; then
     while true; do
         show_installed_menu "$installed_version" "$latest_version"
         
-        read -p "Enter your choice [0-5]: " choice
+        read -p "Enter your choice [0-6]: " choice
         echo ""
         
         case "$choice" in
@@ -592,6 +593,24 @@ if [ -n "$installed_version" ]; then
                 read -p "Press Enter to continue..."
                 ;;
             5)
+                # 显示当前配置
+                echo "========================================="
+                echo "Current Snell Configuration"
+                echo "========================================="
+                echo ""
+                
+                if [ -f /etc/snell/snell-server.conf ]; then
+                    cat /etc/snell/snell-server.conf
+                    echo ""
+                    echo "========================================="
+                else
+                    echo "Error: Configuration file not found!"
+                fi
+                
+                echo ""
+                read -p "Press Enter to continue..."
+                ;;
+            6)
                 # 重启服务
                 echo "Restarting Snell service..."
                 systemctl restart snell.service
@@ -607,7 +626,7 @@ if [ -n "$installed_version" ]; then
                 exit 0
                 ;;
             *)
-                echo "Invalid choice. Please enter a number between 0 and 5."
+                echo "Invalid choice. Please enter a number between 0 and 6."
                 read -p "Press Enter to continue..."
                 ;;
         esac
