@@ -1170,6 +1170,42 @@ get_boot_disk() {
 
 print_banner "System Configuration Check"
 set +e
+
+# Fetch IP information
+echo "Fetching network information..."
+IPV4_ADDR=$(timeout 5 curl -s -4 ip.sb 2>/dev/null || echo "N/A")
+IPV6_ADDR=$(timeout 5 curl -s -6 ip.sb 2>/dev/null || echo "N/A")
+IPINFO=$(timeout 5 curl -s ipinfo.io 2>/dev/null || echo "")
+
+if [ -n "$IPINFO" ]; then
+    IP_CITY=$(echo "$IPINFO" | grep -oP '"city":\s*"\K[^"]+' || echo "N/A")
+    IP_REGION=$(echo "$IPINFO" | grep -oP '"region":\s*"\K[^"]+' || echo "N/A")
+    IP_COUNTRY=$(echo "$IPINFO" | grep -oP '"country":\s*"\K[^"]+' || echo "N/A")
+    IP_ORG=$(echo "$IPINFO" | grep -oP '"org":\s*"\K[^"]+' || echo "N/A")
+else
+    IP_CITY="N/A"
+    IP_REGION="N/A"
+    IP_COUNTRY="N/A"
+    IP_ORG="N/A"
+fi
+
+# Display network information
+printf "%-22s: %s\n" "IPv4 Address" "$IPV4_ADDR"
+if [ "$IPV6_ADDR" != "N/A" ]; then
+    printf "%-22s: %s\n" "IPv6 Address" "$IPV6_ADDR"
+fi
+if [ "$IP_CITY" != "N/A" ] || [ "$IP_COUNTRY" != "N/A" ]; then
+    if [ "$IP_CITY" = "$IP_REGION" ] || [ -z "$IP_REGION" ]; then
+        printf "%-22s: %s, %s\n" "Location" "$IP_CITY" "$IP_COUNTRY"
+    else
+        printf "%-22s: %s, %s, %s\n" "Location" "$IP_CITY" "$IP_REGION" "$IP_COUNTRY"
+    fi
+fi
+if [ "$IP_ORG" != "N/A" ]; then
+    printf "%-22s: %s\n" "ISP/Organization" "$IP_ORG"
+fi
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
 printf "%-22s: %s\n" "BBR Congestion Control" "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo 'N/A')"
 printf "%-22s: %s\n" "Queue Discipline" "$(sysctl -n net.core.default_qdisc 2>/dev/null || echo 'N/A')"
 printf "%-22s: %s\n" "Open File Limit" "$(ulimit -n 2>/dev/null || echo 'N/A')"
