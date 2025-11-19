@@ -53,12 +53,119 @@ print_info() {
     echo -e "${CYAN}ℹ️  $1${RESET}"
 }
 
+# Validate yes/no input (accepts yes/y/no/n, case insensitive)
+validate_yes_no() {
+    local input="$1"
+    local input_lower=$(echo "$input" | tr '[:upper:]' '[:lower:]')
+    if [ "$input_lower" = "yes" ] || [ "$input_lower" = "y" ] || [ "$input_lower" = "no" ] || [ "$input_lower" = "n" ]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 error_exit() {
     print_banner "Error occurred at line $1"
     print_error "Script execution failed. Please check the error message above."
     exit 1
 }
+
+cleanup_and_exit() {
+    echo ""
+    echo ""
+    print_banner "⚠️  Script Interrupted"
+    print_warning "Script execution was interrupted by user (Ctrl+C)"
+    echo ""
+    echo -e "${CYAN}${BOLD}Changes made so far:${RESET}"
+    echo ""
+    
+    # Check what has been done
+    local changes_made=false
+    
+    # Check if system packages were updated
+    if [ -f "/var/lib/apt/periodic/update-success-stamp" ]; then
+        local apt_timestamp=$(stat -c %Y /var/lib/apt/periodic/update-success-stamp 2>/dev/null || echo "0")
+        local script_start=$(($(date +%s) - 600)) # Assume script started within last 10 minutes
+        if [ "$apt_timestamp" -gt "$script_start" ]; then
+            echo "  ✓ System packages updated"
+            changes_made=true
+        fi
+    fi
+    
+    # Check installed programs
+    if command -v speedtest &>/dev/null && [ "$SPEEDTEST_ALREADY_INSTALLED" = false ]; then
+        echo "  ✓ Speedtest-cli installed"
+        changes_made=true
+    fi
+    
+    if command -v docker &>/dev/null && [ "$DOCKER_ALREADY_INSTALLED" = false ]; then
+        echo "  ✓ Docker installed"
+        changes_made=true
+    fi
+    
+    if command -v hx &>/dev/null && [ "$HELIX_ALREADY_INSTALLED" = false ]; then
+        echo "  ✓ Helix editor installed"
+        changes_made=true
+    fi
+    
+    if command -v eza &>/dev/null && [ "$EZA_ALREADY_INSTALLED" = false ]; then
+        echo "  ✓ Eza installed"
+        changes_made=true
+    fi
+    
+    # Check if unattended-upgrades was installed
+    if command -v unattended-upgrade &>/dev/null; then
+        echo "  ✓ Unattended-upgrades configured"
+        changes_made=true
+    fi
+    
+    # Check if chrony config was modified
+    if [ -f "$BACKUP_DIR/chrony.conf."* ] 2>/dev/null; then
+        echo "  ✓ Time synchronization configured (chrony)"
+        changes_made=true
+    fi
+    
+    # Check if kernel optimization marker exists
+    if [ -f "$KERNEL_OPT_MARKER" ]; then
+        echo "  ✓ Network & kernel optimization applied"
+        changes_made=true
+    fi
+    
+    # Check if BBR is enabled
+    if [ "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)" = "bbr" ]; then
+        echo "  ✓ BBR congestion control enabled"
+        changes_made=true
+    fi
+    
+    # Check if fail2ban is active
+    if systemctl is-active fail2ban &>/dev/null; then
+        echo "  ✓ Fail2ban service enabled"
+        changes_made=true
+    fi
+    
+    if [ "$changes_made" = false ]; then
+        echo "  ℹ️  No significant changes were made"
+    fi
+    
+    echo ""
+    if [ -d "$BACKUP_DIR" ] && [ "$(ls -A "$BACKUP_DIR" 2>/dev/null)" ]; then
+        print_info "Configuration backups saved to: $BACKUP_DIR"
+    fi
+    
+    echo ""
+    print_warning "The script did not complete. You can:"
+    echo "  1. Run the script again to continue/complete the setup"
+    echo "  2. Check system status manually"
+    if [ "$changes_made" = true ]; then
+        echo "  3. Some changes may require a system reboot to take effect"
+    fi
+    echo ""
+    
+    exit 130
+}
+
 trap 'error_exit $LINENO' ERR
+trap 'cleanup_and_exit' SIGINT SIGTERM
 
 clear
 echo ""
@@ -73,7 +180,7 @@ EOF
 echo -e "${RESET}"
 print_banner "Debian 13 Server Initialization Script 🚀"
 echo "🔧 This script will help you set up a fresh Debian 13 server"
-echo "🤖 Crafted by Claude Sonnet 4.5"
+echo "🤖 Crafted by Claude Sonnet 4.5 & Gemini 3 Pro"
 
 if [ "$(id -u)" != "0" ]; then
     print_error "Error: You must be root to run this script"
@@ -122,10 +229,20 @@ if [ "$AUTO_YES" = false ]; then
     echo ""
     echo -e "${CYAN}${BOLD}⚠️  Note: A system reboot will be required after completion${RESET}"
     echo ""
-    echo -e "${CYAN}${BOLD}>>> Do you want to enable auto-yes mode? (yes/no, default: no):${RESET} "
-    read enable_auto_yes
+    while true; do
+        echo -e "${CYAN}${BOLD}>>> Do you want to enable auto-yes mode? (yes/no, default: no):${RESET} "
+        read enable_auto_yes
+        if [ -z "$enable_auto_yes" ]; then
+            enable_auto_yes="no"
+        fi
+        if validate_yes_no "$enable_auto_yes"; then
+            break
+        else
+            print_error "Invalid input. Please enter 'yes', 'y', 'no', or 'n'"
+        fi
+    done
     enable_auto_yes_lower=$(echo "$enable_auto_yes" | tr '[:upper:]' '[:lower:]')
-    if [ "$enable_auto_yes_lower" = "yes" ]; then
+    if [ "$enable_auto_yes_lower" = "yes" ] || [ "$enable_auto_yes_lower" = "y" ]; then
         AUTO_YES=true
         echo ""
         print_success "Auto-yes mode enabled - all commands will be executed automatically"
@@ -344,17 +461,26 @@ fi
 if [ -f "$MARKER_FILE" ]; then
     print_banner "Warning"
     print_warning "This script has already been run on: $(cat "$MARKER_FILE")"
+    # Even in AUTO_YES mode, we want to confirm reconfiguration
     if [ "$AUTO_YES" = true ]; then
-        echo "Auto-yes mode: Continuing with reconfiguration..."
-    else
+        print_warning "Auto-yes mode detected, but reconfiguration requires manual confirmation."
+    fi
+
+    while true; do
         echo -e "${CYAN}${BOLD}>>> Do you want to continue anyway? This may overwrite existing configurations. (yes/no):${RESET} "
         read continue_run
-        if [ "$continue_run" != "yes" ]; then
-            echo "Exiting..."
-            exit 0
+        if validate_yes_no "$continue_run"; then
+            break
+        else
+            print_error "Invalid input. Please enter 'yes', 'y', 'no', or 'n'"
         fi
-        echo "Continuing with reconfiguration..."
+    done
+    continue_run_lower=$(echo "$continue_run" | tr '[:upper:]' '[:lower:]')
+    if [ "$continue_run_lower" != "yes" ] && [ "$continue_run_lower" != "y" ]; then
+        echo "Exiting..."
+        exit 0
     fi
+    echo "Continuing with reconfiguration..."
 fi
 
 backup_file() {
@@ -370,21 +496,82 @@ backup_file() {
 }
 
 print_banner "Updating system and installing essential packages..."
+
+# Check if dpkg is interrupted or needs configuration
+if ! dpkg --audit >/dev/null 2>&1 || dpkg --audit 2>&1 | grep -q "dpkg was interrupted" || ! apt-get check >/dev/null 2>&1; then
+    print_warning "Package system needs repair. Need to fix package configuration first."
+    echo ""
+    
+    if [ "$AUTO_YES" = true ]; then
+        print_info "Auto-yes mode: Automatically fixing package system..."
+        dpkg --configure -a
+        if ! apt-get install --fix-broken -y 2>&1 | tee /tmp/apt_fix.log; then
+            if grep -q "needs to be reinstalled, but I can't find an archive for it" /tmp/apt_fix.log; then
+                broken_pkg=$(grep "The package .* needs to be reinstalled" /tmp/apt_fix.log | head -n1 | awk '{print $4}')
+                if [ -n "$broken_pkg" ]; then
+                    print_warning "Detected broken package causing repair failure: $broken_pkg"
+                    print_info "Force removing $broken_pkg to proceed..."
+                    dpkg --remove --force-remove-reinstreq "$broken_pkg"
+                    print_info "Retrying package system repair..."
+                    apt-get install --fix-broken -y
+                fi
+            fi
+        fi
+        print_success "Package system repair attempted"
+    else
+        while true; do
+            echo -e "${CYAN}${BOLD}>>> Do you want to run repair commands (dpkg --configure -a) to fix this? (yes/y):${RESET} "
+            read fix_dpkg
+            if [ -z "$fix_dpkg" ]; then
+                fix_dpkg="yes"
+            fi
+            if validate_yes_no "$fix_dpkg"; then
+                break
+            else
+                print_error "Invalid input. Please enter 'yes', 'y', 'no', or 'n'"
+            fi
+        done
+        
+        fix_dpkg_lower=$(echo "$fix_dpkg" | tr '[:upper:]' '[:lower:]')
+        if [ "$fix_dpkg_lower" = "yes" ] || [ "$fix_dpkg_lower" = "y" ]; then
+            echo "Running repair commands..."
+            dpkg --configure -a
+            apt-get install --fix-broken -y
+            print_success "Package system repair attempted"
+        else
+            print_warning "Skipping repair. Subsequent apt commands may fail."
+        fi
+    fi
+    echo ""
+fi
+
 apt update && apt upgrade -y && apt autoremove -y
 apt install -y openssl gnupg curl wget nano htop cron chrony fail2ban unzip logrotate
 
 print_banner "Network & System Monitoring Tools (Optional)"
-print_info "These tools help monitor network traffic and system I/O:"
-echo "  • dnsutils     - DNS query tools (dig, nslookup, host)"
-echo "  • nload        - Real-time network traffic monitor"
-echo "  • iftop        - Display bandwidth usage per connection"
-echo "  • vnstat       - Network traffic statistics daemon"
-echo "  • iotop        - Display I/O usage by processes"
-echo ""
-install_monitoring_lower="no"
-if [ "$AUTO_YES" = false ]; then
-    echo -e "${CYAN}${BOLD}>>> Do you want to install these monitoring tools? (y/yes, default: no):${RESET} "
-    read install_monitoring
+if [ "$AUTO_YES" = true ]; then
+    install_monitoring_lower="no"
+    print_info "Auto-yes mode: Skipping monitoring tools installation"
+else
+    print_info "These tools help monitor network traffic and system I/O:"
+    echo "  • dnsutils     - DNS query tools (dig, nslookup, host)"
+    echo "  • nload        - Real-time network traffic monitor"
+    echo "  • iftop        - Display bandwidth usage per connection"
+    echo "  • vnstat       - Network traffic statistics daemon"
+    echo "  • iotop        - Display I/O usage by processes"
+    echo ""
+    while true; do
+        echo -e "${CYAN}${BOLD}>>> Do you want to install these monitoring tools? (y/yes, default: no):${RESET} "
+        read install_monitoring
+        if [ -z "$install_monitoring" ]; then
+            install_monitoring="no"
+        fi
+        if validate_yes_no "$install_monitoring"; then
+            break
+        else
+            print_error "Invalid input. Please enter 'yes', 'y', 'no', or 'n'"
+        fi
+    done
     install_monitoring_lower=$(echo "$install_monitoring" | tr '[:upper:]' '[:lower:]')
 fi
 if [ "$install_monitoring_lower" = "y" ] || [ "$install_monitoring_lower" = "yes" ]; then
@@ -410,8 +597,18 @@ if [ "$AUTO_YES" = true ]; then
     install_unattended_lower="yes"
     echo "Auto-yes mode: Installing unattended-upgrades..."
 else
-    echo -e "${CYAN}${BOLD}>>> Do you want to install and enable unattended-upgrades? (y/yes):${RESET} "
-    read install_unattended
+    while true; do
+        echo -e "${CYAN}${BOLD}>>> Do you want to install and enable unattended-upgrades? (y/yes, default: no):${RESET} "
+        read install_unattended
+        if [ -z "$install_unattended" ]; then
+            install_unattended="no"
+        fi
+        if validate_yes_no "$install_unattended"; then
+            break
+        else
+            print_error "Invalid input. Please enter 'yes', 'y', 'no', or 'n'"
+        fi
+    done
     install_unattended_lower=$(echo "$install_unattended" | tr '[:upper:]' '[:lower:]')
 fi
 if [ "$install_unattended_lower" = "y" ] || [ "$install_unattended_lower" = "yes" ]; then
@@ -441,8 +638,18 @@ if [ "$install_unattended_lower" = "y" ] || [ "$install_unattended_lower" = "yes
             enable_more_updates_lower="no"
             echo "Auto-yes mode: Keeping default configuration (security updates only)"
         else
-            echo -e "${CYAN}${BOLD}>>> Do you want to enable updates beyond security? (y/yes, default: no):${RESET} "
-            read enable_more_updates
+            while true; do
+                echo -e "${CYAN}${BOLD}>>> Do you want to enable updates beyond security? (y/yes, default: no):${RESET} "
+                read enable_more_updates
+                if [ -z "$enable_more_updates" ]; then
+                    enable_more_updates="no"
+                fi
+                if validate_yes_no "$enable_more_updates"; then
+                    break
+                else
+                    print_error "Invalid input. Please enter 'yes', 'y', 'no', or 'n'"
+                fi
+            done
             enable_more_updates_lower=$(echo "$enable_more_updates" | tr '[:upper:]' '[:lower:]')
         fi
         
@@ -477,8 +684,18 @@ else
         install_speedtest_lower="yes"
         echo "Auto-yes mode: Installing speedtest-cli..."
     else
-        echo -e "${CYAN}${BOLD}>>> Do you want to install speedtest-cli? (y/yes):${RESET} "
-        read install_speedtest
+        while true; do
+            echo -e "${CYAN}${BOLD}>>> Do you want to install speedtest-cli? (y/yes, default: no):${RESET} "
+            read install_speedtest
+            if [ -z "$install_speedtest" ]; then
+                install_speedtest="no"
+            fi
+            if validate_yes_no "$install_speedtest"; then
+                break
+            else
+                print_error "Invalid input. Please enter 'yes', 'y', 'no', or 'n'"
+            fi
+        done
         install_speedtest_lower=$(echo "$install_speedtest" | tr '[:upper:]' '[:lower:]')
     fi
     SPEEDTEST_VERSION="N/A"
@@ -531,8 +748,18 @@ else
         install_docker_lower="no"
         echo "Auto-yes mode: Skipping Docker installation"
     else
-        echo -e "${CYAN}${BOLD}>>> Do you want to install Docker? (y/yes):${RESET} "
-        read install_docker
+        while true; do
+            echo -e "${CYAN}${BOLD}>>> Do you want to install Docker? (y/yes, default: no):${RESET} "
+            read install_docker
+            if [ -z "$install_docker" ]; then
+                install_docker="no"
+            fi
+            if validate_yes_no "$install_docker"; then
+                break
+            else
+                print_error "Invalid input. Please enter 'yes', 'y', 'no', or 'n'"
+            fi
+        done
         install_docker_lower=$(echo "$install_docker" | tr '[:upper:]' '[:lower:]')
     fi
     DOCKER_VERSION="N/A"
@@ -547,8 +774,18 @@ else
             install_watchtower_lower="yes"
             echo "Auto-yes mode: Enabling Watchtower..."
         else
-            echo -e "${CYAN}${BOLD}>>> Do you want to enable Watchtower (auto-update Docker containers)? (y/yes):${RESET} "
-            read install_watchtower
+            while true; do
+                echo -e "${CYAN}${BOLD}>>> Do you want to enable Watchtower (auto-update Docker containers)? (y/yes, default: no):${RESET} "
+                read install_watchtower
+                if [ -z "$install_watchtower" ]; then
+                    install_watchtower="no"
+                fi
+                if validate_yes_no "$install_watchtower"; then
+                    break
+                else
+                    print_error "Invalid input. Please enter 'yes', 'y', 'no', or 'n'"
+                fi
+            done
             install_watchtower_lower=$(echo "$install_watchtower" | tr '[:upper:]' '[:lower:]')
         fi
         if [ "$install_watchtower_lower" = "y" ] || [ "$install_watchtower_lower" = "yes" ]; then
@@ -578,8 +815,18 @@ else
         install_helix_lower="yes"
         echo "Auto-yes mode: Installing Helix editor..."
     else
-        echo -e "${CYAN}${BOLD}>>> Do you want to install Helix editor? (y/yes):${RESET} "
-        read install_helix
+        while true; do
+            echo -e "${CYAN}${BOLD}>>> Do you want to install Helix editor? (y/yes, default: no):${RESET} "
+            read install_helix
+            if [ -z "$install_helix" ]; then
+                install_helix="no"
+            fi
+            if validate_yes_no "$install_helix"; then
+                break
+            else
+                print_error "Invalid input. Please enter 'yes', 'y', 'no', or 'n'"
+            fi
+        done
         install_helix_lower=$(echo "$install_helix" | tr '[:upper:]' '[:lower:]')
     fi
     HELIX_INSTALLED=false
@@ -638,8 +885,18 @@ else
         install_eza_lower="yes"
         echo "Auto-yes mode: Installing eza..."
     else
-        echo -e "${CYAN}${BOLD}>>> Do you want to install eza (modern ls replacement)? (y/yes):${RESET} "
-        read install_eza
+        while true; do
+            echo -e "${CYAN}${BOLD}>>> Do you want to install eza (modern ls replacement)? (y/yes, default: no):${RESET} "
+            read install_eza
+            if [ -z "$install_eza" ]; then
+                install_eza="no"
+            fi
+            if validate_yes_no "$install_eza"; then
+                break
+            else
+                print_error "Invalid input. Please enter 'yes', 'y', 'no', or 'n'"
+            fi
+        done
         install_eza_lower=$(echo "$install_eza" | tr '[:upper:]' '[:lower:]')
     fi
     EZA_INSTALLED=false
@@ -702,12 +959,44 @@ EOF
 fi
 
 print_banner "Configuring time synchronization..."
+
+# Determine NTP server region based on location
+NTP_REGION_PREFIX="" # Default to global pool (0.pool.ntp.org)
+print_info "Detecting server location for optimal NTP servers..."
+
+# Try to fetch timezone from ipinfo.io
+DETECTED_TZ=$(curl -s --max-time 5 ipinfo.io/timezone || echo "")
+
+# If network fetch fails, try system timezone
+if [ -z "$DETECTED_TZ" ]; then
+    DETECTED_TZ=$(timedatectl show --property=Timezone --value 2>/dev/null || echo "")
+fi
+
+if [ -n "$DETECTED_TZ" ]; then
+    case "$DETECTED_TZ" in
+        Asia/*)      NTP_REGION_PREFIX="asia." ;;
+        Europe/*)    NTP_REGION_PREFIX="europe." ;;
+        Africa/*)    NTP_REGION_PREFIX="africa." ;;
+        Australia/*|Pacific/*) NTP_REGION_PREFIX="oceania." ;;
+        America/*)
+            # Rough heuristic for South America
+            if [[ "$DETECTED_TZ" =~ (Argentina|Brazil|Chile|Colombia|Peru|Venezuela|Sao_Paulo|Buenos_Aires|Santiago|Bogota|Lima|Caracas) ]]; then
+                NTP_REGION_PREFIX="south-america."
+            else
+                NTP_REGION_PREFIX="north-america."
+            fi
+            ;;
+    esac
+fi
+
+print_success "Selected NTP servers: 0.${NTP_REGION_PREFIX}pool.ntp.org (Detected: ${DETECTED_TZ:-Unknown})"
+
 backup_file /etc/chrony/chrony.conf
 cat > /etc/chrony/chrony.conf <<EOF
-server 0.asia.pool.ntp.org iburst
-server 1.asia.pool.ntp.org iburst
-server 2.asia.pool.ntp.org iburst
-server 3.asia.pool.ntp.org iburst
+server 0.${NTP_REGION_PREFIX}pool.ntp.org iburst
+server 1.${NTP_REGION_PREFIX}pool.ntp.org iburst
+server 2.${NTP_REGION_PREFIX}pool.ntp.org iburst
+server 3.${NTP_REGION_PREFIX}pool.ntp.org iburst
 driftfile /var/lib/chrony/chrony.drift
 makestep 1.0 3
 rtcsync
@@ -736,8 +1025,18 @@ if [ "$CURRENT_TIMEZONE" != "Asia/Singapore" ]; then
         change_timezone_lower="no"
         echo "Auto-yes mode: Skipping timezone change (keeping current timezone: $CURRENT_TIMEZONE)"
     else
-        echo -e "${CYAN}${BOLD}>>> Do you want to change timezone to Asia/Singapore? (y/yes, default: no):${RESET} "
-        read change_timezone
+        while true; do
+            echo -e "${CYAN}${BOLD}>>> Do you want to change timezone to Asia/Singapore? (y/yes, default: no):${RESET} "
+            read change_timezone
+            if [ -z "$change_timezone" ]; then
+                change_timezone="no"
+            fi
+            if validate_yes_no "$change_timezone"; then
+                break
+            else
+                print_error "Invalid input. Please enter 'yes', 'y', 'no', or 'n'"
+            fi
+        done
         change_timezone_lower=$(echo "$change_timezone" | tr '[:upper:]' '[:lower:]')
     fi
     if [ "$change_timezone_lower" = "y" ] || [ "$change_timezone_lower" = "yes" ]; then
@@ -801,8 +1100,18 @@ else
         optimize_system_lower="no"
         echo "Auto-yes mode: Skipping aggressive network & kernel optimization (BBR will be enabled separately)"
     else
-        echo -e "${YELLOW}${BOLD}>>> Do you want to apply these system optimizations? (y/yes):${RESET} "
-        read optimize_system
+        while true; do
+            echo -e "${YELLOW}${BOLD}>>> Do you want to apply these system optimizations? (y/yes, default: no):${RESET} "
+            read optimize_system
+            if [ -z "$optimize_system" ]; then
+                optimize_system="no"
+            fi
+            if validate_yes_no "$optimize_system"; then
+                break
+            else
+                print_error "Invalid input. Please enter 'yes', 'y', 'no', or 'n'"
+            fi
+        done
         optimize_system_lower=$(echo "$optimize_system" | tr '[:upper:]' '[:lower:]')
     fi
     if [ "$optimize_system_lower" = "y" ] || [ "$optimize_system_lower" = "yes" ]; then
@@ -1080,13 +1389,19 @@ EOF
                 enable_bbr_lower="yes"
                 echo "Auto-yes mode: Enabling BBR..."
             else
-                echo -e "${CYAN}${BOLD}>>> Do you want to enable BBR? (y/yes, default: yes):${RESET} "
-                read enable_bbr
+                while true; do
+                    echo -e "${CYAN}${BOLD}>>> Do you want to enable BBR? (y/yes, default: yes):${RESET} "
+                    read enable_bbr
+                    if [ -z "$enable_bbr" ]; then
+                        enable_bbr="yes"
+                    fi
+                    if validate_yes_no "$enable_bbr"; then
+                        break
+                    else
+                        print_error "Invalid input. Please enter 'yes', 'y', 'no', or 'n'"
+                    fi
+                done
                 enable_bbr_lower=$(echo "$enable_bbr" | tr '[:upper:]' '[:lower:]')
-                # Default to yes if empty
-                if [ -z "$enable_bbr_lower" ]; then
-                    enable_bbr_lower="yes"
-                fi
             fi
             
             if [ "$enable_bbr_lower" = "y" ] || [ "$enable_bbr_lower" = "yes" ]; then
@@ -1211,6 +1526,7 @@ printf "%-22s: %s\n" "Queue Discipline" "$(sysctl -n net.core.default_qdisc 2>/d
 printf "%-22s: %s\n" "Open File Limit" "$(ulimit -n 2>/dev/null || echo 'N/A')"
 printf "%-22s: %s\n" "Process Limit" "$(ulimit -u 2>/dev/null || echo 'N/A')"
 printf "%-22s: %s\n" "Time Sync Status" "$(chronyc tracking 2>/dev/null | grep 'Leap status' | cut -d':' -f2 | xargs 2>/dev/null || echo 'Checking...')"
+printf "%-22s: %s\n" "NTP Server" "$(grep '^server' /etc/chrony/chrony.conf 2>/dev/null | head -n 1 | awk '{print $2}' || echo 'Unknown')"
 printf "%-22s: %s\n" "Current Timezone" "$(timedatectl show --property=Timezone --value 2>/dev/null || echo 'N/A')"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 printf "%-22s: %s\n" "CPU Model Name" "$(lscpu 2>/dev/null | grep 'Model name' | cut -d':' -f2 | xargs || echo 'Unknown')"
@@ -1260,30 +1576,40 @@ if command -v unattended-upgrade &>/dev/null; then
     fi
     
     if [ -n "$config_file" ]; then
-        if grep -q "Debian-Security" "$config_file" 2>/dev/null; then
-            update_sources="Security"
-        fi
-        
-        if grep -qE '^\s*"origin=Debian,codename=\$\{distro_codename\}-updates"' "$config_file" 2>/dev/null; then
-            if [ -n "$update_sources" ]; then
-                update_sources="$update_sources, Stable-updates"
-            else
-                update_sources="Stable-updates"
-            fi
-        fi
-        
-        if grep -qE '^\s*"origin=Debian,codename=\$\{distro_codename\}-proposed-updates"' "$config_file" 2>/dev/null; then
-            if [ -n "$update_sources" ]; then
-                update_sources="$update_sources, Proposed-updates"
-            else
-                update_sources="Proposed-updates"
-            fi
-        fi
-        
-        if [ -n "$update_sources" ]; then
-            printf "    └─ Enabled: %s\n" "$update_sources"
+        enabled_list=""
+        disabled_list=""
+
+        # Check Security
+        # Match line starting with whitespace and quote, followed by origin definition
+        # We don't include the closing quote in regex to handle optional labels like ",label=Debian-Security"
+        if grep -qE '^\s*"origin=Debian,codename=\$\{distro_codename\}-security' "$config_file" 2>/dev/null; then
+            enabled_list="Security"
         else
-            printf "    └─ Enabled: %s\n" "Unknown"
+            disabled_list="Security"
+        fi
+        
+        # Check Stable-updates
+        if grep -qE '^\s*"origin=Debian,codename=\$\{distro_codename\}-updates' "$config_file" 2>/dev/null; then
+            if [ -n "$enabled_list" ]; then enabled_list="$enabled_list, Stable-updates"; else enabled_list="Stable-updates"; fi
+        else
+            if [ -n "$disabled_list" ]; then disabled_list="$disabled_list, Stable-updates"; else disabled_list="Stable-updates"; fi
+        fi
+        
+        # Check Proposed-updates
+        if grep -qE '^\s*"origin=Debian,codename=\$\{distro_codename\}-proposed-updates' "$config_file" 2>/dev/null; then
+            if [ -n "$enabled_list" ]; then enabled_list="$enabled_list, Proposed-updates"; else enabled_list="Proposed-updates"; fi
+        else
+            if [ -n "$disabled_list" ]; then disabled_list="$disabled_list, Proposed-updates"; else disabled_list="Proposed-updates"; fi
+        fi
+        
+        if [ -n "$enabled_list" ]; then
+            printf "    └─ Enabled : %s\n" "$enabled_list"
+        else
+            printf "    └─ Enabled : None\n"
+        fi
+        
+        if [ -n "$disabled_list" ]; then
+            printf "    └─ Disabled: %s\n" "$disabled_list"
         fi
     fi
 else
@@ -1323,8 +1649,18 @@ if [ "$AUTO_YES" = true ]; then
     print_info "Please manually reboot when ready with:"
     echo -e "   ${BOLD}reboot${RESET}"
 else
-    echo -e "${MAGENTA}${BOLD}>>> Would you like to reboot now? (y/yes, default: no):${RESET} "
-    read reboot_now
+    while true; do
+        echo -e "${MAGENTA}${BOLD}>>> Would you like to reboot now? (y/yes, default: no):${RESET} "
+        read reboot_now
+        if [ -z "$reboot_now" ]; then
+            reboot_now="no"
+        fi
+        if validate_yes_no "$reboot_now"; then
+            break
+        else
+            print_error "Invalid input. Please enter 'yes', 'y', 'no', or 'n'"
+        fi
+    done
     reboot_now_lower=$(echo "$reboot_now" | tr '[:upper:]' '[:lower:]')
     if [ "$reboot_now_lower" = "y" ] || [ "$reboot_now_lower" = "yes" ]; then
         echo ""
