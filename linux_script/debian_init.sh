@@ -10,9 +10,33 @@ set -o pipefail
 
 # Auto-yes mode (skip confirmations)
 AUTO_YES=false
+AGGRESSIVE_MODE=false
+MINIMAL_MODE=false
+INSTALL_EZA=""
+INSTALL_HELIX=""
+INSTALL_DOCKER=""
+INSTALL_SPEEDTEST=""
+INSTALL_BBR=""
+ENABLE_AUTO_UPDATE=""
+AUTO_UPDATE_LEVEL=""
+
 if [[ "${1:-}" == "--yes" ]] || [[ "${1:-}" == "-y" ]]; then
     AUTO_YES=true
     echo "🚀 Running in auto-yes mode - all commands will be executed automatically"
+elif [[ "${1:-}" == "--aggressive" ]] || [[ "${1:-}" == "-a" ]]; then
+    AUTO_YES=true
+    AGGRESSIVE_MODE=true
+    echo "🔥 Running in AGGRESSIVE mode - all operations including advanced optimizations will be executed"
+elif [[ "${1:-}" == "--minimal" ]] || [[ "${1:-}" == "-m" ]]; then
+    AUTO_YES=true
+    MINIMAL_MODE=true
+    INSTALL_EZA="yes"
+    INSTALL_HELIX="yes"
+    INSTALL_DOCKER="yes"
+    INSTALL_SPEEDTEST="no"
+    INSTALL_BBR="yes"
+    ENABLE_AUTO_UPDATE="no"
+    echo "📦 Running in MINIMAL mode - installing only eza, helix, docker and enabling BBR"
 fi
 
 MARKER_FILE="/var/lib/init_linux_run.marker"
@@ -65,7 +89,7 @@ validate_yes_no() {
 }
 
 error_exit() {
-    print_banner "Error occurred at line $1"
+    print_banner "❌ Error occurred at line $1"
     print_error "Script execution failed. Please check the error message above."
     exit 1
 }
@@ -181,6 +205,17 @@ echo -e "${RESET}"
 print_banner "Debian 13 Server Initialization Script 🚀"
 echo "🔧 This script will help you set up a fresh Debian 13 server"
 echo "🤖 Crafted by Claude Sonnet 4.5 & Gemini 3 Pro"
+echo "   and maintained by aoaim! 👨‍💻"
+echo ""
+echo "Usage:"
+echo "  sudo bash $0           # Interactive mode"
+echo "  sudo bash $0 --minimal # Minimal mode (eza, helix, docker only)"
+echo "  sudo bash $0 -m        # Minimal mode (short form)"
+echo "  sudo bash $0 --yes     # Auto-yes mode (safe defaults)"
+echo "  sudo bash $0 -y        # Auto-yes mode (short form)"
+echo "  sudo bash $0 --aggressive  # Aggressive mode (all optimizations)"
+echo "  sudo bash $0 -a        # Aggressive mode (short form)"
+sleep 3
 
 if [ "$(id -u)" != "0" ]; then
     print_error "Error: You must be root to run this script"
@@ -188,14 +223,139 @@ if [ "$(id -u)" != "0" ]; then
     exit 1
 fi
 
-# Interactive auto-yes mode prompt (if not already set via command line)
+# Interactive mode prompts (if not already set via command line)
 if [ "$AUTO_YES" = false ]; then
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo -e "${GREEN}${BOLD}🚀 Auto-Yes Mode${RESET}"
+    echo -e "${CYAN}${BOLD}📦 Minimal Mode${RESET}"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
-    echo -e "${YELLOW}Enabling auto-yes mode will automatically execute the following operations:${RESET}"
+    echo -e "${YELLOW}Minimal mode allows you to choose which essential tools to install:${RESET}"
+    echo ""
+    echo "  • Eza (Modern ls replacement)"
+    echo "  • Helix Editor (Modern modal text editor)"
+    echo "  • Docker & Docker Compose"
+    echo "  • Speedtest CLI"
+    echo "  • BBR Congestion Control"
+    echo "  • Automatic Updates"
+    echo ""
+    echo -e "${GREEN}Perfect for: Customizing your setup with only what you need${RESET}"
+    echo ""
+    while true; do
+        echo -e "${CYAN}${BOLD}>>> Do you want to use minimal mode? (yes/no, default: no):${RESET} "
+        read enable_minimal
+        if [ -z "$enable_minimal" ]; then
+            enable_minimal="no"
+        fi
+        if validate_yes_no "$enable_minimal"; then
+            break
+        else
+            print_error "Invalid input. Please enter 'yes', 'y', 'no', or 'n'"
+        fi
+    done
+    enable_minimal_lower=$(echo "$enable_minimal" | tr '[:upper:]' '[:lower:]')
+    if [ "$enable_minimal_lower" = "yes" ] || [ "$enable_minimal_lower" = "y" ]; then
+        AUTO_YES=true
+        MINIMAL_MODE=true
+        
+        # Ask for components
+        echo ""
+        echo -e "${CYAN}${BOLD}--- Component Selection ---${RESET}"
+        
+        # Eza
+        while true; do
+            echo -e "${CYAN}>>> Install Eza? (yes/no, default: yes):${RESET} "
+            read install_eza_choice
+            if [ -z "$install_eza_choice" ]; then install_eza_choice="yes"; fi
+            if validate_yes_no "$install_eza_choice"; then break; fi
+        done
+        INSTALL_EZA=$(echo "$install_eza_choice" | tr '[:upper:]' '[:lower:]')
+        
+        # Helix
+        while true; do
+            echo -e "${CYAN}>>> Install Helix? (yes/no, default: yes):${RESET} "
+            read install_helix_choice
+            if [ -z "$install_helix_choice" ]; then install_helix_choice="yes"; fi
+            if validate_yes_no "$install_helix_choice"; then break; fi
+        done
+        INSTALL_HELIX=$(echo "$install_helix_choice" | tr '[:upper:]' '[:lower:]')
+        
+        # Docker
+        while true; do
+            echo -e "${CYAN}>>> Install Docker? (yes/no, default: yes):${RESET} "
+            read install_docker_choice
+            if [ -z "$install_docker_choice" ]; then install_docker_choice="yes"; fi
+            if validate_yes_no "$install_docker_choice"; then break; fi
+        done
+        INSTALL_DOCKER=$(echo "$install_docker_choice" | tr '[:upper:]' '[:lower:]')
+        
+        # Speedtest
+        while true; do
+            echo -e "${CYAN}>>> Install Speedtest? (yes/no, default: yes):${RESET} "
+            read install_speedtest_choice
+            if [ -z "$install_speedtest_choice" ]; then install_speedtest_choice="yes"; fi
+            if validate_yes_no "$install_speedtest_choice"; then break; fi
+        done
+        INSTALL_SPEEDTEST=$(echo "$install_speedtest_choice" | tr '[:upper:]' '[:lower:]')
+        
+        # BBR
+        while true; do
+            echo -e "${CYAN}>>> Enable BBR Congestion Control? (yes/no, default: yes):${RESET} "
+            read install_bbr_choice
+            if [ -z "$install_bbr_choice" ]; then install_bbr_choice="yes"; fi
+            if validate_yes_no "$install_bbr_choice"; then break; fi
+        done
+        INSTALL_BBR=$(echo "$install_bbr_choice" | tr '[:upper:]' '[:lower:]')
+        
+        # Auto Updates
+        while true; do
+            echo -e "${CYAN}>>> Enable Automatic Updates? (yes/no, default: yes):${RESET} "
+            read enable_auto_update_choice
+            if [ -z "$enable_auto_update_choice" ]; then enable_auto_update_choice="yes"; fi
+            if validate_yes_no "$enable_auto_update_choice"; then break; fi
+        done
+        ENABLE_AUTO_UPDATE=$(echo "$enable_auto_update_choice" | tr '[:upper:]' '[:lower:]')
+        
+        AUTO_UPDATE_LEVEL="none"
+        if [ "$ENABLE_AUTO_UPDATE" = "yes" ] || [ "$ENABLE_AUTO_UPDATE" = "y" ]; then
+            echo -e "${CYAN}>>> Auto Update Level:${RESET}"
+            echo "  1) Security updates only (Recommended)"
+            echo "  2) Full updates (Security + Stable)"
+            while true; do
+                echo -e "${CYAN}>>> Select level (1/2, default: 1):${RESET} "
+                read update_level_choice
+                if [ -z "$update_level_choice" ]; then update_level_choice="1"; fi
+                if [ "$update_level_choice" = "1" ] || [ "$update_level_choice" = "2" ]; then
+                    break
+                else
+                    print_error "Invalid input. Please enter '1' or '2'"
+                fi
+            done
+            AUTO_UPDATE_LEVEL="$update_level_choice"
+        fi
+
+        echo ""
+        print_success "📦 Minimal mode configured:"
+        echo "  • Eza: $INSTALL_EZA"
+        echo "  • Helix: $INSTALL_HELIX"
+        echo "  • Docker: $INSTALL_DOCKER"
+        echo "  • Speedtest: $INSTALL_SPEEDTEST"
+        echo "  • BBR: $INSTALL_BBR"
+        if [ "$ENABLE_AUTO_UPDATE" = "yes" ] || [ "$ENABLE_AUTO_UPDATE" = "y" ]; then
+            level_name="Security only"
+            [ "$AUTO_UPDATE_LEVEL" = "2" ] && level_name="Full updates"
+            echo "  • Auto Updates: Yes ($level_name)"
+        else
+            echo "  • Auto Updates: No"
+        fi
+    else
+        # Continue with auto-yes mode prompt
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo -e "${GREEN}${BOLD}🚀 Auto-Yes Mode${RESET}"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo -e "${YELLOW}Enabling auto-yes mode will automatically execute the following operations:${RESET}"
     echo ""
     echo "📦 Package Installation & Updates:"
     echo "   • Update system packages (apt update && apt upgrade)"
@@ -222,7 +382,7 @@ if [ "$AUTO_YES" = false ]; then
     echo "   • Won't delete any user data or system files"
     echo "   • Won't overwrite configs (backups created in $BACKUP_DIR)"
     echo "   • Won't change timezone (keeps current: $(timedatectl show --property=Timezone --value 2>/dev/null || echo 'Unknown'))"
-    echo "   • Won't enable stable/proposed updates (security updates only)"
+    echo "   • Won't enable stable updates (security updates only)"
     echo "   • Won't install optional monitoring tools (iftop, nload, iotop, etc.)"
     echo "   • Won't reboot system (manual reboot required after completion)"
     echo "   • Script aborts on any error to prevent partial installations"
@@ -241,13 +401,75 @@ if [ "$AUTO_YES" = false ]; then
             print_error "Invalid input. Please enter 'yes', 'y', 'no', or 'n'"
         fi
     done
-    enable_auto_yes_lower=$(echo "$enable_auto_yes" | tr '[:upper:]' '[:lower:]')
-    if [ "$enable_auto_yes_lower" = "yes" ] || [ "$enable_auto_yes_lower" = "y" ]; then
-        AUTO_YES=true
+        enable_auto_yes_lower=$(echo "$enable_auto_yes" | tr '[:upper:]' '[:lower:]')
+        if [ "$enable_auto_yes_lower" = "yes" ] || [ "$enable_auto_yes_lower" = "y" ]; then
+            AUTO_YES=true
+            echo ""
+            print_success "Auto-yes mode enabled - all commands will be executed automatically"
+        else
+            # Ask about aggressive mode when auto-yes is no
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo -e "${RED}${BOLD}🔥 AGGRESSIVE MODE${RESET}"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo ""
-        print_success "Auto-yes mode enabled - all commands will be executed automatically"
-    else
-        print_info "Interactive mode - you will be prompted for each step"
+        echo -e "${YELLOW}Aggressive mode will perform ALL operations WITHOUT prompts, including:${RESET}"
+        echo ""
+        echo "✅ Everything from auto-yes mode PLUS:"
+        echo ""
+        echo "🐳 Docker & Container Management:"
+        echo "   • Install Docker & Docker Compose"
+        echo "   • Install and enable Watchtower (automatic container updates)"
+        echo ""
+        echo "⚡ Advanced System Optimization:"
+        echo "   • Apply aggressive network & kernel optimization"
+        echo "   • Enable BBR congestion control"
+        echo "   • Configure unlimited file descriptors and processes"
+        echo "   • Optimize TCP/IP stack for high-traffic scenarios"
+        echo "   • Install entropy pool enhancement (haveged)"
+        echo "   • Install random number generator optimization (rng-tools)"
+        echo "   • Disable KSM and transparent huge pages"
+        echo "   • Set timezone to Asia/Singapore"
+        echo ""
+        echo "📊 Monitoring Tools:"
+        echo "   • Install iftop, nload, iotop, htop (system monitoring)"
+        echo ""
+        echo -e "${RED}⚠️  WARNING: Aggressive mode is designed for:${RESET}"
+        echo "   • High-traffic proxy servers, CDN nodes, VPN gateways"
+        echo "   • High-concurrency web servers"
+        echo "   • Network-intensive applications"
+        echo ""
+        echo -e "${RED}❌ NOT recommended for:${RESET}"
+        echo "   • General purpose production servers"
+        echo "   • Database servers (may cause issues)"
+        echo "   • Low-traffic personal servers"
+        echo "   • Systems you don't fully understand"
+        echo ""
+        echo -e "${CYAN}${BOLD}⚠️  Note: Aggressive mode cannot be undone easily. System reboot required.${RESET}"
+        echo ""
+        while true; do
+            echo -e "${RED}${BOLD}>>> Do you want to enable AGGRESSIVE mode? (yes/no, default: no):${RESET} "
+            read enable_aggressive
+            if [ -z "$enable_aggressive" ]; then
+                enable_aggressive="no"
+            fi
+            if validate_yes_no "$enable_aggressive"; then
+                break
+            else
+                print_error "Invalid input. Please enter 'yes', 'y', 'no', or 'n'"
+            fi
+        done
+            enable_aggressive_lower=$(echo "$enable_aggressive" | tr '[:upper:]' '[:lower:]')
+            if [ "$enable_aggressive_lower" = "yes" ] || [ "$enable_aggressive_lower" = "y" ]; then
+                AUTO_YES=true
+                AGGRESSIVE_MODE=true
+                echo ""
+                print_success "🔥 AGGRESSIVE MODE ENABLED - All operations will be executed automatically"
+                sleep 2
+            else
+                print_info "Interactive mode - you will be prompted for each step"
+            fi
+        fi
     fi
 fi
 
@@ -273,7 +495,7 @@ fi
 # ============================================
 # Check for updates
 # ============================================
-print_banner "Checking managed programs for updates..."
+print_banner "🔍 Checking managed programs for updates..."
 
 UPDATES_AVAILABLE=false
 UPDATE_LIST=""
@@ -368,7 +590,7 @@ fi
 
 # Auto-update if available
 if [ "$UPDATES_AVAILABLE" = true ]; then
-    print_banner "Updates available"
+    print_banner "🔄 Updates available"
     echo -e "$UPDATE_LIST"
     print_info "Automatically updating programs..."
     
@@ -448,18 +670,18 @@ if [ "$UPDATES_AVAILABLE" = true ]; then
         fi
     fi
     
-    print_success "All updates completed successfully!"
+    print_success "🎉 All updates completed successfully!"
 else
     if [ "$PROGRAMS_FOUND" = true ]; then
-        print_success "All installed programs are up to date"
+        print_success "✓ All installed programs are up to date"
     fi
 fi
 
 # ============================================
 # Check if script has run before
 # ============================================
-if [ -f "$MARKER_FILE" ]; then
-    print_banner "Warning"
+if [ -f "$MARKER_FILE" ] && [ "$MINIMAL_MODE" = false ]; then
+    print_banner "⚠️  Warning"
     print_warning "This script has already been run on: $(cat "$MARKER_FILE")"
     # Even in AUTO_YES mode, we want to confirm reconfiguration
     if [ "$AUTO_YES" = true ]; then
@@ -495,7 +717,7 @@ backup_file() {
     fi
 }
 
-print_banner "Updating system and installing essential packages..."
+print_banner "📦 Updating system and installing essential packages..."
 
 # Check if dpkg is interrupted or needs configuration
 if ! dpkg --audit >/dev/null 2>&1 || dpkg --audit 2>&1 | grep -q "dpkg was interrupted" || ! apt-get check >/dev/null 2>&1; then
@@ -545,11 +767,24 @@ if ! dpkg --audit >/dev/null 2>&1 || dpkg --audit 2>&1 | grep -q "dpkg was inter
     echo ""
 fi
 
-apt update && apt upgrade -y && apt autoremove -y
-apt install -y openssl gnupg curl wget nano htop cron chrony fail2ban unzip logrotate
+if [ "$MINIMAL_MODE" = false ]; then
+    apt update && apt upgrade -y && apt autoremove -y
+    apt install -y openssl gnupg curl wget nano htop cron chrony fail2ban unzip logrotate
+else
+    print_info "Minimal mode: Skipping system update and essential packages"
+    print_info "Only installing curl and wget for download requirements..."
+    apt update -y
+    apt install -y curl wget
+fi
 
-print_banner "Network & System Monitoring Tools (Optional)"
-if [ "$AUTO_YES" = true ]; then
+print_banner "📊 Network & System Monitoring Tools (Optional)"
+if [ "$MINIMAL_MODE" = true ]; then
+    install_monitoring_lower="no"
+    print_info "Minimal mode: Skipping monitoring tools installation"
+elif [ "$AGGRESSIVE_MODE" = true ]; then
+    install_monitoring_lower="yes"
+    print_info "Aggressive mode: Installing monitoring tools..."
+elif [ "$AUTO_YES" = true ]; then
     install_monitoring_lower="no"
     print_info "Auto-yes mode: Skipping monitoring tools installation"
 else
@@ -590,7 +825,22 @@ else
     echo "  apt install -y dnsutils nload iftop vnstat iotop"
 fi
 
-print_banner "Unattended-upgrades installation"
+if [ "$MINIMAL_MODE" = true ]; then
+    if [ "$ENABLE_AUTO_UPDATE" = "yes" ] || [ "$ENABLE_AUTO_UPDATE" = "y" ]; then
+        install_unattended_lower="yes"
+        if [ "$AUTO_UPDATE_LEVEL" = "2" ]; then
+             enable_more_updates_lower="yes"
+        else
+             enable_more_updates_lower="no"
+        fi
+        print_info "Minimal mode: Installing unattended-upgrades..."
+    else
+        print_info "Minimal mode: Skipping unattended-upgrades installation"
+        UNATTENDED_UPGRADES_INSTALLED=false
+        install_unattended_lower="no"
+    fi
+else
+    print_banner "🔄 Unattended-upgrades installation"
 print_info "Unattended-upgrades automatically installs security updates daily."
 echo ""
 if [ "$AUTO_YES" = true ]; then
@@ -633,7 +883,6 @@ if [ "$install_unattended_lower" = "y" ] || [ "$install_unattended_lower" = "yes
         echo "By default, only security updates are automatically installed."
         echo "You can also enable automatic updates for:"
         echo "  • Stable updates (bug fixes)"
-        echo "  • Proposed updates (testing)"
         if [ "$AUTO_YES" = true ]; then
             enable_more_updates_lower="no"
             echo "Auto-yes mode: Keeping default configuration (security updates only)"
@@ -673,14 +922,25 @@ if [ "$install_unattended_lower" = "y" ] || [ "$install_unattended_lower" = "yes
 else
     print_info "Skipping unattended-upgrades installation"
 fi
+fi
 
-# speedtest-cli
-print_banner "Speedtest-cli installation"
+# 📡 speedtest-cli
+print_banner "📡 Speedtest-cli installation"
+install_speedtest_lower="no"
+
 if [ "$SPEEDTEST_ALREADY_INSTALLED" = true ]; then
     print_success "Speedtest-cli already installed, skipping..."
     SPEEDTEST_VERSION=$(speedtest --version 2>/dev/null | grep -oP 'Ookla \K[0-9.]+' | head -n1 || echo "N/A")
 else
-    if [ "$AUTO_YES" = true ]; then
+    if [ "$MINIMAL_MODE" = true ]; then
+        if [ "$INSTALL_SPEEDTEST" = "yes" ] || [ "$INSTALL_SPEEDTEST" = "y" ]; then
+            install_speedtest_lower="yes"
+            print_info "Minimal mode: Installing speedtest-cli..."
+        else
+            print_info "Minimal mode: Skipping speedtest-cli installation"
+            SPEEDTEST_VERSION="N/A"
+        fi
+    elif [ "$AUTO_YES" = true ]; then
         install_speedtest_lower="yes"
         echo "Auto-yes mode: Installing speedtest-cli..."
     else
@@ -698,6 +958,7 @@ else
         done
         install_speedtest_lower=$(echo "$install_speedtest" | tr '[:upper:]' '[:lower:]')
     fi
+    
     SPEEDTEST_VERSION="N/A"
     if [ "$install_speedtest_lower" = "y" ] || [ "$install_speedtest_lower" = "yes" ]; then
     echo "Fetching latest speedtest-cli version from Debian repository..."
@@ -738,13 +999,24 @@ else
     fi
 fi
 
-# Docker
-print_banner "Docker installation"
+# 🐳 Docker
+print_banner "🐳 Docker installation"
 if [ "$DOCKER_ALREADY_INSTALLED" = true ]; then
     print_success "Docker already installed, skipping..."
     DOCKER_VERSION=$(docker --version 2>/dev/null | grep -oP 'Docker version \K[0-9.]+' || echo "N/A")
 else
-    if [ "$AUTO_YES" = true ]; then
+    if [ "$MINIMAL_MODE" = true ]; then
+        if [ "$INSTALL_DOCKER" = "yes" ] || [ "$INSTALL_DOCKER" = "y" ]; then
+            install_docker_lower="yes"
+            echo "Minimal mode: Installing Docker..."
+        else
+            install_docker_lower="no"
+            echo "Minimal mode: Skipping Docker installation"
+        fi
+    elif [ "$AGGRESSIVE_MODE" = true ]; then
+        install_docker_lower="yes"
+        echo "Aggressive mode: Installing Docker..."
+    elif [ "$AUTO_YES" = true ]; then
         install_docker_lower="no"
         echo "Auto-yes mode: Skipping Docker installation"
     else
@@ -769,8 +1041,14 @@ else
         DOCKER_VERSION=$(docker --version 2>/dev/null | grep -oP 'Docker version \K[0-9.]+' || echo "N/A")
         print_success "Docker installed successfully"
         
-        print_banner "Watchtower installation"
-        if [ "$AUTO_YES" = true ]; then
+        print_banner "🐳 Watchtower installation"
+        if [ "$MINIMAL_MODE" = true ]; then
+            install_watchtower_lower="no"
+            echo "Minimal mode: Skipping Watchtower installation"
+        elif [ "$AGGRESSIVE_MODE" = true ]; then
+            install_watchtower_lower="yes"
+            echo "Aggressive mode: Enabling Watchtower..."
+        elif [ "$AUTO_YES" = true ]; then
             install_watchtower_lower="yes"
             echo "Auto-yes mode: Enabling Watchtower..."
         else
@@ -805,13 +1083,21 @@ else
     fi
 fi
 
-# Helix
-print_banner "Helix editor installation"
+# ✏️ Helix
+print_banner "✏️ Helix editor installation"
 if [ "$HELIX_ALREADY_INSTALLED" = true ]; then
     print_success "Helix editor already installed, skipping..."
     HELIX_VERSION=$(hx --version 2>/dev/null | grep -oP 'helix \K[0-9.]+' | head -n1 || echo "N/A")
 else
-    if [ "$AUTO_YES" = true ]; then
+    if [ "$MINIMAL_MODE" = true ]; then
+        if [ "$INSTALL_HELIX" = "yes" ] || [ "$INSTALL_HELIX" = "y" ]; then
+            install_helix_lower="yes"
+            echo "Minimal mode: Installing Helix editor..."
+        else
+            install_helix_lower="no"
+            echo "Minimal mode: Skipping Helix editor installation"
+        fi
+    elif [ "$AUTO_YES" = true ]; then
         install_helix_lower="yes"
         echo "Auto-yes mode: Installing Helix editor..."
     else
@@ -875,13 +1161,21 @@ EOF
     fi
 fi
 
-# Eza
-print_banner "Eza installation"
+# 📂 Eza
+print_banner "📂 Eza installation"
 if [ "$EZA_ALREADY_INSTALLED" = true ]; then
     print_success "Eza already installed, skipping..."
     EZA_VERSION=$(eza --version 2>/dev/null | grep -oP '^v[0-9.]+' || echo "N/A")
 else
-    if [ "$AUTO_YES" = true ]; then
+    if [ "$MINIMAL_MODE" = true ]; then
+        if [ "$INSTALL_EZA" = "yes" ] || [ "$INSTALL_EZA" = "y" ]; then
+            install_eza_lower="yes"
+            echo "Minimal mode: Installing eza..."
+        else
+            install_eza_lower="no"
+            echo "Minimal mode: Skipping eza installation"
+        fi
+    elif [ "$AUTO_YES" = true ]; then
         install_eza_lower="yes"
         echo "Auto-yes mode: Installing eza..."
     else
@@ -958,7 +1252,10 @@ EOF
     fi
 fi
 
-print_banner "Configuring time synchronization..."
+if [ "$MINIMAL_MODE" = true ]; then
+    print_info "Minimal mode: Skipping time synchronization configuration"
+else
+    print_banner "🕐 Configuring time synchronization..."
 
 # Determine NTP server region based on location
 NTP_REGION_PREFIX="" # Default to global pool (0.pool.ntp.org)
@@ -1016,12 +1313,15 @@ for i in {1..12}; do
     sleep 5
 done
 
-# Timezone
+# 🌍 Timezone
 CURRENT_TIMEZONE=$(timedatectl show --property=Timezone --value 2>/dev/null || echo "Unknown")
 echo ""
 echo "Current timezone: $CURRENT_TIMEZONE"
 if [ "$CURRENT_TIMEZONE" != "Asia/Singapore" ]; then
-    if [ "$AUTO_YES" = true ]; then
+    if [ "$AGGRESSIVE_MODE" = true ]; then
+        change_timezone_lower="yes"
+        echo "Aggressive mode: Changing timezone to Asia/Singapore automatically"
+    elif [ "$AUTO_YES" = true ]; then
         change_timezone_lower="no"
         echo "Auto-yes mode: Skipping timezone change (keeping current timezone: $CURRENT_TIMEZONE)"
     else
@@ -1048,20 +1348,28 @@ if [ "$CURRENT_TIMEZONE" != "Asia/Singapore" ]; then
 else
     print_success "Timezone already set to Asia/Singapore"
 fi
+fi
 
-print_banner "Loading kernel modules..."
-# nf_conntrack: Connection tracking
-# tls: Kernel TLS acceleration
-mkdir -p /usr/lib/modules-load.d
-echo nf_conntrack > /usr/lib/modules-load.d/network-performance.conf
-echo tls >> /usr/lib/modules-load.d/network-performance.conf
-modprobe nf_conntrack 2>/dev/null || true
-modprobe tls 2>/dev/null || true
-print_success "Kernel modules configured (nf_conntrack, tls)"
-systemctl enable --now fail2ban
-print_success "Fail2ban enabled"
+if [ "$MINIMAL_MODE" = true ]; then
+    print_info "Minimal mode: Skipping kernel module loading and fail2ban"
+else
+    print_banner "🔧 Loading kernel modules..."
+    # nf_conntrack: Connection tracking
+    # tls: Kernel TLS acceleration
+    mkdir -p /usr/lib/modules-load.d
+    echo nf_conntrack > /usr/lib/modules-load.d/network-performance.conf
+    echo tls >> /usr/lib/modules-load.d/network-performance.conf
+    modprobe nf_conntrack 2>/dev/null || true
+    modprobe tls 2>/dev/null || true
+    print_success "Kernel modules configured (nf_conntrack, tls)"
+    systemctl enable --now fail2ban
+    print_success "Fail2ban enabled"
+fi
 
-print_banner "Network & Kernel Optimization (Optional)"
+if [ "$MINIMAL_MODE" = true ]; then
+    print_info "Minimal mode: Skipping network & kernel optimization"
+else
+    print_banner "⚡ Network & Kernel Optimization (Optional)"
 
 # Check if kernel optimization has already been applied
 if [ -f "$KERNEL_OPT_MARKER" ]; then
@@ -1096,7 +1404,10 @@ else
     echo "  • Aggressive network tuning (BBR, TCP optimization)"
     echo "  • Reference: Kernel optimizations inspired by https://cdn.skk.moe/sh/optimize.sh"
     echo ""
-    if [ "$AUTO_YES" = true ]; then
+    if [ "$AGGRESSIVE_MODE" = true ]; then
+        optimize_system_lower="yes"
+        echo "Aggressive mode: Applying network & kernel optimization..."
+    elif [ "$AUTO_YES" = true ]; then
         optimize_system_lower="no"
         echo "Auto-yes mode: Skipping aggressive network & kernel optimization (BBR will be enabled separately)"
     else
@@ -1310,6 +1621,7 @@ net.ipv4.tcp_syn_retries = 2
 net.ipv4.tcp_synack_retries = 2
 net.ipv4.tcp_syncookies = 1
 net.ipv4.tcp_timestamps = 1
+
 net.ipv4.tcp_tw_reuse = 1
 net.ipv4.tcp_window_scaling = 1
 net.ipv4.tcp_no_metrics_save = 0
@@ -1377,7 +1689,7 @@ EOF
         
         # Check if BBR is enabled when optimization is skipped
         echo ""
-        print_banner "BBR Congestion Control Check"
+        print_banner "📊 BBR Congestion Control Check"
         CURRENT_CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "")
         
         if [ "$CURRENT_CC" != "bbr" ]; then
@@ -1385,7 +1697,15 @@ EOF
             echo "BBR (Bottleneck Bandwidth and RTT) is a modern congestion control algorithm"
             echo "that can significantly improve network performance and latency."
             echo ""
-            if [ "$AUTO_YES" = true ]; then
+            if [ "$MINIMAL_MODE" = true ]; then
+                if [ "$INSTALL_BBR" = "yes" ] || [ "$INSTALL_BBR" = "y" ]; then
+                    enable_bbr_lower="yes"
+                    echo "Minimal mode: Enabling BBR..."
+                else
+                    enable_bbr_lower="no"
+                    echo "Minimal mode: Skipping BBR..."
+                fi
+            elif [ "$AUTO_YES" = true ]; then
                 enable_bbr_lower="yes"
                 echo "Auto-yes mode: Enabling BBR..."
             else
@@ -1428,9 +1748,10 @@ BBREOF
                 print_info "Skipping BBR enablement"
             fi
         else
-            print_success "BBR congestion control is already enabled"
+            print_success "✓ BBR congestion control is already enabled"
         fi
     fi
+fi
 fi
 
 get_cpu_cache_info() {
@@ -1483,7 +1804,7 @@ get_boot_disk() {
     set -e
 }
 
-print_banner "System Configuration Check"
+print_banner "📊 System Configuration Check"
 set +e
 
 # Fetch IP information
@@ -1595,13 +1916,6 @@ if command -v unattended-upgrade &>/dev/null; then
             if [ -n "$disabled_list" ]; then disabled_list="$disabled_list, Stable-updates"; else disabled_list="Stable-updates"; fi
         fi
         
-        # Check Proposed-updates
-        if grep -qE '^\s*"origin=Debian,codename=\$\{distro_codename\}-proposed-updates' "$config_file" 2>/dev/null; then
-            if [ -n "$enabled_list" ]; then enabled_list="$enabled_list, Proposed-updates"; else enabled_list="Proposed-updates"; fi
-        else
-            if [ -n "$disabled_list" ]; then disabled_list="$disabled_list, Proposed-updates"; else disabled_list="Proposed-updates"; fi
-        fi
-        
         if [ -n "$enabled_list" ]; then
             printf "    └─ Enabled : %s\n" "$enabled_list"
         else
@@ -1617,16 +1931,28 @@ else
 fi
 set -e
 
-print_banner "Optimization complete!"
-echo ""
-if [ -d "$BACKUP_DIR" ] && [ "$(ls -A "$BACKUP_DIR" 2>/dev/null)" ]; then
-    print_info "Original configuration files backed up to: $BACKUP_DIR"
-    echo "  Backed up files: chrony.conf, limits.conf, system.conf, journald.conf,"
-    echo "                   common-session, *nproc.conf (if existed)"
+if [ "$MINIMAL_MODE" = true ]; then
+    print_banner "✅ Minimal installation complete! 🎉"
+    echo ""
+    print_success "Installed packages:"
+    echo "  ✅ Eza       - $(eza --version 2>/dev/null | head -n1 || echo 'Installed')"
+    echo "  ✅ Helix     - $(hx --version 2>/dev/null | head -n1 || echo 'Installed')"
+    echo "  ✅ Docker    - $(docker --version 2>/dev/null || echo 'Installed')"
+    echo ""
+    print_info "Minimal mode completed. System configuration was not modified."
+    echo ""
 else
-    print_info "No configuration files were modified"
+    print_banner "✅ System optimization complete! 🎉"
+    echo ""
+    if [ -d "$BACKUP_DIR" ] && [ "$(ls -A "$BACKUP_DIR" 2>/dev/null)" ]; then
+        print_info "Original configuration files backed up to: $BACKUP_DIR"
+        echo "  Backed up files: chrony.conf, limits.conf, system.conf, journald.conf,"
+        echo "                   common-session, *nproc.conf (if existed)"
+    else
+        print_info "No configuration files were modified"
+    fi
+    echo ""
 fi
-echo ""
 
 # Check if network & kernel optimization was skipped
 if [ -f "$KERNEL_OPT_MARKER" ] && [ "$optimize_system_lower" = "no" ]; then
@@ -1640,37 +1966,47 @@ fi
 
 echo "$(date '+%Y-%m-%d %H:%M:%S')" > "$MARKER_FILE"
 
-print_banner "⚠️  REBOOT REQUIRED ⚠️"
-print_warning "It is STRONGLY RECOMMENDED to reboot the system for all settings to take effect."
-print_warning "This includes kernel parameters, system limits, and various optimizations."
-echo ""
-if [ "$AUTO_YES" = true ]; then
-    print_info "Auto-yes mode: Skipping automatic reboot for safety."
-    print_info "Please manually reboot when ready with:"
-    echo -e "   ${BOLD}reboot${RESET}"
+if [ "$MINIMAL_MODE" = true ]; then
+    print_info "Minimal mode: No system reboot required"
+    print_success "You can start using the installed tools immediately!"
+    echo ""
+    echo "Quick start:"
+    echo -e "  • Try eza: ${BOLD}eza -la${RESET}"
+    echo -e "  • Try helix: ${BOLD}hx filename${RESET}"
+    echo -e "  • Check docker: ${BOLD}docker --version${RESET}"
 else
-    while true; do
-        echo -e "${MAGENTA}${BOLD}>>> Would you like to reboot now? (y/yes, default: no):${RESET} "
-        read reboot_now
-        if [ -z "$reboot_now" ]; then
-            reboot_now="no"
-        fi
-        if validate_yes_no "$reboot_now"; then
-            break
-        else
-            print_error "Invalid input. Please enter 'yes', 'y', 'no', or 'n'"
-        fi
-    done
-    reboot_now_lower=$(echo "$reboot_now" | tr '[:upper:]' '[:lower:]')
-    if [ "$reboot_now_lower" = "y" ] || [ "$reboot_now_lower" = "yes" ]; then
-        echo ""
-        print_info "Rebooting system in 3 seconds... Press Ctrl+C to cancel"
-        sleep 3
-        reboot
-    else
-        echo ""
-        print_info "Please remember to reboot manually later with:"
+    print_banner "⚠️  REBOOT REQUIRED ⚠️"
+    print_warning "It is STRONGLY RECOMMENDED to reboot the system for all settings to take effect."
+    print_warning "This includes kernel parameters, system limits, and various optimizations."
+    echo ""
+    if [ "$AUTO_YES" = true ]; then
+        print_info "Auto-yes mode: Skipping automatic reboot for safety."
+        print_info "Please manually reboot when ready with:"
         echo -e "   ${BOLD}reboot${RESET}"
-        echo ""
+    else
+        while true; do
+            echo -e "${MAGENTA}${BOLD}>>> Would you like to reboot now? (y/yes, default: no):${RESET} "
+            read reboot_now
+            if [ -z "$reboot_now" ]; then
+                reboot_now="no"
+            fi
+            if validate_yes_no "$reboot_now"; then
+                break
+            else
+                print_error "Invalid input. Please enter 'yes', 'y', 'no', or 'n'"
+            fi
+        done
+        reboot_now_lower=$(echo "$reboot_now" | tr '[:upper:]' '[:lower:]')
+        if [ "$reboot_now_lower" = "y" ] || [ "$reboot_now_lower" = "yes" ]; then
+            echo ""
+            print_info "Rebooting system in 3 seconds... Press Ctrl+C to cancel"
+            sleep 3
+            reboot
+        else
+            echo ""
+            print_info "Please remember to reboot manually later with:"
+            echo -e "   ${BOLD}reboot${RESET}"
+            echo ""
+        fi
     fi
 fi
