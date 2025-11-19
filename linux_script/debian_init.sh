@@ -98,24 +98,25 @@ if [ "$AUTO_YES" = false ]; then
     echo "   • Install Docker & Docker Compose (container platform)"
     echo "   • Install Watchtower (auto-update Docker containers)"
     echo "   • Install Helix editor (modern terminal editor)"
-    echo "   • Install eza (modern ls replacement)"
+    echo "   • Install Eza (modern ls replacement)"
     echo ""
     echo "⚙️  System Configuration:"
     echo "   • Configure time synchronization (systemd-timesyncd)"
-    echo "   • Load kernel modules (BBR, TCP optimizations)"
-    echo "   • Apply system optimizations (sysctl tuning)"
-    echo "   • Configure network & security settings"
-    echo "   • Set up firewall rules (if applicable)"
+    echo "   • Load kernel modules (nf_conntrack, tls)"
+    echo "   • Enable BBR congestion control (if not already enabled)"
+    echo "   • Configure network & security settings (fail2ban)"
     echo ""
     echo "🔧 Shell Customization:"
     echo "   • Configure bash aliases and environment"
     echo "   • Set up color prompt and command shortcuts"
     echo ""
     echo -e "${RED}❌ What will NOT be executed automatically:${RESET}"
+    echo "   • Won't apply aggressive network & kernel optimization (too risky for general use)"
     echo "   • Won't delete any user data or system files"
     echo "   • Won't overwrite configs (backups created in $BACKUP_DIR)"
     echo "   • Won't change timezone (keeps current: $(timedatectl show --property=Timezone --value 2>/dev/null || echo 'Unknown'))"
     echo "   • Won't enable stable/proposed updates (security updates only)"
+    echo "   • Won't install optional monitoring tools (iftop, nload, iotop, etc.)"
     echo "   • Won't reboot system (manual reboot required after completion)"
     echo "   • Script aborts on any error to prevent partial installations"
     echo ""
@@ -368,9 +369,41 @@ backup_file() {
     fi
 }
 
-print_banner "Updating system and installing packages..."
+print_banner "Updating system and installing essential packages..."
 apt update && apt upgrade -y && apt autoremove -y
-apt install -y openssl gnupg net-tools dnsutils nload curl wget lsof nano htop cron vnstat chrony iftop iotop fail2ban unzip logrotate
+apt install -y openssl gnupg curl wget nano htop cron chrony fail2ban unzip logrotate
+
+print_banner "Network & System Monitoring Tools (Optional)"
+print_info "These tools help monitor network traffic and system I/O:"
+echo "  • dnsutils     - DNS query tools (dig, nslookup, host)"
+echo "  • nload        - Real-time network traffic monitor"
+echo "  • iftop        - Display bandwidth usage per connection"
+echo "  • vnstat       - Network traffic statistics daemon"
+echo "  • iotop        - Display I/O usage by processes"
+echo ""
+if [ "$AUTO_YES" = true ]; then
+    install_monitoring_lower="no"
+    echo "Auto-yes mode: Skipping optional monitoring tools installation"
+else
+    echo -e "${CYAN}${BOLD}>>> Do you want to install these monitoring tools? (y/yes, default: no):${RESET} "
+    read install_monitoring
+    install_monitoring_lower=$(echo "$install_monitoring" | tr '[:upper:]' '[:lower:]')
+fi
+if [ "$install_monitoring_lower" = "y" ] || [ "$install_monitoring_lower" = "yes" ]; then
+    echo "Installing network & system monitoring tools..."
+    apt install -y dnsutils nload iftop vnstat iotop
+    print_success "Monitoring tools installed successfully"
+    
+    # Enable vnstat if installed
+    if command -v vnstat &> /dev/null; then
+        systemctl enable --now vnstat 2>/dev/null || true
+        print_success "Vnstat service enabled"
+    fi
+else
+    print_info "Skipping monitoring tools installation"
+    echo "  You can install them later with:"
+    echo "  apt install -y dnsutils nload iftop vnstat iotop"
+fi
 
 print_banner "Unattended-upgrades installation"
 print_info "Unattended-upgrades automatically installs security updates daily."
@@ -729,39 +762,47 @@ echo tls >> /usr/lib/modules-load.d/network-performance.conf
 modprobe nf_conntrack 2>/dev/null || true
 modprobe tls 2>/dev/null || true
 print_success "Kernel modules configured (nf_conntrack, tls)"
-systemctl enable --now vnstat
-print_success "Vnstat enabled"
 systemctl enable --now fail2ban
 print_success "Fail2ban enabled"
 
-print_banner "System Optimization (recommended for production servers)"
+print_banner "Network & Kernel Optimization (Optional)"
 
 # Check if kernel optimization has already been applied
 if [ -f "$KERNEL_OPT_MARKER" ]; then
     echo ""
     echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${RED}${BOLD}⚠️  KERNEL OPTIMIZATION ALREADY APPLIED${RESET}"
+    echo -e "${RED}${BOLD}⚠️  NETWORK & KERNEL OPTIMIZATION ALREADY APPLIED${RESET}"
     echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     echo -e "${YELLOW}Applied on: ${BOLD}$(cat "$KERNEL_OPT_MARKER")${RESET}"
-    echo -e "${YELLOW}Skipping system optimization to prevent potential conflicts${RESET}"
+    echo -e "${YELLOW}Skipping network & kernel optimization to prevent potential conflicts${RESET}"
     echo ""
     print_info "If you need to re-apply optimizations, manually remove:"
     echo -e "   ${BOLD}rm $KERNEL_OPT_MARKER${RESET}"
     echo ""
     optimize_system_lower="no"
 else
+    echo -e "${YELLOW}⚠️  These optimizations are designed for high-traffic scenarios:${RESET}"
+    echo "  • Proxy servers, CDN nodes, VPN gateways"
+    echo "  • High-concurrency web servers"
+    echo "  • Network-intensive applications"
+    echo ""
+    echo -e "${RED}⚠️  NOT recommended for:${RESET}"
+    echo "  • General purpose production servers"
+    echo "  • Database servers (may cause issues)"
+    echo "  • Low-traffic personal servers"
+    echo ""
     echo "This will apply:"
     echo "  • System resource limits (unlimited file descriptors and processes)"
     echo "  • Journald log size limits (prevent disk space issues)"
     echo "  • Entropy pool enhancement (haveged)"
     echo "  • Random number generator optimization (rng-tools)"
     echo "  • Disable KSM and transparent huge pages"
-    echo "  • Network performance tuning (BBR, TCP optimization)"
+    echo "  • Aggressive network tuning (BBR, TCP optimization)"
     echo "  • Reference: Kernel optimizations inspired by https://cdn.skk.moe/sh/optimize.sh"
     echo ""
     if [ "$AUTO_YES" = true ]; then
-        optimize_system_lower="yes"
-        echo "Auto-yes mode: Applying system optimizations..."
+        optimize_system_lower="no"
+        echo "Auto-yes mode: Skipping aggressive network & kernel optimization (BBR will be enabled separately)"
     else
         echo -e "${YELLOW}${BOLD}>>> Do you want to apply these system optimizations? (y/yes):${RESET} "
         read optimize_system
@@ -1022,8 +1063,58 @@ EOF
         echo "$(date '+%Y-%m-%d %H:%M:%S')" > "$KERNEL_OPT_MARKER"
         print_info "Kernel optimization marker created: $KERNEL_OPT_MARKER"
     else
-        print_info "Skipping system optimization"
-        print_info "Note: System will use default settings (may not be optimal for high-performance servers)"
+        print_info "Skipping aggressive network & kernel optimization"
+        print_info "Note: System will use default settings (recommended for most production servers)"
+        
+        # Check if BBR is enabled when optimization is skipped
+        echo ""
+        print_banner "BBR Congestion Control Check"
+        CURRENT_CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "")
+        
+        if [ "$CURRENT_CC" != "bbr" ]; then
+            print_warning "BBR congestion control is NOT enabled (current: $CURRENT_CC)"
+            echo "BBR (Bottleneck Bandwidth and RTT) is a modern congestion control algorithm"
+            echo "that can significantly improve network performance and latency."
+            echo ""
+            if [ "$AUTO_YES" = true ]; then
+                enable_bbr_lower="yes"
+                echo "Auto-yes mode: Enabling BBR..."
+            else
+                echo -e "${CYAN}${BOLD}>>> Do you want to enable BBR? (y/yes, default: yes):${RESET} "
+                read enable_bbr
+                enable_bbr_lower=$(echo "$enable_bbr" | tr '[:upper:]' '[:lower:]')
+                # Default to yes if empty
+                if [ -z "$enable_bbr_lower" ]; then
+                    enable_bbr_lower="yes"
+                fi
+            fi
+            
+            if [ "$enable_bbr_lower" = "y" ] || [ "$enable_bbr_lower" = "yes" ]; then
+                print_info "Enabling BBR congestion control..."
+                
+                # Create sysctl config for BBR only
+                cat > /etc/sysctl.d/99-bbr.conf <<'BBREOF'
+# BBR Congestion Control
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+BBREOF
+                
+                # Apply settings immediately
+                sysctl -p /etc/sysctl.d/99-bbr.conf >/dev/null 2>&1 || true
+                
+                # Verify BBR is enabled
+                NEW_CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "")
+                if [ "$NEW_CC" = "bbr" ]; then
+                    print_success "BBR congestion control enabled successfully"
+                else
+                    print_warning "BBR may require a system reboot to take effect"
+                fi
+            else
+                print_info "Skipping BBR enablement"
+            fi
+        else
+            print_success "BBR congestion control is already enabled"
+        fi
     fi
 fi
 
@@ -1077,7 +1168,7 @@ get_boot_disk() {
     set -e
 }
 
-print_banner "System Optimization Complete - Configuration Check"
+print_banner "System Configuration Check"
 set +e
 printf "%-22s: %s\n" "BBR Congestion Control" "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo 'N/A')"
 printf "%-22s: %s\n" "Queue Discipline" "$(sysctl -n net.core.default_qdisc 2>/dev/null || echo 'N/A')"
@@ -1175,12 +1266,12 @@ else
 fi
 echo ""
 
-# Check if kernel optimization was skipped
+# Check if network & kernel optimization was skipped
 if [ -f "$KERNEL_OPT_MARKER" ] && [ "$optimize_system_lower" = "no" ]; then
     echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${RED}${BOLD}⚠️  KERNEL OPTIMIZATION WAS SKIPPED${RESET}"
+    echo -e "${RED}${BOLD}⚠️  NETWORK & KERNEL OPTIMIZATION WAS SKIPPED${RESET}"
     echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${YELLOW}Reason: Kernel optimization marker already exists${RESET}"
+    echo -e "${YELLOW}Reason: Network & kernel optimization marker already exists${RESET}"
     echo -e "${YELLOW}Applied on: ${BOLD}$(cat "$KERNEL_OPT_MARKER")${RESET}"
     echo ""
 fi
