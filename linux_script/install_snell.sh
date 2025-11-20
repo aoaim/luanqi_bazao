@@ -256,11 +256,17 @@ select_obfs_host() {
     echo "     images.contentstack.io" >&2
     echo "  3) NCBI CDN" >&2
     echo "     cdn.ncbi.nlm.nih.gov" >&2
-    echo "  4) Xiaohongshu CDN" >&2
+    echo "  4) ScienceDirect CDN (US East)" >&2
+    echo "     sdfestaticassets-us-east-1.sciencedirectassets.com" >&2
+    echo "  5) ScienceDirect CDN (EU West)" >&2
+    echo "     sdfestaticassets-eu-west-1.sciencedirectassets.com" >&2
+    echo "  6) Xiaohongshu CDN" >&2
     echo "     sns-video-qc.xhscdn.com" >&2
-    echo "  5) Douyin/TikTok CDN" >&2
+    echo "  7) Douyin/TikTok CDN" >&2
     echo "     sf1-cdn-tos.huoshanstatic.com" >&2
-    echo "  6) Custom host" >&2
+    echo "  8) Microsoft CDN" >&2
+    echo "     software-static.download.prss.microsoft.com" >&2
+    echo "  9) Custom host" >&2
     
     while true; do
         read -p "Enter the host option number [1]: " host_choice
@@ -279,14 +285,26 @@ select_obfs_host() {
                 break
                 ;;
             4)
-                selected_host="sns-video-qc.xhscdn.com"
+                selected_host="sdfestaticassets-us-east-1.sciencedirectassets.com"
                 break
                 ;;
             5)
-                selected_host="sf1-cdn-tos.huoshanstatic.com"
+                selected_host="sdfestaticassets-eu-west-1.sciencedirectassets.com"
                 break
                 ;;
             6)
+                selected_host="sns-video-qc.xhscdn.com"
+                break
+                ;;
+            7)
+                selected_host="sf1-cdn-tos.huoshanstatic.com"
+                break
+                ;;
+            8)
+                selected_host="software-static.download.prss.microsoft.com"
+                break
+                ;;
+            9)
                 read -p "Enter custom host: " custom_host
                 if [[ -z "$custom_host" ]]; then
                     echo "Custom host cannot be empty. Please try again." >&2
@@ -296,7 +314,7 @@ select_obfs_host() {
                 break
                 ;;
             *)
-                echo "Invalid choice. Please enter a number between 1 and 6." >&2
+                echo "Invalid choice. Please enter a number between 1 and 9." >&2
                 ;;
         esac
     done
@@ -600,7 +618,44 @@ change_dns() {
     echo "=========================================="
 }
 
-# --- 11. 查看当前配置 ---
+# --- 11. 显示 Surge 配置 ---
+show_surge_config() {
+    echo "=========================================="
+    echo "📱 Surge Configuration"
+    echo "=========================================="
+    
+    if [ ! -f /etc/snell/snell-server.conf ]; then
+        echo "Error: Configuration file not found!"
+        return 1
+    fi
+    
+    local port=$(grep -oP 'listen = 0.0.0.0:\K[0-9]+' /etc/snell/snell-server.conf)
+    local psk=$(grep -oP 'psk = \K.+' /etc/snell/snell-server.conf)
+    local obfs=$(grep -oP 'obfs = \K.+' /etc/snell/snell-server.conf || echo "")
+    local host=$(grep -oP 'host = \K.+' /etc/snell/snell-server.conf || echo "")
+    
+    echo "Getting server IP address..."
+    local ip=$(curl -s ip.sb -4)
+    
+    if [ -z "$ip" ]; then
+        echo "Error: Failed to get server IP address!"
+        return 1
+    fi
+    
+    echo ""
+    echo "Copy the following configuration to Surge:"
+    echo "=========================================="
+    
+    if [[ -n "$obfs" && -n "$host" ]]; then
+        echo "snell = snell, ${ip}, ${port}, psk=${psk}, obfs=${obfs}, obfs-host=${host}, version=5, reuse=true"
+    else
+        echo "snell = snell, ${ip}, ${port}, psk=${psk}, version=5, reuse=true"
+    fi
+    
+    echo "=========================================="
+}
+
+# --- 12. 查看当前配置 ---
 show_config() {
     echo "=========================================="
     echo "📋 Current Snell Configuration"
@@ -615,7 +670,7 @@ show_config() {
     echo "=========================================="
 }
 
-# --- 12. 已安装菜单 ---
+# --- 13. 已安装菜单 ---
 show_installed_menu() {
     local installed_version=$1
     local latest_version=$2
@@ -647,12 +702,13 @@ show_installed_menu() {
     echo "  5) Modify Obfs"
     echo "  6) Modify DNS"
     echo "  7) Show Current Configuration"
-    echo "  8) Restart Service"
+    echo "  8) Show Surge Configuration"
+    echo "  9) Restart Service"
     echo "  0) Exit"
     echo "=========================================="
 }
 
-# --- 13. 未安装菜单 ---
+# --- 14. 未安装菜单 ---
 show_not_installed_menu() {
     local latest_version=$1
     
@@ -691,7 +747,7 @@ if [ -n "$installed_version" ]; then
     while true; do
         show_installed_menu "$installed_version" "$latest_version"
         
-        read -p "Enter your choice [0-8]: " choice
+        read -p "Enter your choice [0-9]: " choice
         echo ""
         
         case "$choice" in
@@ -769,6 +825,11 @@ if [ -n "$installed_version" ]; then
                 read -p "Press Enter to continue..."
                 ;;
             8)
+                show_surge_config
+                echo ""
+                read -p "Press Enter to continue..."
+                ;;
+            9)
                 echo "Restarting Snell service..."
                 systemctl restart snell.service
                 echo "Service restarted successfully!"
@@ -782,7 +843,7 @@ if [ -n "$installed_version" ]; then
                 exit 0
                 ;;
             *)
-                echo "Invalid choice. Please enter a number between 0 and 8."
+                echo "Invalid choice. Please enter a number between 0 and 9."
                 read -p "Press Enter to continue..."
                 ;;
         esac
@@ -808,6 +869,8 @@ else
                     echo "✅ Snell server installation complete!"
                     echo "Version: v${latest_version}"
                     echo "=========================================="
+                    echo ""
+                    show_surge_config
                 else
                     echo "Installation failed."
                     cleanup_on_exit
