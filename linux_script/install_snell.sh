@@ -181,7 +181,15 @@ configure_snell() {
         echo "     d1--ov-gotcha07.bilivideo.com"
         echo "  2) Contentstack"
         echo "     images.contentstack.io"
-        echo "  3) Custom host"
+        echo "  3) Elsevier CDN"
+        echo "     ars.els-cdn.com"
+        echo "  4) NCBI CDN"
+        echo "     cdn.ncbi.nlm.nih.gov"
+        echo "  5) Xiaohongshu CDN"
+        echo "     sns-video-qc.xhscdn.com"
+        echo "  6) Douyin/TikTok CDN"
+        echo "     sf1-cdn-tos.huoshanstatic.com"
+        echo "  7) Custom host"
         
         while true; do
             read -p "Enter the host option number [1]: " host_choice
@@ -196,6 +204,22 @@ configure_snell() {
                     break
                     ;;
                 3)
+                    host="ars.els-cdn.com"
+                    break
+                    ;;
+                4)
+                    host="cdn.ncbi.nlm.nih.gov"
+                    break
+                    ;;
+                5)
+                    host="sns-video-qc.xhscdn.com"
+                    break
+                    ;;
+                6)
+                    host="sf1-cdn-tos.huoshanstatic.com"
+                    break
+                    ;;
+                7)
                     read -p "Enter custom host: " custom_host
                     if [[ -z "$custom_host" ]]; then
                         echo "Custom host cannot be empty. Please try again."
@@ -205,7 +229,7 @@ configure_snell() {
                     break
                     ;;
                 *)
-                    echo "Invalid choice. Please enter a number between 1 and 3."
+                    echo "Invalid choice. Please enter a number between 1 and 7."
                     ;;
             esac
         done
