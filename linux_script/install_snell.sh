@@ -618,10 +618,10 @@ change_dns() {
     echo "=========================================="
 }
 
-# --- 11. 显示 Surge 配置 ---
+# --- 11. 显示 Surge 节点配置 ---
 show_surge_config() {
     echo "=========================================="
-    echo "📱 Surge Configuration"
+    echo "📱 Surge Node Configuration"
     echo "=========================================="
     
     if [ ! -f /etc/snell/snell-server.conf ]; then
@@ -643,7 +643,7 @@ show_surge_config() {
     fi
     
     echo ""
-    echo "Copy the following configuration to Surge:"
+    echo "Copy the following node configuration to Surge:"
     echo "=========================================="
     
     if [[ -n "$obfs" && -n "$host" ]]; then
@@ -702,7 +702,7 @@ show_installed_menu() {
     echo "  5) Modify Obfs"
     echo "  6) Modify DNS"
     echo "  7) Show Current Configuration"
-    echo "  8) Show Surge Configuration"
+    echo "  8) Show Surge Node Configuration"
     echo "  9) Restart Service"
     echo "  0) Exit"
     echo "=========================================="
