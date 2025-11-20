@@ -696,10 +696,10 @@ show_installed_menu() {
     echo "  2) Uninstall Snell"
     echo "  3) Modify Port"
     echo "  4) Modify Password (PSK)"
-    echo "  5) Show Current Configuration"
-    echo "  6) Restart Service"
-    echo "  7) Modify Obfs"
-    echo "  8) Modify DNS"
+    echo "  5) Modify Obfs"
+    echo "  6) Modify DNS"
+    echo "  7) Show Current Configuration"
+    echo "  8) Restart Service"
     echo "  0) Exit"
     echo "=========================================="
 }
@@ -808,6 +808,18 @@ if [ -n "$installed_version" ]; then
                 read -p "Press Enter to continue..."
                 ;;
             5)
+                # 修改 Obfs
+                change_obfs
+                echo ""
+                read -p "Press Enter to continue..."
+                ;;
+            6)
+                # 修改 DNS
+                change_dns
+                echo ""
+                read -p "Press Enter to continue..."
+                ;;
+            7)
                 # 显示当前配置
                 echo "========================================="
                 echo "Current Snell Configuration"
@@ -825,24 +837,12 @@ if [ -n "$installed_version" ]; then
                 echo ""
                 read -p "Press Enter to continue..."
                 ;;
-            6)
+            8)
                 # 重启服务
                 echo "Restarting Snell service..."
                 systemctl restart snell.service
                 echo "Service restarted successfully!"
                 systemctl status snell.service --no-pager
-                echo ""
-                read -p "Press Enter to continue..."
-                ;;
-            7)
-                # 修改 Obfs
-                change_obfs
-                echo ""
-                read -p "Press Enter to continue..."
-                ;;
-            8)
-                # 修改 DNS
-                change_dns
                 echo ""
                 read -p "Press Enter to continue..."
                 ;;
