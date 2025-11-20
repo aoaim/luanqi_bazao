@@ -7,3 +7,16 @@ Co-created with AI 🧑‍💻🤝🤖
 不時會整啲新嘢。  
 
 呼呼呼~ ✈️
+
+
+```
+# 使用 curl（推薦）
+bash <(curl -Ls https:///sh.miaom.eu.org/<path>)
+
+# 使用 wget（如果冇 curl）
+bash <(wget -qO- https:///sh.miaom.eu.org/<path>)
+
+# 當前支援嘅 path：
+# - snell
+# - debianinit
+```
