@@ -322,7 +322,7 @@ select_obfs_host() {
     echo "$selected_host"
 }
 
-# --- 6.1 选择 DNS ---
+# --- 7. 选择 DNS ---
 select_dns() {
     local allow_cancel=${1:-false}
     local default_choice=${2:-1}
@@ -428,7 +428,7 @@ select_dns() {
     echo "${selected_dns}|${selected_label}"
 }
 
-# --- 7. 修改端口 ---
+# --- 8. 修改端口 ---
 change_port() {
     echo "=========================================="
     echo "🔌 Modify Snell Server Port"
@@ -457,10 +457,10 @@ change_port() {
     
     echo "=========================================="
     echo "✅ Port modification completed!"
-    echo "=========================================="
+    echo "========================================"
 }
 
-# --- 8. 修改密码 ---
+# --- 9. 修改密码 ---
 change_password() {
     echo "=========================================="
     echo "🔐 Modify Snell Server Password (PSK)"
@@ -489,10 +489,10 @@ change_password() {
     
     echo "=========================================="
     echo "✅ Password modification completed!"
-    echo "=========================================="
+    echo "========================================"
 }
 
-# --- 9. 修改 Obfs ---
+# --- 10. 修改 Obfs ---
 change_obfs() {
     echo "=========================================="
     echo "🎭 Modify Snell Server Obfs Settings"
@@ -582,7 +582,7 @@ change_obfs() {
     fi
 }
 
-# --- 10. 修改 DNS ---
+# --- 11. 修改 DNS ---
 change_dns() {
     echo "=========================================="
     echo "🌐 Modify Snell Server DNS Settings"
@@ -615,10 +615,10 @@ change_dns() {
     
     echo "=========================================="
     echo "✅ DNS modification completed!"
-    echo "=========================================="
+    echo "========================================"
 }
 
-# --- 11. 显示 Surge 节点配置 ---
+# --- 12. 显示 Surge 节点配置 ---
 show_surge_config() {
     echo "=========================================="
     echo "📱 Surge Node Configuration"
@@ -652,10 +652,10 @@ show_surge_config() {
         echo "snell = snell, ${ip}, ${port}, psk=${psk}, version=5, reuse=true"
     fi
     
-    echo "=========================================="
+    echo "========================================"
 }
 
-# --- 12. 查看当前配置 ---
+# --- 13. 查看当前配置 ---
 show_config() {
     echo "=========================================="
     echo "📋 Current Snell Configuration"
@@ -667,10 +667,10 @@ show_config() {
     fi
     
     cat /etc/snell/snell-server.conf
-    echo "=========================================="
+    echo "========================================"
 }
 
-# --- 13. 已安装菜单 ---
+# --- 14. 已安装菜单 ---
 show_installed_menu() {
     local installed_version=$1
     local latest_version=$2
@@ -705,10 +705,10 @@ show_installed_menu() {
     echo "  8) Show Surge Node Configuration"
     echo "  9) Restart Service"
     echo "  0) Exit"
-    echo "=========================================="
+    echo "========================================"
 }
 
-# --- 14. 未安装菜单 ---
+# --- 15. 未安装菜单 ---
 show_not_installed_menu() {
     local latest_version=$1
     
