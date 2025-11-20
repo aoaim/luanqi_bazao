@@ -43,6 +43,7 @@ MARKER_FILE="/var/lib/init_linux_run.marker"
 KERNEL_OPT_MARKER="/var/lib/init_linux_kernel_optimized.marker"
 BACKUP_DIR="/root/init_linux_backups"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+ACTIONS_LOG=()
 
 # Colors
 RED='\033[0;31m'
@@ -682,7 +683,17 @@ fi
 # ============================================
 if [ -f "$MARKER_FILE" ] && [ "$MINIMAL_MODE" = false ]; then
     print_banner "⚠️  Warning"
-    print_warning "This script has already been run on: $(cat "$MARKER_FILE")"
+    echo -e "${YELLOW}This script has already been run previously:${RESET}"
+    echo ""
+    # Read and display marker content
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2} ]]; then
+            echo -e "  ${BOLD}Time:${RESET} $line"
+        elif [ -n "$line" ]; then
+            echo -e "  ${CYAN}→${RESET} $line"
+        fi
+    done < "$MARKER_FILE"
+    echo ""
     # Even in AUTO_YES mode, we want to confirm reconfiguration
     if [ "$AUTO_YES" = true ]; then
         print_warning "Auto-yes mode detected, but reconfiguration requires manual confirmation."
@@ -705,16 +716,36 @@ if [ -f "$MARKER_FILE" ] && [ "$MINIMAL_MODE" = false ]; then
     echo "Continuing with reconfiguration..."
 fi
 
+# Log actions performed during script execution
+log_action() {
+    ACTIONS_LOG+=("$1")
+}
+
 backup_file() {
     local file="$1"
-    if [ -f "$file" ]; then
-        if [ ! -d "$BACKUP_DIR" ]; then
-            mkdir -p "$BACKUP_DIR"
-            print_success "Backup directory created: $BACKUP_DIR"
-        fi
-        cp "$file" "${BACKUP_DIR}/$(basename "$file").${TIMESTAMP}.bak"
-        echo "  Backed up: $file"
+    local new_content="${2:-}"
+    
+    if [ ! -f "$file" ]; then
+        # File doesn't exist, no need to backup
+        return 0
     fi
+    
+    # If new content is provided, check if it differs from existing
+    if [ -n "$new_content" ]; then
+        local current_content=$(cat "$file" 2>/dev/null || echo "")
+        if [ "$current_content" = "$new_content" ]; then
+            # Content is the same, no need to backup
+            return 0
+        fi
+    fi
+    
+    # Content differs or new content not provided, create backup
+    if [ ! -d "$BACKUP_DIR" ]; then
+        mkdir -p "$BACKUP_DIR"
+        print_success "Backup directory created: $BACKUP_DIR"
+    fi
+    cp "$file" "${BACKUP_DIR}/$(basename "$file").${TIMESTAMP}.bak"
+    echo "  Backed up: $file"
 }
 
 print_banner "📦 Updating system and installing essential packages..."
@@ -769,12 +800,15 @@ fi
 
 if [ "$MINIMAL_MODE" = false ]; then
     apt update && apt upgrade -y && apt autoremove -y
+    log_action "Updated system packages (apt update && upgrade)"
     apt install -y openssl gnupg curl wget nano htop cron chrony fail2ban unzip logrotate
+    log_action "Installed essential packages: openssl, gnupg, curl, wget, nano, htop, cron, chrony, fail2ban, unzip, logrotate"
 else
     print_info "Minimal mode: Skipping system update and essential packages"
     print_info "Only installing curl and wget for download requirements..."
     apt update -y
     apt install -y curl wget
+    log_action "Minimal mode: Installed curl and wget only"
 fi
 
 print_banner "📊 Network & System Monitoring Tools (Optional)"
@@ -813,6 +847,7 @@ if [ "$install_monitoring_lower" = "y" ] || [ "$install_monitoring_lower" = "yes
     echo "Installing network & system monitoring tools..."
     apt install -y dnsutils nload iftop vnstat iotop
     print_success "Monitoring tools installed successfully"
+    log_action "Installed monitoring tools: dnsutils, nload, iftop, vnstat, iotop"
     
     # Enable vnstat if installed
     if command -v vnstat &> /dev/null; then
@@ -867,6 +902,7 @@ if [ "$install_unattended_lower" = "y" ] || [ "$install_unattended_lower" = "yes
     
     if dpkg -l unattended-upgrades 2>/dev/null | grep -q "^ii" || command -v unattended-upgrade &>/dev/null; then
         print_success "unattended-upgrades installed successfully"
+        log_action "Installed and enabled unattended-upgrades (automatic security updates)"
         echo unattended-upgrades unattended-upgrades/enable_auto_updates boolean true | debconf-set-selections
         dpkg-reconfigure -f noninteractive unattended-upgrades
         if [ -f /etc/apt/apt.conf.d/20auto-upgrades ]; then
@@ -910,6 +946,7 @@ if [ "$install_unattended_lower" = "y" ] || [ "$install_unattended_lower" = "yes
             sed -i 's|^//      "origin=Debian,codename=\${distro_codename}-updates";|        "origin=Debian,codename=${distro_codename}-updates";|' /etc/apt/apt.conf.d/52unattended-upgrades-local
             
             print_success "Enabled automatic stable updates (bug fixes)"
+            log_action "Configured unattended-upgrades for stable updates (not just security)"
             print_info "Configuration saved to: /etc/apt/apt.conf.d/52unattended-upgrades-local"
         else
             print_success "Keeping default configuration (security updates only)"
@@ -924,28 +961,28 @@ else
 fi
 fi
 
-# 📡 speedtest-cli
-print_banner "📡 Speedtest-cli installation"
+# 📡 Speedtest
+print_banner "📡 Speedtest installation"
 install_speedtest_lower="no"
 
 if [ "$SPEEDTEST_ALREADY_INSTALLED" = true ]; then
-    print_success "Speedtest-cli already installed, skipping..."
+    print_success "Speedtest already installed, skipping..."
     SPEEDTEST_VERSION=$(speedtest --version 2>/dev/null | grep -oP 'Ookla \K[0-9.]+' | head -n1 || echo "N/A")
 else
     if [ "$MINIMAL_MODE" = true ]; then
         if [ "$INSTALL_SPEEDTEST" = "yes" ] || [ "$INSTALL_SPEEDTEST" = "y" ]; then
             install_speedtest_lower="yes"
-            print_info "Minimal mode: Installing speedtest-cli..."
+            print_info "Minimal mode: Installing Speedtest..."
         else
-            print_info "Minimal mode: Skipping speedtest-cli installation"
+            print_info "Minimal mode: Skipping Speedtest installation"
             SPEEDTEST_VERSION="N/A"
         fi
     elif [ "$AUTO_YES" = true ]; then
         install_speedtest_lower="yes"
-        echo "Auto-yes mode: Installing speedtest-cli..."
+        echo "Auto-yes mode: Installing Speedtest..."
     else
         while true; do
-            echo -e "${CYAN}${BOLD}>>> Do you want to install speedtest-cli? (y/yes, default: no):${RESET} "
+            echo -e "${CYAN}${BOLD}>>> Do you want to install Speedtest? (y/yes, default: no):${RESET} "
             read install_speedtest
             if [ -z "$install_speedtest" ]; then
                 install_speedtest="no"
@@ -961,7 +998,7 @@ else
     
     SPEEDTEST_VERSION="N/A"
     if [ "$install_speedtest_lower" = "y" ] || [ "$install_speedtest_lower" = "yes" ]; then
-    echo "Fetching latest speedtest-cli version from Debian repository..."
+    echo "Fetching latest Speedtest version from Debian repository..."
     
     SPEEDTEST_DEB_PATH=$(curl -sL "https://packagecloud.io/ookla/speedtest-cli/debian/dists/trixie/main/binary-amd64/Packages" 2>/dev/null | \
         grep -A10 "Package: speedtest" | \
@@ -985,17 +1022,18 @@ else
             dpkg -i speedtest.deb || apt-get install -f -y
             rm -f speedtest.deb
             SPEEDTEST_VERSION=$(speedtest --version 2>/dev/null | grep -oP 'Ookla \K[0-9.]+' | head -n1 || echo "N/A")
-            echo "✓ Speedtest-cli installed: v$SPEEDTEST_VERSION"
+            echo "✓ Speedtest installed: v$SPEEDTEST_VERSION"
+            log_action "Installed Speedtest v$SPEEDTEST_VERSION"
         else
             echo "❌ Failed to download speedtest deb package"
             rm -f speedtest.deb
-            print_error "Failed to install speedtest-cli"
+            print_error "Failed to install Speedtest"
         fi
     else
         print_error "Could not fetch latest version from repository. Skipping installation."
     fi
     else
-        echo "⏭️  Skipping speedtest-cli installation"
+        echo "⏭️  Skipping Speedtest installation"
     fi
 fi
 
@@ -1040,6 +1078,7 @@ else
         wget -qO- https://get.docker.com/ | sh
         DOCKER_VERSION=$(docker --version 2>/dev/null | grep -oP 'Docker version \K[0-9.]+' || echo "N/A")
         print_success "Docker installed successfully"
+        log_action "Installed Docker v$DOCKER_VERSION"
         
         print_banner "🐳 Watchtower installation"
         if [ "$MINIMAL_MODE" = true ]; then
@@ -1075,6 +1114,7 @@ else
                 nickfedor/watchtower \
                 --cleanup
             print_success "Watchtower enabled"
+            log_action "Installed Watchtower (automatic Docker container updates)"
         else
             print_info "Skipping Watchtower installation"
         fi
@@ -1128,7 +1168,9 @@ else
                         apt-get install -f -y
                         rm -f helix.deb
                         HELIX_INSTALLED=true
+                        HELIX_VERSION=$(hx --version 2>/dev/null | head -n1 | grep -oP 'helix \K[0-9.]+' || echo "N/A")
                         print_success "Helix editor installed successfully"
+                        log_action "Installed Helix editor v$HELIX_VERSION"
                         break
                     else
                         print_warning "Failed to install downloaded package, retrying..."
@@ -1210,7 +1252,9 @@ else
                             rm -f eza.tar.gz
                             rm -rf "$TMP_EZA_DIR"
                             EZA_INSTALLED=true
+                            EZA_VERSION=$(eza --version 2>/dev/null | head -n1 | grep -oP 'v\K[0-9.]+' || echo "N/A")
                             print_success "Eza installed from GitHub release (binary)"
+                            log_action "Installed Eza v$EZA_VERSION"
                             break
                         else
                             print_warning "Could not locate eza binary inside tarball"
@@ -1288,9 +1332,7 @@ fi
 
 print_success "Selected NTP servers: 0.${NTP_REGION_PREFIX}pool.ntp.org (Detected: ${DETECTED_TZ:-Unknown})"
 
-backup_file /etc/chrony/chrony.conf
-cat > /etc/chrony/chrony.conf <<EOF
-server 0.${NTP_REGION_PREFIX}pool.ntp.org iburst
+NEW_CHRONY_CONF="server 0.${NTP_REGION_PREFIX}pool.ntp.org iburst
 server 1.${NTP_REGION_PREFIX}pool.ntp.org iburst
 server 2.${NTP_REGION_PREFIX}pool.ntp.org iburst
 server 3.${NTP_REGION_PREFIX}pool.ntp.org iburst
@@ -1298,8 +1340,10 @@ driftfile /var/lib/chrony/chrony.drift
 makestep 1.0 3
 rtcsync
 log tracking measurements statistics
-logdir /var/log/chrony
-EOF
+logdir /var/log/chrony"
+
+backup_file /etc/chrony/chrony.conf "$NEW_CHRONY_CONF"
+echo "$NEW_CHRONY_CONF" > /etc/chrony/chrony.conf
 systemctl enable --now chrony
 sleep 2
 chronyc tracking || true
@@ -1308,6 +1352,7 @@ for i in {1..12}; do
     status=$(chronyc tracking 2>/dev/null | grep 'Leap status' | cut -d':' -f2 | xargs || echo "Unknown")
     if [[ "$status" == "Normal" ]]; then
         print_success "Time synchronized"
+        log_action "Configured time synchronization (chrony with ${NTP_REGION_PREFIX}pool.ntp.org)"
         break
     fi
     sleep 5
@@ -1342,6 +1387,7 @@ if [ "$CURRENT_TIMEZONE" != "Asia/Singapore" ]; then
     if [ "$change_timezone_lower" = "y" ] || [ "$change_timezone_lower" = "yes" ]; then
         timedatectl set-timezone Asia/Singapore
         print_success "Timezone changed to Asia/Singapore"
+        log_action "Changed timezone to Asia/Singapore"
     else
         print_info "Keeping current timezone: $CURRENT_TIMEZONE"
     fi
@@ -1471,6 +1517,7 @@ DefaultLimitNPROC=infinity
 DefaultLimitNOFILE=infinity
 EOF
     print_success "System limits configured (drop-in file created)"
+    log_action "Configured system resource limits (unlimited nofile, nproc)"
     
     # === 2. Journald Configuration ===
     echo ""
@@ -1492,6 +1539,7 @@ ForwardToSyslog=no
 EOF
     systemctl restart systemd-journald
     print_success "Journald configured with size limits (drop-in file created)"
+    log_action "Configured journald log limits (384M system, 256M runtime)"
     
     # === 3. Entropy and Random Number Generation ===
     echo ""
@@ -1679,6 +1727,7 @@ EOF
 
         print_success "Kernel network parameters configured with aggressive optimizations"
         print_success "All system optimizations applied successfully!"
+        log_action "Applied network & kernel optimizations (BBR, TCP tuning, connection tracking, memory management)"
         
         # Create marker file to prevent re-running
         echo "$(date '+%Y-%m-%d %H:%M:%S')" > "$KERNEL_OPT_MARKER"
@@ -1741,8 +1790,10 @@ BBREOF
                 NEW_CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "")
                 if [ "$NEW_CC" = "bbr" ]; then
                     print_success "BBR congestion control enabled successfully"
+                    log_action "Enabled BBR congestion control"
                 else
                     print_warning "BBR may require a system reboot to take effect"
+                    log_action "Configured BBR congestion control (requires reboot)"
                 fi
             else
                 print_info "Skipping BBR enablement"
@@ -1964,7 +2015,14 @@ if [ -f "$KERNEL_OPT_MARKER" ] && [ "$optimize_system_lower" = "no" ]; then
     echo ""
 fi
 
-echo "$(date '+%Y-%m-%d %H:%M:%S')" > "$MARKER_FILE"
+# Write marker file with timestamp and actions log
+{
+    echo "$(date '+%Y-%m-%d %H:%M:%S')"
+    for action in "${ACTIONS_LOG[@]}"; do
+        echo "$action"
+    done
+} > "$MARKER_FILE"
+print_info "Execution log saved to: $MARKER_FILE"
 
 if [ "$MINIMAL_MODE" = true ]; then
     print_info "Minimal mode: No system reboot required"

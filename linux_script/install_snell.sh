@@ -254,15 +254,13 @@ select_obfs_host() {
     echo "     d1--ov-gotcha07.bilivideo.com" >&2
     echo "  2) Contentstack" >&2
     echo "     images.contentstack.io" >&2
-    echo "  3) Elsevier CDN" >&2
-    echo "     ars.els-cdn.com" >&2
-    echo "  4) NCBI CDN" >&2
+    echo "  3) NCBI CDN" >&2
     echo "     cdn.ncbi.nlm.nih.gov" >&2
-    echo "  5) Xiaohongshu CDN" >&2
+    echo "  4) Xiaohongshu CDN" >&2
     echo "     sns-video-qc.xhscdn.com" >&2
-    echo "  6) Douyin/TikTok CDN" >&2
+    echo "  5) Douyin/TikTok CDN" >&2
     echo "     sf1-cdn-tos.huoshanstatic.com" >&2
-    echo "  7) Custom host" >&2
+    echo "  6) Custom host" >&2
     
     while true; do
         read -p "Enter the host option number [1]: " host_choice
@@ -277,22 +275,18 @@ select_obfs_host() {
                 break
                 ;;
             3)
-                selected_host="ars.els-cdn.com"
-                break
-                ;;
-            4)
                 selected_host="cdn.ncbi.nlm.nih.gov"
                 break
                 ;;
-            5)
+            4)
                 selected_host="sns-video-qc.xhscdn.com"
                 break
                 ;;
-            6)
+            5)
                 selected_host="sf1-cdn-tos.huoshanstatic.com"
                 break
                 ;;
-            7)
+            6)
                 read -p "Enter custom host: " custom_host
                 if [[ -z "$custom_host" ]]; then
                     echo "Custom host cannot be empty. Please try again." >&2
@@ -302,7 +296,7 @@ select_obfs_host() {
                 break
                 ;;
             *)
-                echo "Invalid choice. Please enter a number between 1 and 7." >&2
+                echo "Invalid choice. Please enter a number between 1 and 6." >&2
                 ;;
         esac
     done
