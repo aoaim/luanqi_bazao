@@ -1,40 +1,59 @@
 #!/bin/bash
 
 # =====================================================
-# Debian 13 Server Initialization Script
+# Debian Server Initialization Script
+# - Targets Debian amd64, assumes fresh server
+# - Provides Interactive, Auto-yes (safe defaults) and Aggressive (all tweaks) modes
+# - Creates backups in /root/init_linux_backups before touching configs
 # =====================================================
 
 set -e
 set -u
 set -o pipefail
 
-# Auto-yes mode (skip confirmations)
+# Mode switches (populated by CLI flags or interactive prompts)
 AUTO_YES=false
 AGGRESSIVE_MODE=false
 MINIMAL_MODE=false
 INSTALL_EZA=""
 INSTALL_HELIX=""
 INSTALL_DOCKER=""
+INSTALL_FAIL2BAN="no"
 INSTALL_SPEEDTEST=""
 INSTALL_BBR=""
+INSTALL_TIME_SYNC=""
 ENABLE_AUTO_UPDATE=""
 AUTO_UPDATE_LEVEL=""
+enable_more_updates_lower=""
+optimize_system_lower="no"
+
+# Installation status trackers (initialized early for set -u safety)
+SPEEDTEST_ALREADY_INSTALLED=false
+HELIX_ALREADY_INSTALLED=false
+EZA_ALREADY_INSTALLED=false
+DOCKER_ALREADY_INSTALLED=false
+UNATTENDED_UPGRADES_INSTALLED=false
+AUTO_MODE_LABEL="interactive"
 
 if [[ "${1:-}" == "--yes" ]] || [[ "${1:-}" == "-y" ]]; then
     AUTO_YES=true
+    AUTO_MODE_LABEL="auto-yes"
     echo "🚀 Running in auto-yes mode - all commands will be executed automatically"
 elif [[ "${1:-}" == "--aggressive" ]] || [[ "${1:-}" == "-a" ]]; then
     AUTO_YES=true
     AGGRESSIVE_MODE=true
+    AUTO_MODE_LABEL="aggressive"
     echo "🔥 Running in AGGRESSIVE mode - all operations including advanced optimizations will be executed"
 elif [[ "${1:-}" == "--minimal" ]] || [[ "${1:-}" == "-m" ]]; then
     AUTO_YES=true
     MINIMAL_MODE=true
+    AUTO_MODE_LABEL="minimal"
     INSTALL_EZA="yes"
     INSTALL_HELIX="yes"
     INSTALL_DOCKER="yes"
     INSTALL_SPEEDTEST="no"
     INSTALL_BBR="yes"
+    INSTALL_TIME_SYNC=""
     ENABLE_AUTO_UPDATE="no"
     echo "📦 Running in MINIMAL mode - installing only eza, helix, docker and enabling BBR"
 fi
@@ -189,6 +208,7 @@ cleanup_and_exit() {
     exit 130
 }
 
+# Trap errors and interrupts with readable context
 trap 'error_exit $LINENO' ERR
 trap 'cleanup_and_exit' SIGINT SIGTERM
 
@@ -203,25 +223,168 @@ cat << 'EOF'
 |____/ \___|_.__/|_|\__,_|_| |_|___|_| |_|_|\__|
 EOF
 echo -e "${RESET}"
-print_banner "Debian 13 Server Initialization Script 🚀"
-echo "🔧 This script will help you set up a fresh Debian 13 server"
-echo "🤖 Crafted by Claude Sonnet 4.5 & Gemini 3 Pro"
-echo "   and maintained by aoaim! 👨‍💻"
+
+# Get script last update time from GitHub
+LAST_UPDATE=""
+LAST_UPDATE_TIMESTAMP=""
+GITHUB_API_URL="https://api.github.com/repos/aoaim/luanqi_bazao/commits?path=linux_script/debian_init.sh&page=1&per_page=1"
+
+# Try to get last commit date from GitHub API
+if command -v curl &>/dev/null; then
+    GITHUB_RESPONSE=$(curl -s -m 5 "$GITHUB_API_URL" 2>/dev/null) || true
+    if [ -n "$GITHUB_RESPONSE" ]; then
+        # Extract date from JSON response (format: 2025-11-20T09:05:45Z)
+        # Look for the first "date" field in the commit.author or commit.committer object
+        GITHUB_DATE=$(echo "$GITHUB_RESPONSE" | grep '"date"' | head -1 | sed 's/.*: "//;s/".*//') || true
+        
+        if [ -n "$GITHUB_DATE" ]; then
+            # Convert ISO 8601 to readable format with timezone
+            if command -v date &>/dev/null; then
+                # Try GNU date format first (Linux)
+                LAST_UPDATE=$(date -d "$GITHUB_DATE" '+%Y-%m-%d %H:%M:%S %z' 2>/dev/null) || true
+                LAST_UPDATE_TIMESTAMP=$(date -d "$GITHUB_DATE" '+%s' 2>/dev/null) || true
+                
+                # Try macOS date format if GNU format failed
+                if [ -z "$LAST_UPDATE" ]; then
+                    LAST_UPDATE=$(date -jf "%Y-%m-%dT%H:%M:%SZ" "$GITHUB_DATE" '+%Y-%m-%d %H:%M:%S %z' 2>/dev/null) || true
+                    LAST_UPDATE_TIMESTAMP=$(date -jf "%Y-%m-%dT%H:%M:%SZ" "$GITHUB_DATE" '+%s' 2>/dev/null) || true
+                fi
+            fi
+        fi
+    fi
+fi
+
+# Calculate time difference
+TIME_AGO=""
+if [ -n "$LAST_UPDATE_TIMESTAMP" ]; then
+    CURRENT_TIMESTAMP=$(date +%s)
+    DIFF_SECONDS=$((CURRENT_TIMESTAMP - LAST_UPDATE_TIMESTAMP))
+    
+    if [ $DIFF_SECONDS -lt 60 ]; then
+        TIME_AGO="${DIFF_SECONDS} seconds ago"
+    elif [ $DIFF_SECONDS -lt 3600 ]; then
+        MINUTES=$((DIFF_SECONDS / 60))
+        TIME_AGO="${MINUTES} minute(s) ago"
+    elif [ $DIFF_SECONDS -lt 86400 ]; then
+        HOURS=$((DIFF_SECONDS / 3600))
+        TIME_AGO="${HOURS} hour(s) ago"
+    elif [ $DIFF_SECONDS -lt 2592000 ]; then
+        DAYS=$((DIFF_SECONDS / 86400))
+        TIME_AGO="${DAYS} day(s) ago"
+    elif [ $DIFF_SECONDS -lt 31536000 ]; then
+        MONTHS=$((DIFF_SECONDS / 2592000))
+        TIME_AGO="${MONTHS} month(s) ago"
+    else
+        YEARS=$((DIFF_SECONDS / 31536000))
+        TIME_AGO="${YEARS} year(s) ago"
+    fi
+fi
+
+print_banner "Debian Server Init 🚀"
+echo "🔧 One-stop bootstrap for a fresh Debian amd64 server."
+echo "🛡️  Config files touched by this script are first backed up to $BACKUP_DIR."
+echo "🤖 Crafted by Claude Sonnet 4.5 & Gemini 3 Pro."
+echo "Maintained by aoaim! 👨‍💻"
+if [ -n "$LAST_UPDATE" ]; then
+    echo -e "📅 Last updated: ${BOLD}${GREEN}$LAST_UPDATE${RESET}"
+    if [ -n "$TIME_AGO" ]; then
+        echo -e "   ${CYAN}($TIME_AGO)${RESET}"
+    fi
+else
+    echo -e "📅 Last updated: ${YELLOW}Unable to fetch from GitHub${RESET}"
+fi
 echo ""
-echo "Usage:"
-echo "  sudo bash $0           # Interactive mode"
-echo "  sudo bash $0 --minimal # Minimal mode (eza, helix, docker only)"
-echo "  sudo bash $0 -m        # Minimal mode (short form)"
-echo "  sudo bash $0 --yes     # Auto-yes mode (safe defaults)"
-echo "  sudo bash $0 -y        # Auto-yes mode (short form)"
-echo "  sudo bash $0 --aggressive  # Aggressive mode (all optimizations)"
-echo "  sudo bash $0 -a        # Aggressive mode (short form)"
+echo "Usage (choose a mode):"
+echo "  sudo bash $0               # Interactive mode"
+echo "  sudo bash $0 --minimal|-m  # Minimal: pick essentials only"
+echo "  sudo bash $0 --yes|-y      # Auto-yes: safe defaults, no prompts"
+echo "  sudo bash $0 --aggressive|-a  # Aggressive: apply every tweak"
 sleep 3
 
 if [ "$(id -u)" != "0" ]; then
     print_error "Error: You must be root to run this script"
     echo "💡 Please run with: sudo bash $0"
     exit 1
+fi
+
+# ============================================
+# Check if script has run before (Early Check)
+# ============================================
+if [ -f "$MARKER_FILE" ]; then
+    echo ""
+    print_banner "📋 Previous Run Detected"
+    
+    # Read the marker file
+    MARKER_LINES=()
+    while IFS= read -r line; do
+        MARKER_LINES+=("$line")
+    done < "$MARKER_FILE"
+    
+    # First line is the timestamp
+    if [ ${#MARKER_LINES[@]} -gt 0 ]; then
+        echo -e "${BOLD}Last run:${RESET} ${GREEN}${MARKER_LINES[0]}${RESET}"
+        echo ""
+    fi
+    
+    # Determine the mode from the actions
+    RUN_MODE="Unknown"
+    if grep -qi "Minimal mode:" "$MARKER_FILE" 2>/dev/null; then
+        RUN_MODE="Minimal Mode"
+    elif grep -qi "aggressive" "$MARKER_FILE" 2>/dev/null; then
+        RUN_MODE="Aggressive Mode"
+    elif [ ${#MARKER_LINES[@]} -gt 1 ]; then
+        RUN_MODE="Standard Mode"
+    fi
+    
+    echo -e "${BOLD}Mode used:${RESET} ${CYAN}$RUN_MODE${RESET}"
+    echo ""
+    
+    # Show mode details (line 2 of marker file) separately from actions
+    START_ACTION_INDEX=1
+    if [ ${#MARKER_LINES[@]} -gt 1 ]; then
+        echo -e "${BOLD}Mode details:${RESET} ${MARKER_LINES[1]}"
+        echo ""
+        START_ACTION_INDEX=2
+    fi
+    
+    # Display the actions taken
+    if [ ${#MARKER_LINES[@]} -gt $START_ACTION_INDEX ]; then
+        echo -e "${BOLD}Actions performed:${RESET}"
+        for ((i=START_ACTION_INDEX; i<${#MARKER_LINES[@]}; i++)); do
+            if [ -n "${MARKER_LINES[$i]}" ]; then
+                echo -e "  ${CYAN}→${RESET} ${MARKER_LINES[$i]}"
+            fi
+        done
+        echo ""
+    fi
+    
+    print_warning "Running this script again may overwrite existing configurations."
+    echo ""
+
+    # Always confirm rerun regardless of mode/flags
+    if [ "$AGGRESSIVE_MODE" = true ]; then
+        print_warning "Aggressive mode detected, but reconfiguration requires manual confirmation."
+    elif [ "$AUTO_YES" = true ]; then
+        print_warning "Auto-yes mode detected, but reconfiguration requires manual confirmation."
+    fi
+
+    while true; do
+        echo -e "${CYAN}${BOLD}>>> Do you want to continue anyway? This may overwrite existing configurations. (yes/no):${RESET} "
+        read continue_run
+        if validate_yes_no "$continue_run"; then
+            break
+        else
+            print_error "Invalid input. Please enter 'yes', 'y', 'no', or 'n'"
+        fi
+    done
+    continue_run_lower=$(echo "$continue_run" | tr '[:upper:]' '[:lower:]')
+    if [ "$continue_run_lower" != "yes" ] && [ "$continue_run_lower" != "y" ]; then
+        echo "Exiting..."
+        exit 0
+    fi
+    echo "Continuing with reconfiguration..."
+
+    sleep 2
 fi
 
 # Interactive mode prompts (if not already set via command line)
@@ -231,16 +394,18 @@ if [ "$AUTO_YES" = false ]; then
     echo -e "${CYAN}${BOLD}📦 Minimal Mode${RESET}"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
-    echo -e "${YELLOW}Minimal mode allows you to choose which essential tools to install:${RESET}"
+    echo -e "${YELLOW}Minimal mode lets you cherry-pick only the essentials:${RESET}"
     echo ""
     echo "  • Eza (Modern ls replacement)"
     echo "  • Helix Editor (Modern modal text editor)"
     echo "  • Docker & Docker Compose"
-    echo "  • Speedtest CLI"
+    echo "  • Speedtest"
+    echo "  • Fail2ban"
     echo "  • BBR Congestion Control"
+    echo "  • Time Synchronization (chrony)"
     echo "  • Automatic Updates"
     echo ""
-    echo -e "${GREEN}Perfect for: Customizing your setup with only what you need${RESET}"
+    echo -e "${GREEN}Good for: Keeping the box lean while adding your must-haves${RESET}"
     echo ""
     while true; do
         echo -e "${CYAN}${BOLD}>>> Do you want to use minimal mode? (yes/no, default: no):${RESET} "
@@ -257,6 +422,7 @@ if [ "$AUTO_YES" = false ]; then
     enable_minimal_lower=$(echo "$enable_minimal" | tr '[:upper:]' '[:lower:]')
     if [ "$enable_minimal_lower" = "yes" ] || [ "$enable_minimal_lower" = "y" ]; then
         AUTO_YES=true
+        AUTO_MODE_LABEL="minimal"
         MINIMAL_MODE=true
         
         # Ask for components
@@ -298,6 +464,15 @@ if [ "$AUTO_YES" = false ]; then
             if validate_yes_no "$install_speedtest_choice"; then break; fi
         done
         INSTALL_SPEEDTEST=$(echo "$install_speedtest_choice" | tr '[:upper:]' '[:lower:]')
+
+        # Fail2ban
+        while true; do
+            echo -e "${CYAN}>>> Install Fail2ban? (yes/no, default: yes):${RESET} "
+            read install_fail2ban_choice
+            if [ -z "$install_fail2ban_choice" ]; then install_fail2ban_choice="yes"; fi
+            if validate_yes_no "$install_fail2ban_choice"; then break; fi
+        done
+        INSTALL_FAIL2BAN=$(echo "$install_fail2ban_choice" | tr '[:upper:]' '[:lower:]')
         
         # BBR
         while true; do
@@ -307,6 +482,15 @@ if [ "$AUTO_YES" = false ]; then
             if validate_yes_no "$install_bbr_choice"; then break; fi
         done
         INSTALL_BBR=$(echo "$install_bbr_choice" | tr '[:upper:]' '[:lower:]')
+        
+        # Time Synchronization
+        while true; do
+            echo -e "${CYAN}>>> Install Time Synchronization (chrony)? (yes/no, default: yes):${RESET} "
+            read install_time_sync_choice
+            if [ -z "$install_time_sync_choice" ]; then install_time_sync_choice="yes"; fi
+            if validate_yes_no "$install_time_sync_choice"; then break; fi
+        done
+        INSTALL_TIME_SYNC=$(echo "$install_time_sync_choice" | tr '[:upper:]' '[:lower:]')
         
         # Auto Updates
         while true; do
@@ -341,7 +525,9 @@ if [ "$AUTO_YES" = false ]; then
         echo "  • Helix: $INSTALL_HELIX"
         echo "  • Docker: $INSTALL_DOCKER"
         echo "  • Speedtest: $INSTALL_SPEEDTEST"
+        echo "  • Fail2ban: $INSTALL_FAIL2BAN"
         echo "  • BBR: $INSTALL_BBR"
+        echo "  • Time Sync: $INSTALL_TIME_SYNC"
         if [ "$ENABLE_AUTO_UPDATE" = "yes" ] || [ "$ENABLE_AUTO_UPDATE" = "y" ]; then
             level_name="Security only"
             [ "$AUTO_UPDATE_LEVEL" = "2" ] && level_name="Full updates"
@@ -356,7 +542,7 @@ if [ "$AUTO_YES" = false ]; then
         echo -e "${GREEN}${BOLD}🚀 Auto-Yes Mode${RESET}"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo ""
-        echo -e "${YELLOW}Enabling auto-yes mode will automatically execute the following operations:${RESET}"
+        echo -e "${YELLOW}Auto-yes mode applies safe defaults with zero prompts:${RESET}"
     echo ""
     echo "📦 Package Installation & Updates:"
     echo "   • Update system packages (apt update && apt upgrade)"
@@ -376,17 +562,15 @@ if [ "$AUTO_YES" = false ]; then
     echo "   • Configure bash aliases and environment"
     echo "   • Set up color prompt and command shortcuts"
     echo ""
-    echo -e "${RED}❌ What will NOT be executed automatically:${RESET}"
-    echo "   • Won't install Docker & Docker Compose (default: no)"
-    echo "   • Won't install Watchtower (depends on Docker)"
-    echo "   • Won't apply aggressive network & kernel optimization (too risky for general use)"
-    echo "   • Won't delete any user data or system files"
-    echo "   • Won't overwrite configs (backups created in $BACKUP_DIR)"
-    echo "   • Won't change timezone (keeps current: $(timedatectl show --property=Timezone --value 2>/dev/null || echo 'Unknown'))"
-    echo "   • Won't enable stable updates (security updates only)"
-    echo "   • Won't install optional monitoring tools (iftop, nload, iotop, etc.)"
-    echo "   • Won't reboot system (manual reboot required after completion)"
-    echo "   • Script aborts on any error to prevent partial installations"
+    echo -e "${RED}❌ Auto-yes deliberately skips:${RESET}"
+    echo "   • Docker, Docker Compose, Watchtower (opt-in only)"
+    echo "   • Aggressive kernel/network tweaks"
+    echo "   • Any destructive changes or config overwrites (backups go to $BACKUP_DIR)"
+    echo "   • Timezone changes (keeps current: $(timedatectl show --property=Timezone --value 2>/dev/null || echo 'Unknown'))"
+    echo "   • Stable/non-security auto updates"
+    echo "   • Optional monitoring tools (iftop, nload, iotop, etc.)"
+    echo "   • Automatic reboot (you decide when to reboot)"
+    echo "   • Continues only while commands succeed; aborts on error"
     echo ""
     echo -e "${CYAN}${BOLD}⚠️  Note: A system reboot will be required after completion${RESET}"
     echo ""
@@ -414,7 +598,7 @@ if [ "$AUTO_YES" = false ]; then
             echo -e "${RED}${BOLD}🔥 AGGRESSIVE MODE${RESET}"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo ""
-        echo -e "${YELLOW}Aggressive mode will perform ALL operations WITHOUT prompts, including:${RESET}"
+        echo -e "${YELLOW}Aggressive mode runs EVERYTHING without prompts, including risky tuning:${RESET}"
         echo ""
         echo "✅ Everything from auto-yes mode PLUS:"
         echo ""
@@ -464,6 +648,7 @@ if [ "$AUTO_YES" = false ]; then
             if [ "$enable_aggressive_lower" = "yes" ] || [ "$enable_aggressive_lower" = "y" ]; then
                 AUTO_YES=true
                 AGGRESSIVE_MODE=true
+                AUTO_MODE_LABEL="aggressive"
                 echo ""
                 print_success "🔥 AGGRESSIVE MODE ENABLED - All operations will be executed automatically"
                 sleep 2
@@ -482,15 +667,28 @@ if [ -f /etc/os-release ]; then
     fi
     DEBIAN_VERSION=$(cat /etc/debian_version | cut -d. -f1)
     ARCH=$(uname -m)
-    if [ "$DEBIAN_VERSION" != "13" ]; then
-        print_error "Error: This script only supports Debian 13 (detected: Debian $DEBIAN_VERSION)"
+    if [ "$DEBIAN_VERSION" != "12" ] && [ "$DEBIAN_VERSION" != "13" ]; then
+        print_error "Error: This script only supports Debian 12 or 13 (detected: Debian $DEBIAN_VERSION)"
         exit 1
     fi
     if [ "$ARCH" != "x86_64" ] && [ "$ARCH" != "amd64" ]; then
         print_error "Error: This script only supports amd64 architecture (detected: $ARCH)"
         exit 1
     fi
-    print_success "Running on Debian 13 amd64"
+    distro_codename="${VERSION_CODENAME:-$(lsb_release -cs 2>/dev/null || echo '')}"
+    if [ -z "$distro_codename" ]; then
+        case "$DEBIAN_VERSION" in
+            12)
+                distro_codename="bookworm"
+                print_warning "Unable to detect Debian codename, defaulting to 'bookworm'"
+                ;;
+            13|*)
+                distro_codename="trixie"
+                print_warning "Unable to detect Debian codename, defaulting to 'trixie'"
+                ;;
+        esac
+    fi
+    print_success "Running on Debian ${DEBIAN_VERSION} amd64"
 fi
 
 # ============================================
@@ -501,6 +699,7 @@ print_banner "🔍 Checking managed programs for updates..."
 UPDATES_AVAILABLE=false
 UPDATE_LIST=""
 PROGRAMS_FOUND=false
+SPEEDTEST_DISTRO="${distro_codename:-trixie}"
 
 # Track installation status
 SPEEDTEST_ALREADY_INSTALLED=false
@@ -515,7 +714,7 @@ if command -v speedtest &> /dev/null; then
     CURRENT_SPEEDTEST=$(speedtest --version 2>/dev/null | grep -oP 'Ookla \K[0-9.]+' | head -n1 || echo "unknown")
     print_success "Speedtest installed: v$CURRENT_SPEEDTEST"
     
-    LATEST_SPEEDTEST_VERSION=$(curl -sL "https://packagecloud.io/ookla/speedtest-cli/debian/dists/trixie/main/binary-amd64/Packages" 2>/dev/null | \
+    LATEST_SPEEDTEST_VERSION=$(curl -sL "https://packagecloud.io/ookla/speedtest-cli/debian/dists/${SPEEDTEST_DISTRO}/main/binary-amd64/Packages" 2>/dev/null | \
         grep -A10 "Package: speedtest" | \
         grep "^Version:" | \
         head -n1 | \
@@ -598,7 +797,7 @@ if [ "$UPDATES_AVAILABLE" = true ]; then
     # Update speedtest-cli
     if command -v speedtest &> /dev/null && echo "$UPDATE_LIST" | grep -q "speedtest-cli"; then
         echo "Updating speedtest-cli..."
-        SPEEDTEST_DEB_PATH=$(curl -sL "https://packagecloud.io/ookla/speedtest-cli/debian/dists/trixie/main/binary-amd64/Packages" 2>/dev/null | \
+        SPEEDTEST_DEB_PATH=$(curl -sL "https://packagecloud.io/ookla/speedtest-cli/debian/dists/${SPEEDTEST_DISTRO}/main/binary-amd64/Packages" 2>/dev/null | \
             grep -A10 "Package: speedtest" | \
             grep "^Filename:" | \
             head -n1 | \
@@ -611,6 +810,7 @@ if [ "$UPDATES_AVAILABLE" = true ]; then
                 dpkg -i speedtest_update.deb || apt-get install -f -y
                 rm -f speedtest_update.deb
                 print_success "speedtest-cli updated to $(speedtest --version 2>/dev/null | head -n1)"
+                log_action "Updated speedtest-cli to $(speedtest --version 2>/dev/null | head -n1)"
             else
                 print_error "Failed to download speedtest update"
                 rm -f speedtest_update.deb
@@ -632,6 +832,7 @@ if [ "$UPDATES_AVAILABLE" = true ]; then
                 dpkg -i helix_update.deb || apt-get install -f -y
                 rm -f helix_update.deb
                 print_success "Helix updated to $(hx --version 2>/dev/null | head -n1)"
+                log_action "Updated Helix editor to $(hx --version 2>/dev/null | head -n1)"
             else
                 print_error "Failed to download Helix update"
                 rm -f helix_update.deb
@@ -656,6 +857,7 @@ if [ "$UPDATES_AVAILABLE" = true ]; then
                     if [ -n "$EZA_BIN_PATH" ]; then
                         install -m 755 "$EZA_BIN_PATH" /usr/local/bin/eza
                         print_success "eza updated to $(eza --version 2>/dev/null | head -n1)"
+                        log_action "Updated eza to $(eza --version 2>/dev/null | head -n1)"
                     else
                         print_error "Failed to locate eza binary in update package"
                     fi
@@ -678,49 +880,12 @@ else
     fi
 fi
 
-# ============================================
-# Check if script has run before
-# ============================================
-if [ -f "$MARKER_FILE" ] && [ "$MINIMAL_MODE" = false ]; then
-    print_banner "⚠️  Warning"
-    echo -e "${YELLOW}This script has already been run previously:${RESET}"
-    echo ""
-    # Read and display marker content
-    while IFS= read -r line; do
-        if [[ "$line" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2} ]]; then
-            echo -e "  ${BOLD}Time:${RESET} $line"
-        elif [ -n "$line" ]; then
-            echo -e "  ${CYAN}→${RESET} $line"
-        fi
-    done < "$MARKER_FILE"
-    echo ""
-    # Even in AUTO_YES mode, we want to confirm reconfiguration
-    if [ "$AUTO_YES" = true ]; then
-        print_warning "Auto-yes mode detected, but reconfiguration requires manual confirmation."
-    fi
-
-    while true; do
-        echo -e "${CYAN}${BOLD}>>> Do you want to continue anyway? This may overwrite existing configurations. (yes/no):${RESET} "
-        read continue_run
-        if validate_yes_no "$continue_run"; then
-            break
-        else
-            print_error "Invalid input. Please enter 'yes', 'y', 'no', or 'n'"
-        fi
-    done
-    continue_run_lower=$(echo "$continue_run" | tr '[:upper:]' '[:lower:]')
-    if [ "$continue_run_lower" != "yes" ] && [ "$continue_run_lower" != "y" ]; then
-        echo "Exiting..."
-        exit 0
-    fi
-    echo "Continuing with reconfiguration..."
-fi
-
-# Log actions performed during script execution
+# Log actions performed during script execution (written to marker file at end)
 log_action() {
     ACTIONS_LOG+=("$1")
 }
 
+# Create timestamped backup if target exists and content would change
 backup_file() {
     local file="$1"
     local new_content="${2:-}"
@@ -748,6 +913,21 @@ backup_file() {
     echo "  Backed up: $file"
 }
 
+print_changes_summary() {
+    print_banner "📜 Changes applied (${AUTO_MODE_LABEL:-interactive})"
+    if [ ${#ACTIONS_LOG[@]} -gt 0 ]; then
+        for action in "${ACTIONS_LOG[@]}"; do
+            echo "  • $action"
+        done
+    else
+        print_info "No system changes were recorded in this run."
+    fi
+    
+    if [ -d "$BACKUP_DIR" ] && [ "$(ls -A "$BACKUP_DIR" 2>/dev/null)" ]; then
+        print_info "Backups saved to: $BACKUP_DIR"
+    fi
+}
+
 print_banner "📦 Updating system and installing essential packages..."
 
 # Check if dpkg is interrupted or needs configuration
@@ -771,6 +951,7 @@ if ! dpkg --audit >/dev/null 2>&1 || dpkg --audit 2>&1 | grep -q "dpkg was inter
             fi
         fi
         print_success "Package system repair attempted"
+        log_action "Repaired package system (dpkg --configure -a, apt-get install --fix-broken -y)"
     else
         while true; do
             echo -e "${CYAN}${BOLD}>>> Do you want to run repair commands (dpkg --configure -a) to fix this? (yes/y):${RESET} "
@@ -791,6 +972,7 @@ if ! dpkg --audit >/dev/null 2>&1 || dpkg --audit 2>&1 | grep -q "dpkg was inter
             dpkg --configure -a
             apt-get install --fix-broken -y
             print_success "Package system repair attempted"
+            log_action "Repaired package system (dpkg --configure -a, apt-get install --fix-broken -y)"
         else
             print_warning "Skipping repair. Subsequent apt commands may fail."
         fi
@@ -807,8 +989,13 @@ else
     print_info "Minimal mode: Skipping system update and essential packages"
     print_info "Only installing curl and wget for download requirements..."
     apt update -y
-    apt install -y curl wget
-    log_action "Minimal mode: Installed curl and wget only"
+    MINIMAL_PACKAGES=(curl wget)
+    if [ "$INSTALL_FAIL2BAN" = "yes" ] || [ "$INSTALL_FAIL2BAN" = "y" ]; then
+        MINIMAL_PACKAGES+=(fail2ban)
+        print_info "Minimal mode: Including fail2ban as requested"
+    fi
+    apt install -y "${MINIMAL_PACKAGES[@]}"
+    log_action "Minimal mode: Installed ${MINIMAL_PACKAGES[*]}"
 fi
 
 print_banner "📊 Network & System Monitoring Tools (Optional)"
@@ -860,6 +1047,7 @@ else
     echo "  apt install -y dnsutils nload iftop vnstat iotop"
 fi
 
+# Determine whether to install unattended-upgrades
 if [ "$MINIMAL_MODE" = true ]; then
     if [ "$ENABLE_AUTO_UPDATE" = "yes" ] || [ "$ENABLE_AUTO_UPDATE" = "y" ]; then
         install_unattended_lower="yes"
@@ -876,26 +1064,31 @@ if [ "$MINIMAL_MODE" = true ]; then
     fi
 else
     print_banner "🔄 Unattended-upgrades installation"
-print_info "Unattended-upgrades automatically installs security updates daily."
-echo ""
-if [ "$AUTO_YES" = true ]; then
-    install_unattended_lower="yes"
-    echo "Auto-yes mode: Installing unattended-upgrades..."
-else
-    while true; do
-        echo -e "${CYAN}${BOLD}>>> Do you want to install and enable unattended-upgrades? (y/yes, default: no):${RESET} "
-        read install_unattended
-        if [ -z "$install_unattended" ]; then
-            install_unattended="no"
-        fi
-        if validate_yes_no "$install_unattended"; then
-            break
-        else
-            print_error "Invalid input. Please enter 'yes', 'y', 'no', or 'n'"
-        fi
-    done
-    install_unattended_lower=$(echo "$install_unattended" | tr '[:upper:]' '[:lower:]')
+    print_info "Unattended-upgrades automatically installs security updates daily."
+    echo ""
+    if [ "$AUTO_YES" = true ]; then
+        install_unattended_lower="yes"
+        echo "Auto-yes mode: Installing unattended-upgrades..."
+        enable_more_updates_lower="yes"
+        echo "Auto-yes/aggressive mode: Enabling security + stable (non-security) unattended updates"
+    else
+        while true; do
+            echo -e "${CYAN}${BOLD}>>> Do you want to install and enable unattended-upgrades? (y/yes, default: no):${RESET} "
+            read install_unattended
+            if [ -z "$install_unattended" ]; then
+                install_unattended="no"
+            fi
+            if validate_yes_no "$install_unattended"; then
+                break
+            else
+                print_error "Invalid input. Please enter 'yes', 'y', 'no', or 'n'"
+            fi
+        done
+        install_unattended_lower=$(echo "$install_unattended" | tr '[:upper:]' '[:lower:]')
+    fi
 fi
+
+# Proceed with installation if user agreed
 if [ "$install_unattended_lower" = "y" ] || [ "$install_unattended_lower" = "yes" ]; then
     echo "Installing unattended-upgrades..."
     apt install -y unattended-upgrades
@@ -905,6 +1098,7 @@ if [ "$install_unattended_lower" = "y" ] || [ "$install_unattended_lower" = "yes
         log_action "Installed and enabled unattended-upgrades (automatic security updates)"
         echo unattended-upgrades unattended-upgrades/enable_auto_updates boolean true | debconf-set-selections
         dpkg-reconfigure -f noninteractive unattended-upgrades
+        systemctl enable --now apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
         if [ -f /etc/apt/apt.conf.d/20auto-upgrades ]; then
             print_success "Auto-updates configuration created"
         fi
@@ -915,27 +1109,30 @@ if [ "$install_unattended_lower" = "y" ] || [ "$install_unattended_lower" = "yes
             print_success "apt-daily-upgrade.timer is enabled"
         fi
         
-        echo ""
-        echo "By default, only security updates are automatically installed."
-        echo "You can also enable automatic updates for:"
-        echo "  • Stable updates (bug fixes)"
-        if [ "$AUTO_YES" = true ]; then
-            enable_more_updates_lower="no"
-            echo "Auto-yes mode: Keeping default configuration (security updates only)"
-        else
-            while true; do
-                echo -e "${CYAN}${BOLD}>>> Do you want to enable updates beyond security? (y/yes, default: no):${RESET} "
-                read enable_more_updates
-                if [ -z "$enable_more_updates" ]; then
-                    enable_more_updates="no"
-                fi
-                if validate_yes_no "$enable_more_updates"; then
-                    break
-                else
-                    print_error "Invalid input. Please enter 'yes', 'y', 'no', or 'n'"
-                fi
-            done
-            enable_more_updates_lower=$(echo "$enable_more_updates" | tr '[:upper:]' '[:lower:]')
+        # Check if we need to ask about additional updates (if not already set in minimal mode)
+        if [ -z "$enable_more_updates_lower" ]; then
+            echo ""
+            echo "By default, only security updates are automatically installed."
+            echo "You can also enable automatic updates for:"
+            echo "  • Stable updates (bug fixes)"
+            if [ "$AUTO_YES" = true ]; then
+                enable_more_updates_lower="no"
+                echo "Auto-yes mode: Keeping default configuration (security updates only)"
+            else
+                while true; do
+                    echo -e "${CYAN}${BOLD}>>> Do you want to enable updates beyond security? (y/yes, default: no):${RESET} "
+                    read enable_more_updates
+                    if [ -z "$enable_more_updates" ]; then
+                        enable_more_updates="no"
+                    fi
+                    if validate_yes_no "$enable_more_updates"; then
+                        break
+                    else
+                        print_error "Invalid input. Please enter 'yes', 'y', 'no', or 'n'"
+                    fi
+                done
+                enable_more_updates_lower=$(echo "$enable_more_updates" | tr '[:upper:]' '[:lower:]')
+            fi
         fi
         
         if [ "$enable_more_updates_lower" = "y" ] || [ "$enable_more_updates_lower" = "yes" ]; then
@@ -953,12 +1150,28 @@ if [ "$install_unattended_lower" = "y" ] || [ "$install_unattended_lower" = "yes
         fi
         
         print_success "Unattended-upgrades configured and enabled"
+        UNATTENDED_UPGRADES_INSTALLED=true
     else
         print_warning "unattended-upgrades installation could not be verified"
+        UNATTENDED_UPGRADES_INSTALLED=false
     fi
 else
     print_info "Skipping unattended-upgrades installation"
-fi
+    UNATTENDED_UPGRADES_INSTALLED=false
+    if dpkg -l unattended-upgrades 2>/dev/null | grep -q "^ii"; then
+        print_warning "User opted out; removing unattended-upgrades and disabling related timers"
+        systemctl disable --now unattended-upgrades.service apt-daily-upgrade.service apt-daily-upgrade.timer apt-daily.service apt-daily.timer 2>/dev/null || true
+        rm -f /etc/apt/apt.conf.d/20auto-upgrades /etc/apt/apt.conf.d/50unattended-upgrades /etc/apt/apt.conf.d/52unattended-upgrades-local
+        if apt purge -y unattended-upgrades; then
+            print_success "unattended-upgrades removed"
+            log_action "Removed unattended-upgrades per user opt-out"
+        else
+            print_warning "Failed to purge unattended-upgrades automatically; please review manually"
+        fi
+    else
+        systemctl disable --now apt-daily-upgrade.timer apt-daily.timer 2>/dev/null || true
+        print_info "Auto-update timers disabled per user choice"
+    fi
 fi
 
 # 📡 Speedtest
@@ -1000,7 +1213,7 @@ else
     if [ "$install_speedtest_lower" = "y" ] || [ "$install_speedtest_lower" = "yes" ]; then
     echo "Fetching latest Speedtest version from Debian repository..."
     
-    SPEEDTEST_DEB_PATH=$(curl -sL "https://packagecloud.io/ookla/speedtest-cli/debian/dists/trixie/main/binary-amd64/Packages" 2>/dev/null | \
+    SPEEDTEST_DEB_PATH=$(curl -sL "https://packagecloud.io/ookla/speedtest-cli/debian/dists/${SPEEDTEST_DISTRO}/main/binary-amd64/Packages" 2>/dev/null | \
         grep -A10 "Package: speedtest" | \
         grep "^Filename:" | \
         head -n1 | \
@@ -1008,7 +1221,7 @@ else
     
     if [ -n "$SPEEDTEST_DEB_PATH" ]; then
         SPEEDTEST_DEB_URL="https://packagecloud.io/ookla/speedtest-cli/debian/${SPEEDTEST_DEB_PATH}"
-        SPEEDTEST_VERSION_INFO=$(curl -sL "https://packagecloud.io/ookla/speedtest-cli/debian/dists/trixie/main/binary-amd64/Packages" 2>/dev/null | \
+        SPEEDTEST_VERSION_INFO=$(curl -sL "https://packagecloud.io/ookla/speedtest-cli/debian/dists/${SPEEDTEST_DISTRO}/main/binary-amd64/Packages" 2>/dev/null | \
             grep -A10 "Package: speedtest" | \
             grep "^Version:" | \
             head -n1 | \
@@ -1204,10 +1417,21 @@ EOF
 fi
 
 # 📂 Eza
+# Helper: parse eza version reliably (handles outputs with or without leading 'v')
+get_eza_version() {
+    local version_raw
+    version_raw=$(eza --version 2>/dev/null | head -n1 || true)
+    if [ -z "$version_raw" ]; then
+        echo "N/A"
+        return
+    fi
+    echo "$version_raw" | grep -oE '[0-9]+(\.[0-9]+)*([.-][A-Za-z0-9]+)?' || echo "N/A"
+}
+
 print_banner "📂 Eza installation"
 if [ "$EZA_ALREADY_INSTALLED" = true ]; then
     print_success "Eza already installed, skipping..."
-    EZA_VERSION=$(eza --version 2>/dev/null | grep -oP '^v[0-9.]+' || echo "N/A")
+    EZA_VERSION=$(get_eza_version)
 else
     if [ "$MINIMAL_MODE" = true ]; then
         if [ "$INSTALL_EZA" = "yes" ] || [ "$INSTALL_EZA" = "y" ]; then
@@ -1252,7 +1476,7 @@ else
                             rm -f eza.tar.gz
                             rm -rf "$TMP_EZA_DIR"
                             EZA_INSTALLED=true
-                            EZA_VERSION=$(eza --version 2>/dev/null | head -n1 | grep -oP 'v\K[0-9.]+' || echo "N/A")
+                            EZA_VERSION=$(get_eza_version)
                             print_success "Eza installed from GitHub release (binary)"
                             log_action "Installed Eza v$EZA_VERSION"
                             break
@@ -1288,7 +1512,7 @@ alias lt='eza -lh --icons --git --tree'
 alias l='eza -lah --icons --git'
 EOF
             chmod 644 /etc/profile.d/eza-alias.sh
-            EZA_VERSION=$(eza --version 2>/dev/null | grep -oP '^v[0-9.]+' || echo "N/A")
+            EZA_VERSION=$(get_eza_version)
             print_success "Eza aliased to ls"
         fi
     else
@@ -1296,10 +1520,17 @@ EOF
     fi
 fi
 
-if [ "$MINIMAL_MODE" = true ]; then
+if [ "$MINIMAL_MODE" = true ] && [ "$INSTALL_TIME_SYNC" != "yes" ] && [ "$INSTALL_TIME_SYNC" != "y" ]; then
     print_info "Minimal mode: Skipping time synchronization configuration"
 else
     print_banner "🕐 Configuring time synchronization..."
+
+# Install chrony if not already installed
+if ! command -v chronyc &> /dev/null; then
+    print_info "Installing chrony..."
+    apt install -y chrony
+    print_success "Chrony installed successfully"
+fi
 
 # Determine NTP server region based on location
 NTP_REGION_PREFIX="" # Default to global pool (0.pool.ntp.org)
@@ -1342,9 +1573,22 @@ rtcsync
 log tracking measurements statistics
 logdir /var/log/chrony"
 
-backup_file /etc/chrony/chrony.conf "$NEW_CHRONY_CONF"
-echo "$NEW_CHRONY_CONF" > /etc/chrony/chrony.conf
+# Determine the correct chrony config file path
+CHRONY_CONF=""
+if [ -f /etc/chrony/chrony.conf ]; then
+    CHRONY_CONF="/etc/chrony/chrony.conf"
+elif [ -f /etc/chrony.conf ]; then
+    CHRONY_CONF="/etc/chrony.conf"
+else
+    # Create directory if needed
+    mkdir -p /etc/chrony
+    CHRONY_CONF="/etc/chrony/chrony.conf"
+fi
+
+backup_file "$CHRONY_CONF" "$NEW_CHRONY_CONF"
+echo "$NEW_CHRONY_CONF" > "$CHRONY_CONF"
 systemctl enable --now chrony
+log_action "Configured time synchronization (chrony with ${NTP_REGION_PREFIX}pool.ntp.org)"
 sleep 2
 chronyc tracking || true
 echo "Waiting for time synchronization..."
@@ -1352,7 +1596,6 @@ for i in {1..12}; do
     status=$(chronyc tracking 2>/dev/null | grep 'Leap status' | cut -d':' -f2 | xargs || echo "Unknown")
     if [[ "$status" == "Normal" ]]; then
         print_success "Time synchronized"
-        log_action "Configured time synchronization (chrony with ${NTP_REGION_PREFIX}pool.ntp.org)"
         break
     fi
     sleep 5
@@ -1397,7 +1640,7 @@ fi
 fi
 
 if [ "$MINIMAL_MODE" = true ]; then
-    print_info "Minimal mode: Skipping kernel module loading and fail2ban"
+    print_info "Minimal mode: Skipping kernel module loading"
 else
     print_banner "🔧 Loading kernel modules..."
     # nf_conntrack: Connection tracking
@@ -1408,8 +1651,48 @@ else
     modprobe nf_conntrack 2>/dev/null || true
     modprobe tls 2>/dev/null || true
     print_success "Kernel modules configured (nf_conntrack, tls)"
+    log_action "Configured kernel modules (nf_conntrack, tls) via /usr/lib/modules-load.d/network-performance.conf"
+fi
+
+CONFIGURE_FAIL2BAN=false
+if [ "$MINIMAL_MODE" = true ]; then
+    if [ "$INSTALL_FAIL2BAN" = "yes" ] || [ "$INSTALL_FAIL2BAN" = "y" ]; then
+        CONFIGURE_FAIL2BAN=true
+    else
+        print_info "Minimal mode: Skipping fail2ban"
+    fi
+else
+    CONFIGURE_FAIL2BAN=true
+fi
+
+if [ "$CONFIGURE_FAIL2BAN" = true ]; then
+    if ! command -v fail2ban-server &> /dev/null; then
+        apt install -y fail2ban
+        log_action "Installed fail2ban (dependency install before configuration)"
+    fi
+
+    if [ "$DEBIAN_VERSION" = "12" ]; then
+        JAIL_LOCAL="/etc/fail2ban/jail.local"
+        JAIL_LOCAL_CONTENT="[DEFAULT]
+backend = systemd
+
+[sshd]
+enabled = true"
+        backup_file "$JAIL_LOCAL" "$JAIL_LOCAL_CONTENT"
+        cat > "$JAIL_LOCAL" <<'EOF'
+[DEFAULT]
+backend = systemd
+
+[sshd]
+enabled = true
+EOF
+        print_success "Configured fail2ban to use systemd backend for sshd (Debian 12)"
+        log_action "Configured fail2ban systemd backend for sshd on Debian 12"
+    fi
+
     systemctl enable --now fail2ban
     print_success "Fail2ban enabled"
+    log_action "Enabled fail2ban service"
 fi
 
 if [ "$MINIMAL_MODE" = true ]; then
@@ -1855,6 +2138,7 @@ get_boot_disk() {
     set -e
 }
 
+# Parse eza version reliably (handles outputs with or without leading 'v')
 print_banner "📊 System Configuration Check"
 set +e
 
@@ -1897,7 +2181,9 @@ printf "%-22s: %s\n" "BBR Congestion Control" "$(sysctl -n net.ipv4.tcp_congesti
 printf "%-22s: %s\n" "Queue Discipline" "$(sysctl -n net.core.default_qdisc 2>/dev/null || echo 'N/A')"
 printf "%-22s: %s\n" "Open File Limit" "$(ulimit -n 2>/dev/null || echo 'N/A')"
 printf "%-22s: %s\n" "Process Limit" "$(ulimit -u 2>/dev/null || echo 'N/A')"
-printf "%-22s: %s\n" "Time Sync Status" "$(chronyc tracking 2>/dev/null | grep 'Leap status' | cut -d':' -f2 | xargs 2>/dev/null || echo 'Checking...')"
+TIME_SYNC_STATUS="$(chronyc tracking 2>/dev/null | grep 'Leap status' | cut -d':' -f2 | xargs 2>/dev/null || true)"
+[ -z "$TIME_SYNC_STATUS" ] && TIME_SYNC_STATUS="Checking..."
+printf "%-22s: %s\n" "Time Sync Status" "$TIME_SYNC_STATUS"
 printf "%-22s: %s\n" "NTP Server" "$(grep '^server' /etc/chrony/chrony.conf 2>/dev/null | head -n 1 | awk '{print $2}' || echo 'Unknown')"
 printf "%-22s: %s\n" "Current Timezone" "$(timedatectl show --property=Timezone --value 2>/dev/null || echo 'N/A')"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -1927,9 +2213,12 @@ if command -v docker &>/dev/null; then
 fi
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "Security Status:"
-ssh_status=$(systemctl is-active ssh 2>/dev/null || echo 'inactive')
-fail2ban_status=$(systemctl is-active fail2ban 2>/dev/null || echo 'inactive')
-unattended_upgrades_timer=$(systemctl is-active apt-daily-upgrade.timer 2>/dev/null || echo 'inactive')
+ssh_status=$(systemctl is-active ssh 2>/dev/null || true)
+[ -z "$ssh_status" ] && ssh_status="inactive"
+fail2ban_status=$(systemctl is-active fail2ban 2>/dev/null || true)
+[ -z "$fail2ban_status" ] && fail2ban_status="inactive"
+unattended_upgrades_timer=$(systemctl is-active apt-daily-upgrade.timer 2>/dev/null || true)
+[ -z "$unattended_upgrades_timer" ] && unattended_upgrades_timer="inactive"
 printf "  %-20s: %s\n" "SSH Service" "$ssh_status"
 printf "  %-20s: %s\n" "Fail2ban Service" "$fail2ban_status"
 printf "  %-20s: %s\n" "Auto-updates Timer" "$unattended_upgrades_timer"
@@ -1977,6 +2266,10 @@ if command -v unattended-upgrade &>/dev/null; then
             printf "    └─ Disabled: %s\n" "$disabled_list"
         fi
     fi
+    
+    if [ "$unattended_upgrades_timer" != "active" ]; then
+        echo "    └─ Note : Timer inactive; automatic upgrades will not run. Enable with: systemctl enable --now apt-daily.timer apt-daily-upgrade.timer"
+    fi
 else
     printf "  %-20s: %s\n" "Unattended-upgrades" "not installed"
 fi
@@ -1986,12 +2279,31 @@ if [ "$MINIMAL_MODE" = true ]; then
     print_banner "✅ Minimal installation complete! 🎉"
     echo ""
     print_success "Installed packages:"
-    echo "  ✅ Eza       - $(eza --version 2>/dev/null | head -n1 || echo 'Installed')"
-    echo "  ✅ Helix     - $(hx --version 2>/dev/null | head -n1 || echo 'Installed')"
-    echo "  ✅ Docker    - $(docker --version 2>/dev/null || echo 'Installed')"
-    echo ""
-    print_info "Minimal mode completed. System configuration was not modified."
-    echo ""
+    
+    # Only show packages that were actually selected and installed
+    if [ "$INSTALL_EZA" = "yes" ] || [ "$INSTALL_EZA" = "y" ]; then
+        if command -v eza &>/dev/null; then
+            echo "  ✅ Eza       - $(eza --version 2>/dev/null | head -n1 || echo 'Installed')"
+        fi
+    fi
+    
+    if [ "$INSTALL_HELIX" = "yes" ] || [ "$INSTALL_HELIX" = "y" ]; then
+        if command -v hx &>/dev/null; then
+            echo "  ✅ Helix     - $(hx --version 2>/dev/null | head -n1 || echo 'Installed')"
+        fi
+    fi
+    
+    if [ "$INSTALL_DOCKER" = "yes" ] || [ "$INSTALL_DOCKER" = "y" ]; then
+        if command -v docker &>/dev/null; then
+            echo "  ✅ Docker    - $(docker --version 2>/dev/null || echo 'Installed')"
+        fi
+    fi
+    
+    if [ "$INSTALL_SPEEDTEST" = "yes" ] || [ "$INSTALL_SPEEDTEST" = "y" ]; then
+        if command -v speedtest &>/dev/null; then
+            echo "  ✅ Speedtest - $(speedtest --version 2>/dev/null | grep -oP 'Ookla \K[0-9.]+' | head -n1 || echo 'Installed')"
+        fi
+    fi
 else
     print_banner "✅ System optimization complete! 🎉"
     echo ""
@@ -2018,20 +2330,61 @@ fi
 # Write marker file with timestamp and actions log
 {
     echo "$(date '+%Y-%m-%d %H:%M:%S')"
+    
+    # Add mode information
+    if [ "$MINIMAL_MODE" = true ]; then
+        minimal_summary="${MINIMAL_PACKAGES[*]-}"
+        if [ -n "$minimal_summary" ]; then
+            echo "Minimal mode: Installed packages -> $minimal_summary"
+        else
+            echo "Minimal mode: Installed packages -> (not recorded)"
+        fi
+    elif [ "$AGGRESSIVE_MODE" = true ]; then
+        echo "Aggressive mode: All optimizations applied"
+    elif [ "$AUTO_YES" = true ]; then
+        echo "Auto-yes mode: Safe defaults applied"
+    else
+        echo "Interactive mode: User-selected configurations"
+    fi
+    
     for action in "${ACTIONS_LOG[@]}"; do
         echo "$action"
     done
 } > "$MARKER_FILE"
 print_info "Execution log saved to: $MARKER_FILE"
+print_changes_summary
+echo ""
 
 if [ "$MINIMAL_MODE" = true ]; then
     print_info "Minimal mode: No system reboot required"
     print_success "You can start using the installed tools immediately!"
     echo ""
     echo "Quick start:"
-    echo -e "  • Try eza: ${BOLD}eza -la${RESET}"
-    echo -e "  • Try helix: ${BOLD}hx filename${RESET}"
-    echo -e "  • Check docker: ${BOLD}docker --version${RESET}"
+    
+    # Only show commands for installed tools
+    if [ "$INSTALL_EZA" = "yes" ] || [ "$INSTALL_EZA" = "y" ]; then
+        if command -v eza &>/dev/null; then
+            echo -e "  • Try eza: ${BOLD}eza -la${RESET}"
+        fi
+    fi
+    
+    if [ "$INSTALL_HELIX" = "yes" ] || [ "$INSTALL_HELIX" = "y" ]; then
+        if command -v hx &>/dev/null; then
+            echo -e "  • Try helix: ${BOLD}hx filename${RESET}"
+        fi
+    fi
+    
+    if [ "$INSTALL_DOCKER" = "yes" ] || [ "$INSTALL_DOCKER" = "y" ]; then
+        if command -v docker &>/dev/null; then
+            echo -e "  • Check docker: ${BOLD}docker --version${RESET}"
+        fi
+    fi
+    
+    if [ "$INSTALL_SPEEDTEST" = "yes" ] || [ "$INSTALL_SPEEDTEST" = "y" ]; then
+        if command -v speedtest &>/dev/null; then
+            echo -e "  • Run speedtest: ${BOLD}speedtest${RESET}"
+        fi
+    fi
 else
     print_banner "⚠️  REBOOT REQUIRED ⚠️"
     print_warning "It is STRONGLY RECOMMENDED to reboot the system for all settings to take effect."

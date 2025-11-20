@@ -19,4 +19,5 @@ bash <(wget -qO- https://sh.miaom.eu.org/<path>)
 # 當前支援嘅 path：
 # - snell
 # - debianinit
+# - netcheck
 ```
