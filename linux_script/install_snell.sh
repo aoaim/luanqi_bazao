@@ -73,19 +73,17 @@ get_latest_version() {
     
     if [ -z "$version" ]; then
         echo "5.0.1"
+    else
         echo "$version"
     fi
 }
 
 # --- 比较版本号 ---
 version_gt() {
-        test "$(printf '%s\n' "$@" | sort -V | head -n 1)" != "$1"
+    test "$(printf '%s\n' "$@" | sort -V | head -n 1)" != "$1"
 }
 
 # --- 1. 安装依赖 ---
-install_dependencies() {
-}
-
 install_dependencies() {
     echo "Checking and installing dependencies..."
     
