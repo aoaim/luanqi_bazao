@@ -212,6 +212,17 @@ cleanup_and_exit() {
 trap 'error_exit $LINENO' ERR
 trap 'cleanup_and_exit' SIGINT SIGTERM
 
+# =====================================================
+# Ensure curl is installed first (needed for GitHub API)
+# =====================================================
+if ! command -v curl &>/dev/null; then
+    echo "📦 Installing curl..."
+    apt-get update -qq >/dev/null 2>&1
+    apt-get install -y curl >/dev/null 2>&1
+    echo "✓ curl installed"
+fi
+
+# Clear screen and show banner
 clear
 echo ""
 echo -e "${CYAN}"
@@ -229,35 +240,39 @@ LAST_UPDATE=""
 LAST_UPDATE_TIMESTAMP=""
 GITHUB_API_URL="https://api.github.com/repos/aoaim/luanqi_bazao/commits?path=linux_script/debian_init.sh&page=1&per_page=1"
 
-# Try to get last commit date from GitHub API
-if command -v curl &>/dev/null; then
-    GITHUB_RESPONSE=$(curl -s -m 5 "$GITHUB_API_URL" 2>/dev/null) || true
-    if [ -n "$GITHUB_RESPONSE" ]; then
-        # Extract date from JSON response (format: 2025-11-20T09:05:45Z)
-        # Look for the first "date" field in the commit.author or commit.committer object
-        GITHUB_DATE=$(echo "$GITHUB_RESPONSE" | grep '"date"' | head -1 | sed 's/.*: "//;s/".*//') || true
+# Try to get last commit date from GitHub API (curl is guaranteed to be installed now)
+GITHUB_RESPONSE=$(curl -s -m 5 "$GITHUB_API_URL" 2>/dev/null) || true
+if [ -n "$GITHUB_RESPONSE" ]; then
+    # Extract date from JSON response (format: 2025-11-20T09:05:45Z - already in UTC)
+    GITHUB_DATE=$(echo "$GITHUB_RESPONSE" | grep '"date"' | head -1 | sed 's/.*: "//;s/".*//') || true
+    
+    if [ -n "$GITHUB_DATE" ]; then
+        # Store the UTC timestamp from GitHub
+        # Try GNU date format first (Linux)
+        LAST_UPDATE_TIMESTAMP=$(date -u -d "$GITHUB_DATE" '+%s' 2>/dev/null) || true
         
-        if [ -n "$GITHUB_DATE" ]; then
-            # Convert ISO 8601 to readable format with timezone
-            if command -v date &>/dev/null; then
-                # Try GNU date format first (Linux)
-                LAST_UPDATE=$(date -d "$GITHUB_DATE" '+%Y-%m-%d %H:%M:%S %z' 2>/dev/null) || true
-                LAST_UPDATE_TIMESTAMP=$(date -d "$GITHUB_DATE" '+%s' 2>/dev/null) || true
-                
-                # Try macOS date format if GNU format failed
-                if [ -z "$LAST_UPDATE" ]; then
-                    LAST_UPDATE=$(date -jf "%Y-%m-%dT%H:%M:%SZ" "$GITHUB_DATE" '+%Y-%m-%d %H:%M:%S %z' 2>/dev/null) || true
-                    LAST_UPDATE_TIMESTAMP=$(date -jf "%Y-%m-%dT%H:%M:%SZ" "$GITHUB_DATE" '+%s' 2>/dev/null) || true
-                fi
+        # Try macOS date format if GNU format failed
+        if [ -z "$LAST_UPDATE_TIMESTAMP" ]; then
+            LAST_UPDATE_TIMESTAMP=$(date -ju -f "%Y-%m-%dT%H:%M:%SZ" "$GITHUB_DATE" '+%s' 2>/dev/null) || true
+        fi
+        
+        # Format as UTC time for display
+        if [ -n "$LAST_UPDATE_TIMESTAMP" ]; then
+            # Try GNU date format first (Linux)
+            LAST_UPDATE=$(date -u -d "@$LAST_UPDATE_TIMESTAMP" '+%Y-%m-%d %H:%M:%S UTC' 2>/dev/null) || true
+            
+            # Try macOS date format if GNU format failed
+            if [ -z "$LAST_UPDATE" ]; then
+                LAST_UPDATE=$(date -ju -r "$LAST_UPDATE_TIMESTAMP" '+%Y-%m-%d %H:%M:%S UTC' 2>/dev/null) || true
             fi
         fi
     fi
 fi
 
-# Calculate time difference
+# Calculate time difference (compare UTC timestamps)
 TIME_AGO=""
 if [ -n "$LAST_UPDATE_TIMESTAMP" ]; then
-    CURRENT_TIMESTAMP=$(date +%s)
+    CURRENT_TIMESTAMP=$(date -u +%s)  # Get current UTC timestamp
     DIFF_SECONDS=$((CURRENT_TIMESTAMP - LAST_UPDATE_TIMESTAMP))
     
     if [ $DIFF_SECONDS -lt 60 ]; then
@@ -2283,13 +2298,13 @@ if [ "$MINIMAL_MODE" = true ]; then
     # Only show packages that were actually selected and installed
     if [ "$INSTALL_EZA" = "yes" ] || [ "$INSTALL_EZA" = "y" ]; then
         if command -v eza &>/dev/null; then
-            echo "  ✅ Eza       - $(eza --version 2>/dev/null | head -n1 || echo 'Installed')"
+            echo "  ✅ Eza       - $(eza --version 2>/dev/null | grep -oP '^v[0-9.]+' || echo 'installed')"
         fi
     fi
     
     if [ "$INSTALL_HELIX" = "yes" ] || [ "$INSTALL_HELIX" = "y" ]; then
         if command -v hx &>/dev/null; then
-            echo "  ✅ Helix     - $(hx --version 2>/dev/null | head -n1 || echo 'Installed')"
+            echo "  ✅ Helix     - v$(hx --version 2>/dev/null | grep -oP 'helix \K[0-9.]+' | head -n1 || echo 'installed')"
         fi
     fi
     
@@ -2301,7 +2316,7 @@ if [ "$MINIMAL_MODE" = true ]; then
     
     if [ "$INSTALL_SPEEDTEST" = "yes" ] || [ "$INSTALL_SPEEDTEST" = "y" ]; then
         if command -v speedtest &>/dev/null; then
-            echo "  ✅ Speedtest - $(speedtest --version 2>/dev/null | grep -oP 'Ookla \K[0-9.]+' | head -n1 || echo 'Installed')"
+            echo "  ✅ Speedtest - v$(speedtest --version 2>/dev/null | grep -oP 'Ookla \K[0-9.]+' | head -n1 || echo 'installed')"
         fi
     fi
 else
