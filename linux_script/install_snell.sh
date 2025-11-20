@@ -647,9 +647,9 @@ show_surge_config() {
     echo "=========================================="
     
     if [[ -n "$obfs" && -n "$host" ]]; then
-        echo "snell = snell, ${ip}, ${port}, psk=${psk}, obfs=${obfs}, obfs-host=${host}, version=5, reuse=true"
+        echo "node_name = snell, ${ip}, ${port}, psk=${psk}, obfs=${obfs}, obfs-host=${host}, version=5, reuse=true"
     else
-        echo "snell = snell, ${ip}, ${port}, psk=${psk}, version=5, reuse=true"
+        echo "node_name = snell, ${ip}, ${port}, psk=${psk}, version=5, reuse=true"
     fi
     
     echo "========================================"
