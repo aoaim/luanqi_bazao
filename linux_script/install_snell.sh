@@ -784,15 +784,22 @@ if [ -n "$installed_version" ]; then
                 ;;
             2)
                 echo "Are you sure you want to uninstall Snell server?"
-                read -p "Type 'yes' to confirm: " confirm
-                if [ "$confirm" = "yes" ]; then
-                    uninstall_snell
-                    cleanup_on_exit
-                    exit 0
-                else
-                    echo "Uninstallation cancelled."
-                    read -p "Press Enter to continue..."
-                fi
+                while true; do
+                    read -p "Type 'yes' or 'no': " confirm
+                    confirm_lower=$(echo "$confirm" | tr '[:upper:]' '[:lower:]')
+                    if [ "$confirm_lower" = "yes" ]; then
+                        uninstall_snell
+                        cleanup_on_exit
+                        exit 0
+                    elif [ "$confirm_lower" = "no" ]; then
+                        echo "Uninstallation cancelled."
+                        break
+                    else
+                        echo "Invalid input. Please type 'yes' or 'no'."
+                    fi
+                done
+                echo ""
+                read -p "Press Enter to continue..."
                 ;;
             3)
                 change_port

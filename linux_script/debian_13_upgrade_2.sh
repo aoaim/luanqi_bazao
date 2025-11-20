@@ -178,10 +178,10 @@ run_optimization_lower=$(echo "$run_optimization" | tr '[:upper:]' '[:lower:]')
 if [ "$run_optimization_lower" = "y" ] || [ "$run_optimization_lower" = "yes" ]; then
     echo ""
     echo "Downloading and running optimization script..."
-    bash <(curl -fsSL https://raw.githubusercontent.com/aoaim/luanqi_bazao/main/linux_script/init_linux.sh)
+    bash <(curl -fsSL https://raw.githubusercontent.com/aoaim/luanqi_bazao/main/linux_script/debian_init.sh)
 else
     echo ""
     echo "You can run the optimization script later with:"
-    echo "   bash <(curl -fsSL https://raw.githubusercontent.com/aoaim/luanqi_bazao/main/linux_script/init_linux.sh)"
+    echo "   bash <(curl -fsSL https://raw.githubusercontent.com/aoaim/luanqi_bazao/main/linux_script/debian_init.sh)"
     echo ""
 fi
