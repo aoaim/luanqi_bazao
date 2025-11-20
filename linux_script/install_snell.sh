@@ -176,131 +176,14 @@ configure_snell() {
     if [[ "$enable_obfs" =~ ^[Yy]$ ]]; then
         echo ""
         echo "obfs enabled. obfs mode is set to 'http'."
-        echo "Select an obfs host (default: Bilibili):"
-        echo "  1) Bilibili"
-        echo "     d1--ov-gotcha07.bilivideo.com"
-        echo "  2) Contentstack"
-        echo "     images.contentstack.io"
-        echo "  3) Elsevier CDN"
-        echo "     ars.els-cdn.com"
-        echo "  4) NCBI CDN"
-        echo "     cdn.ncbi.nlm.nih.gov"
-        echo "  5) Xiaohongshu CDN"
-        echo "     sns-video-qc.xhscdn.com"
-        echo "  6) Douyin/TikTok CDN"
-        echo "     sf1-cdn-tos.huoshanstatic.com"
-        echo "  7) Custom host"
-        
-        while true; do
-            read -p "Enter the host option number [1]: " host_choice
-            host_choice=${host_choice:-1}
-            case "$host_choice" in
-                1)
-                    host="d1--ov-gotcha07.bilivideo.com"
-                    break
-                    ;;
-                2)
-                    host="images.contentstack.io"
-                    break
-                    ;;
-                3)
-                    host="ars.els-cdn.com"
-                    break
-                    ;;
-                4)
-                    host="cdn.ncbi.nlm.nih.gov"
-                    break
-                    ;;
-                5)
-                    host="sns-video-qc.xhscdn.com"
-                    break
-                    ;;
-                6)
-                    host="sf1-cdn-tos.huoshanstatic.com"
-                    break
-                    ;;
-                7)
-                    read -p "Enter custom host: " custom_host
-                    if [[ -z "$custom_host" ]]; then
-                        echo "Custom host cannot be empty. Please try again."
-                        continue
-                    fi
-                    host="$custom_host"
-                    break
-                    ;;
-                *)
-                    echo "Invalid choice. Please enter a number between 1 and 7."
-                    ;;
-            esac
-        done
+        host=$(select_obfs_host)
     fi
     
     # 交互式选择 DNS
     echo ""
-    echo "Select a public DNS provider (default: Google):"
-    echo "  1) Google"
-    echo "     8.8.8.8,8.8.4.4,2001:4860:4860::8888,2001:4860:4860::8844"
-    echo "  2) Cloudflare"
-    echo "     1.1.1.1,1.0.0.1,2606:4700:4700::1111,2606:4700:4700::1001"
-    echo "  3) Cloudflare Malware Protection"
-    echo "     1.1.1.2,1.0.0.2,2606:4700:4700::1112,2606:4700:4700::1002"
-    echo "  4) Cloudflare Family"
-    echo "     1.1.1.3,1.0.0.3,2606:4700:4700::1113,2606:4700:4700::1003"
-    echo "  5) Quad9"
-    echo "     9.9.9.9,149.112.112.112,2620:fe::fe,2620:fe::9"
-    echo "  6) Quad9 Secured"
-    echo "     9.9.9.11,149.112.112.11,2620:fe::11,2620:fe::fe:11"
-    echo "  7) Custom DNS"
-    
-    while true; do
-        read -p "Enter the DNS option number [1]: " dns_choice
-        dns_choice=${dns_choice:-1}
-        case "$dns_choice" in
-            1)
-                dns_label="Google"
-                dns_servers="8.8.8.8,8.8.4.4,2001:4860:4860::8888,2001:4860:4860::8844"
-                break
-                ;;
-            2)
-                dns_label="Cloudflare"
-                dns_servers="1.1.1.1,1.0.0.1,2606:4700:4700::1111,2606:4700:4700::1001"
-                break
-                ;;
-            3)
-                dns_label="Cloudflare Malware Protection"
-                dns_servers="1.1.1.2,1.0.0.2,2606:4700:4700::1112,2606:4700:4700::1002"
-                break
-                ;;
-            4)
-                dns_label="Cloudflare Family"
-                dns_servers="1.1.1.3,1.0.0.3,2606:4700:4700::1113,2606:4700:4700::1003"
-                break
-                ;;
-            5)
-                dns_label="Quad9"
-                dns_servers="9.9.9.9,149.112.112.112,2620:fe::fe,2620:fe::9"
-                break
-                ;;
-            6)
-                dns_label="Quad9 Secured"
-                dns_servers="9.9.9.11,149.112.112.11,2620:fe::11,2620:fe::fe:11"
-                break
-                ;;
-            7)
-                read -p "Enter custom DNS addresses (comma separated): " custom_dns
-                if [[ -z "$custom_dns" ]]; then
-                    echo "Custom DNS cannot be empty. Please try again."
-                    continue
-                fi
-                dns_label="Custom DNS"
-                dns_servers="$custom_dns"
-                break
-                ;;
-            *)
-                echo "Invalid choice. Please enter a number between 1 and 7."
-                ;;
-        esac
-    done
+    local dns_result=$(select_dns false 1)
+    dns_servers=$(echo "$dns_result" | cut -d'|' -f1)
+    dns_label=$(echo "$dns_result" | cut -d'|' -f2)
     
     # 确保配置文件目录存在
     mkdir -p /etc/snell
@@ -377,7 +260,179 @@ EOF
     systemctl status snell.service --no-pager
 }
 
-# --- 6. 修改端口 ---
+# --- 6. 选择 Obfs Host (复用函数) ---
+select_obfs_host() {
+    local selected_host=""
+    
+    echo "Select an obfs host:"
+    echo "  1) Bilibili"
+    echo "     d1--ov-gotcha07.bilivideo.com"
+    echo "  2) Contentstack"
+    echo "     images.contentstack.io"
+    echo "  3) Elsevier CDN"
+    echo "     ars.els-cdn.com"
+    echo "  4) NCBI CDN"
+    echo "     cdn.ncbi.nlm.nih.gov"
+    echo "  5) Xiaohongshu CDN"
+    echo "     sns-video-qc.xhscdn.com"
+    echo "  6) Douyin/TikTok CDN"
+    echo "     sf1-cdn-tos.huoshanstatic.com"
+    echo "  7) Custom host"
+    
+    while true; do
+        read -p "Enter the host option number [1]: " host_choice
+        host_choice=${host_choice:-1}
+        case "$host_choice" in
+            1)
+                selected_host="d1--ov-gotcha07.bilivideo.com"
+                break
+                ;;
+            2)
+                selected_host="images.contentstack.io"
+                break
+                ;;
+            3)
+                selected_host="ars.els-cdn.com"
+                break
+                ;;
+            4)
+                selected_host="cdn.ncbi.nlm.nih.gov"
+                break
+                ;;
+            5)
+                selected_host="sns-video-qc.xhscdn.com"
+                break
+                ;;
+            6)
+                selected_host="sf1-cdn-tos.huoshanstatic.com"
+                break
+                ;;
+            7)
+                read -p "Enter custom host: " custom_host
+                if [[ -z "$custom_host" ]]; then
+                    echo "Custom host cannot be empty. Please try again."
+                    continue
+                fi
+                selected_host="$custom_host"
+                break
+                ;;
+            *)
+                echo "Invalid choice. Please enter a number between 1 and 7."
+                ;;
+        esac
+    done
+    
+    echo "$selected_host"
+}
+
+# --- 6.1 选择 DNS (复用函数) ---
+select_dns() {
+    local allow_cancel=${1:-false}
+    local default_choice=${2:-1}
+    local selected_dns=""
+    local selected_label=""
+    local provider_name=""
+    local ipv4_servers=""
+    local ipv6_servers=""
+    
+    echo "Select a DNS provider:"
+    echo "  1) Google"
+    echo "  2) Cloudflare"
+    echo "  3) Cloudflare Malware Protection"
+    echo "  4) Cloudflare Family"
+    echo "  5) Quad9"
+    echo "  6) Quad9 Secured"
+    echo "  7) Custom DNS"
+    if [[ "$allow_cancel" == "true" ]]; then
+        echo "  0) Cancel"
+    fi
+    
+    while true; do
+        read -p "Enter the DNS provider number [${default_choice}]: " dns_choice
+        dns_choice=${dns_choice:-$default_choice}
+        case "$dns_choice" in
+            1)
+                provider_name="Google"
+                ipv4_servers="8.8.8.8,8.8.4.4"
+                ipv6_servers="2001:4860:4860::8888,2001:4860:4860::8844"
+                break
+                ;;
+            2)
+                provider_name="Cloudflare"
+                ipv4_servers="1.1.1.1,1.0.0.1"
+                ipv6_servers="2606:4700:4700::1111,2606:4700:4700::1001"
+                break
+                ;;
+            3)
+                provider_name="Cloudflare Malware Protection"
+                ipv4_servers="1.1.1.2,1.0.0.2"
+                ipv6_servers="2606:4700:4700::1112,2606:4700:4700::1002"
+                break
+                ;;
+            4)
+                provider_name="Cloudflare Family"
+                ipv4_servers="1.1.1.3,1.0.0.3"
+                ipv6_servers="2606:4700:4700::1113,2606:4700:4700::1003"
+                break
+                ;;
+            5)
+                provider_name="Quad9"
+                ipv4_servers="9.9.9.9,149.112.112.112"
+                ipv6_servers="2620:fe::fe,2620:fe::9"
+                break
+                ;;
+            6)
+                provider_name="Quad9 Secured"
+                ipv4_servers="9.9.9.11,149.112.112.11"
+                ipv6_servers="2620:fe::11,2620:fe::fe:11"
+                break
+                ;;
+            7)
+                read -p "Enter custom DNS addresses (comma separated): " custom_dns
+                if [[ -z "$custom_dns" ]]; then
+                    echo "Custom DNS cannot be empty. Please try again."
+                    continue
+                fi
+                selected_label="Custom DNS"
+                selected_dns="$custom_dns"
+                echo "${selected_dns}|${selected_label}"
+                return 0
+                ;;
+            0)
+                if [[ "$allow_cancel" == "true" ]]; then
+                    echo "CANCELLED"
+                    return 1
+                else
+                    echo "Invalid choice. Please enter a number between 1 and 7."
+                fi
+                ;;
+            *)
+                if [[ "$allow_cancel" == "true" ]]; then
+                    echo "Invalid choice. Please enter a number between 0 and 7."
+                else
+                    echo "Invalid choice. Please enter a number between 1 and 7."
+                fi
+                ;;
+        esac
+    done
+    
+    # 询问是否包含 IPv6
+    echo ""
+    read -p "Include IPv6 DNS servers? [Y/n]: " include_ipv6
+    include_ipv6=${include_ipv6:-Y}
+    
+    if [[ "$include_ipv6" =~ ^[Yy]$ ]]; then
+        selected_dns="${ipv4_servers},${ipv6_servers}"
+        selected_label="${provider_name} (IPv4 + IPv6)"
+    else
+        selected_dns="${ipv4_servers}"
+        selected_label="${provider_name} (IPv4 only)"
+    fi
+    
+    echo "${selected_dns}|${selected_label}"
+}
+
+# --- 7. 修改端口 ---
 change_port() {
     echo "=========================================="
     echo "Modify Snell Server Port"
@@ -411,7 +466,7 @@ change_port() {
     echo "=========================================="
 }
 
-# --- 7. 修改密码 ---
+# --- 8. 修改密码 ---
 change_password() {
     echo "=========================================="
     echo "Modify Snell Server Password (PSK)"
@@ -445,7 +500,141 @@ change_password() {
     echo "=========================================="
 }
 
-# --- 8. 查看当前配置 ---
+# --- 9. 修改 Obfs ---
+change_obfs() {
+    echo "=========================================="
+    echo "Modify Snell Server Obfs Settings"
+    echo "=========================================="
+    
+    # 读取当前配置
+    if [ ! -f /etc/snell/snell-server.conf ]; then
+        echo "Error: Configuration file not found!"
+        return 1
+    fi
+    
+    # 检查当前是否启用了 obfs
+    local current_obfs=$(grep -oP 'obfs = \K.+' /etc/snell/snell-server.conf || echo "")
+    local current_host=$(grep -oP 'host = \K.+' /etc/snell/snell-server.conf || echo "")
+    
+    if [[ -n "$current_obfs" ]]; then
+        echo "Current obfs status: Enabled (mode: ${current_obfs})"
+        echo "Current host: ${current_host}"
+        echo ""
+        echo "What would you like to do?"
+        echo "  1) Change obfs host"
+        echo "  2) Disable obfs"
+        echo "  0) Cancel"
+        
+        while true; do
+            read -p "Enter your choice [0-2]: " obfs_action
+            case "$obfs_action" in
+                1)
+                    # 更换 host
+                    echo ""
+                    new_host=$(select_obfs_host)
+                    
+                    # 更新配置文件中的 host
+                    sed -i "s|host = ${current_host}|host = ${new_host}|" /etc/snell/snell-server.conf
+                    
+                    echo "Obfs host changed to: ${new_host}"
+                    echo "Restarting Snell service..."
+                    systemctl restart snell.service
+                    
+                    echo "=========================================="
+                    echo "Obfs host modification completed!"
+                    echo "=========================================="
+                    return 0
+                    ;;
+                2)
+                    # 禁用 obfs
+                    echo "Disabling obfs..."
+                    sed -i '/^obfs = /d' /etc/snell/snell-server.conf
+                    sed -i '/^host = /d' /etc/snell/snell-server.conf
+                    
+                    echo "Obfs has been disabled."
+                    echo "Restarting Snell service..."
+                    systemctl restart snell.service
+                    
+                    echo "=========================================="
+                    echo "Obfs disabled successfully!"
+                    echo "=========================================="
+                    return 0
+                    ;;
+                0)
+                    echo "Cancelled."
+                    return 0
+                    ;;
+                *)
+                    echo "Invalid choice. Please enter a number between 0 and 2."
+                    ;;
+            esac
+        done
+    else
+        echo "Current obfs status: Disabled"
+        echo ""
+        read -p "Would you like to enable obfs? [y/N]: " enable_obfs
+        
+        if [[ ! "$enable_obfs" =~ ^[Yy]$ ]]; then
+            echo "Cancelled."
+            return 0
+        fi
+        
+        # 启用 obfs 并选择 host
+        echo ""
+        new_host=$(select_obfs_host)
+        
+        # 在配置文件中添加 obfs 和 host
+        # 在 dns 行后面添加
+        sed -i "/^dns = /a obfs = http\nhost = ${new_host}" /etc/snell/snell-server.conf
+        
+        echo "Obfs enabled with host: ${new_host}"
+        echo "Restarting Snell service..."
+        systemctl restart snell.service
+        
+        echo "=========================================="
+        echo "Obfs enabled successfully!"
+        echo "=========================================="
+    fi
+}
+
+# --- 10. 修改 DNS ---
+change_dns() {
+    echo "=========================================="
+    echo "Modify Snell Server DNS Settings"
+    echo "=========================================="
+    
+    # 读取当前配置
+    if [ ! -f /etc/snell/snell-server.conf ]; then
+        echo "Error: Configuration file not found!"
+        return 1
+    fi
+    
+    local current_dns=$(grep -oP 'dns = \K.+' /etc/snell/snell-server.conf)
+    echo "Current DNS: ${current_dns}"
+    echo ""
+    
+    local dns_result=$(select_dns true 0)
+    if [ $? -ne 0 ]; then
+        echo "Cancelled."
+        return 0
+    fi
+    
+    local new_dns=$(echo "$dns_result" | cut -d'|' -f1)
+    local dns_label=$(echo "$dns_result" | cut -d'|' -f2)
+    
+    # 更新配置文件中的 DNS
+    sed -i "s|dns = ${current_dns}|dns = ${new_dns}|" /etc/snell/snell-server.conf
+    
+    echo "DNS changed to: ${new_dns} (${dns_label})"
+    echo "Restarting Snell service..."
+    systemctl restart snell.service
+    
+    echo "=========================================="
+    echo "DNS modification completed!"
+    echo "=========================================="
+}
+
+# --- 11. 查看当前配置 ---
 show_config() {
     echo "=========================================="
     echo "Current Snell Configuration"
@@ -460,7 +649,7 @@ show_config() {
     echo "=========================================="
 }
 
-# --- 9. 已安装菜单 ---
+# --- 12. 已安装菜单 ---
 show_installed_menu() {
     local installed_version=$1
     local latest_version=$2
@@ -509,11 +698,13 @@ show_installed_menu() {
     echo "  4) Modify Password (PSK)"
     echo "  5) Show Current Configuration"
     echo "  6) Restart Service"
+    echo "  7) Modify Obfs"
+    echo "  8) Modify DNS"
     echo "  0) Exit"
     echo "=========================================="
 }
 
-# --- 10. 未安装菜单 ---
+# --- 13. 未安装菜单 ---
 show_not_installed_menu() {
     local latest_version=$1
     
@@ -562,7 +753,7 @@ if [ -n "$installed_version" ]; then
     while true; do
         show_installed_menu "$installed_version" "$latest_version"
         
-        read -p "Enter your choice [0-6]: " choice
+        read -p "Enter your choice [0-8]: " choice
         echo ""
         
         case "$choice" in
@@ -643,6 +834,18 @@ if [ -n "$installed_version" ]; then
                 echo ""
                 read -p "Press Enter to continue..."
                 ;;
+            7)
+                # 修改 Obfs
+                change_obfs
+                echo ""
+                read -p "Press Enter to continue..."
+                ;;
+            8)
+                # 修改 DNS
+                change_dns
+                echo ""
+                read -p "Press Enter to continue..."
+                ;;
             0)
                 # 退出
                 echo "Exiting..."
@@ -650,7 +853,7 @@ if [ -n "$installed_version" ]; then
                 exit 0
                 ;;
             *)
-                echo "Invalid choice. Please enter a number between 0 and 6."
+                echo "Invalid choice. Please enter a number between 0 and 8."
                 read -p "Press Enter to continue..."
                 ;;
         esac
