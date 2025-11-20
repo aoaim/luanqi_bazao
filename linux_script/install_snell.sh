@@ -154,8 +154,11 @@ configure_snell() {
     echo "⚙️  Please configure your Snell server:"
     echo "=========================================="
     
-    read -p "Enter the listening port [default: 6666]: " port
-    port=${port:-6666}
+    # 生成 20000-65535 之间的随机端口
+    default_port=$((20000 + RANDOM % 45536))
+    
+    read -p "Enter the listening port [default: ${default_port}]: " port
+    port=${port:-${default_port}}
     
     default_psk=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24)
     
@@ -442,7 +445,11 @@ change_port() {
     local current_port=$(grep -oP 'listen = 0.0.0.0:\K[0-9]+' /etc/snell/snell-server.conf)
     echo "Current port: ${current_port}"
     
-    read -p "Enter new port number: " new_port
+    # 生成 20000-65535 之间的随机端口
+    local default_new_port=$((20000 + RANDOM % 45536))
+    
+    read -p "Enter new port number [default: ${default_new_port}]: " new_port
+    new_port=${new_port:-${default_new_port}}
     
     if [[ ! "$new_port" =~ ^[0-9]+$ ]] || [ "$new_port" -lt 1 ] || [ "$new_port" -gt 65535 ]; then
         echo "Error: Invalid port number!"
