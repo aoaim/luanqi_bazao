@@ -4,6 +4,11 @@
 .ib.snssdk.com
 .xlog.snssdk.com
 .log.snssdk.com
+.data.thoughtmetric.io
+.assets.9gtb.com
+.cdn.logbase.io
+.lc.recopick.com
+.cv.aedi.ai
 .toup.net
 .tags.tiqcdn.com
 .prebid.loopmertb.com
@@ -49335,6 +49340,8 @@
 .tagman.britishairways.com
 .ct.pinterest.com
 .incoming.telemetry.mozilla.org
+.conversionsapigateway.com
+.ebm.lfmall.co.kr
 .analytics.adjust.io
 .jitsu.ixbt.site
 .sgtm.ixbt.site
@@ -52481,6 +52488,13 @@
 .int.vlancaa.site
 .int.vlancaa.fun
 .tok.vaicore.xyz
+.datarangers-event.myrightone.com
+.stats.rong-edge.com
+.config.toto.zipoapps.com
+.tracking.ksztone.com
+.log.stickflow.xyz
+.stats.us-light-edge.com
+.log2.ihubgo.info
 .logreport-global-dual.coolhcloud.com
 .detaillog-global-dual.coolhcloud.com
 .stat.dp.vocalbeats.com
@@ -53319,6 +53333,7 @@
 .4jnzhl0d0.com
 .82o9v830.com
 .abilityscale.com
+.abilitytoucan.com
 .abjectattempt.com
 .aboardamusement.com
 .aboardlevel.com
@@ -53461,6 +53476,7 @@
 .billowybelief.com
 .billtable.com
 .binarycrest.com
+.binarykite.com
 .binspiredtees.com
 .birthdaybelief.com
 .blackbrake.com
@@ -53668,6 +53684,7 @@
 .copyfranchise.com
 .copyrightaccesscontrols.com
 .copyvibes.com
+.coralcranes.com
 .coralreverie.com
 .corgibeachday.com
 .cornershirts.com
@@ -53817,6 +53834,7 @@
 .effervescentvista.com
 .effulgentnook.com
 .effulgenttempest.com
+.eightgreens.com
 .elasticchange.com
 .elderlybean.com
 .elderlytown.com
@@ -53932,6 +53950,7 @@
 .flimsycircle.com
 .flimsythought.com
 .flippedfunnel.com
+.floodedpixel.com
 .floodprincipal.com
 .flourishingcollaboration.com
 .flourishingendeavor.com
@@ -54421,6 +54440,7 @@
 .oafishobservation.com
 .objecthero.com
 .objectsnetwork.com
+.oblivionfleet.com
 .obscenesidewalk.com
 .octaneblood.com
 .offerniche.com
