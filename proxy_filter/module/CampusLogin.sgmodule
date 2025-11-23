@@ -1,16 +1,17 @@
-#!name=RuijieCampus Auto Login
-#!desc=连接指定 WiFi 时自动进行校园网认证。支持 HTTPS/HTTP 自适应。
+#!name=🏫 校园网自动登录 (Ruijie)
+#!desc=连接指定 WiFi 时自动进行锐捷校园网认证。
 #!category=Campus
-#!system=ios, mac
+#!arguments=Username:"学号",Password:"密码",SSID:"HebmuWlan",Delay:"3"
+#!arguments-desc=Username: [账号] 您的校园网登录学号\nPassword: [密码] 您的校园网登录密码\nSSID: [网络名称] 触发自动登录的 WiFi 名称 (例如 HebmuWlan)\nDelay: [DHCP延时] 连接 WiFi 后等待获取 IP 的缓冲时间 (秒)，建议 3-5 秒
+
 
 [Script]
-# 请在安装后点击模块设置填写参数：
-# - username: 学号
-# - password: 密码
-# - ssid: 目标WiFi名称 (默认 HebmuWlan)
-# - delay: 连接后等待秒数 (默认 3)
-
-Ruijie Campus Network = type=network-changed, script-path=https://raw.githubusercontent.com/aoaim/luanqi_bazao/main/proxy_filter/js/ruijie_campuslogin.js, argument=username=您的学号&password=您的密码&ssid=HebmuWlan&delay=3
+# 🏫 Campus Auto Login
+Check and Login Ruijie Campus Network = type=network-changed, script-path=CampusLogin.js, argument=username={{{Username}}}&password={{{Password}}}&ssid={{{SSID}}}&delay={{{Delay}}}
 
 [General]
 skip-proxy = eportal.hebmu.edu.cn
+
+[Rule]
+# 🛡️ 确保认证域名不走代理
+DOMAIN,eportal.hebmu.edu.cn,DIRECT
