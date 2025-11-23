@@ -7,9 +7,10 @@
 [Script]
 Campus Auto Login = type = event, event-name = network-changed, script-path = https://raw.githubusercontent.com/aoaim/luanqi_bazao/main/proxy_filter/js/ruijie_campuslogin.js, timeout=60, argument=username={{{Username}}}&password={{{Password}}}&ssid={{{SSID}}}&delay={{{Delay}}}
 
-[General]
-skip-proxy = eportal.hebmu.edu.cn
+[Host]
+www.baidu.com = server:system
+eportal.hebmu.edu.cn = server:system
 
 [Rule]
-# 🛡️ 确保认证域名不走代理
 DOMAIN,eportal.hebmu.edu.cn,DIRECT
+DOMAIN,www.baidu.com,DIRECT
