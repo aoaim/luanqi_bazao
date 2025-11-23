@@ -1,6 +1,15 @@
 /**
  * Surge Script: 校园网自动登录 (Ruijie ePortal)
- * 参考: https://www.cnblogs.com/0x000001/p/18766279
+ * 参考实现: https://www.cnblogs.com/0x000001/p/18766279
+ * 功能:
+ *  - 自动检测重定向并完成锐捷认证登录 (Ruijie ePortal)
+ *  - 支持通过参数传入 `username` 和 `password`
+ *  - 可配置 `ssid`（目标无线名）和 `delay`（等待网络就绪秒数）
+ *  - 在无法读取 SSID（如 macOS）时仍会尝试探测并登录
+ *  - 登录成功/失败使用通知提醒，并包含简单的错误处理与重试友好延时
+ * 为 HebMUer 编写，已在 HebMU 测试通过: 2025-11-23
+ * Made by Gemini 3.0 Pro
+ * Update: 2025-11-23  17:56
  */
 
 const CHECK_URL = 'http://www.baidu.com';
