@@ -1,14 +1,11 @@
 /**
  * Surge Script: 校园网自动登录 (Ruijie ePortal)
  * 参考: https://www.cnblogs.com/0x000001/p/18766279
- * * 解决 macOS 下 Surge 未获取定位权限导致 SSID 为 null 的问题
- * * 逻辑变更: 仅在 SSID 存在且不匹配时退出；SSID 为空时尝试探测网络特征
  */
 
 const CHECK_URL = 'http://www.baidu.com';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36 Edg/134.0.0.0';
 
-// 默认配置
 const DEFAULT_CONFIG = {
     ssid: 'HebmuWlan',
     delay: 2
@@ -25,27 +22,21 @@ const DEFAULT_CONFIG = {
     }
 
     const TARGET_SSID = args.ssid || DEFAULT_CONFIG.ssid;
-    
-    let delaySec = parseInt(args.delay);
-    if (isNaN(delaySec)) delaySec = DEFAULT_CONFIG.delay;
+    let delaySec = parseInt(args.delay) || DEFAULT_CONFIG.delay;
     if (delaySec < 1) delaySec = 1;
 
-    // --- 2. 环境预检 (智能宽松模式) ---
+    // --- 2. 环境预检 ---
     const currentWifi = $network.wifi.ssid;
     
-    // 核心修改逻辑：
-    // 情况 A: 读到了 SSID，但名字不对 (例如在家里: "Home_WiFi") -> 退出
+    // 只有当明确读到 SSID 且不匹配时才退出
+    // currentWifi 为 null (macOS 无权限) 时继续执行
     if (currentWifi && currentWifi !== TARGET_SSID) {
-        // console.log(`[CampusLogin] 当前 WiFi (${currentWifi}) 非目标网络，跳过。`);
         $done();
         return;
     }
 
-    // 情况 B: 读到了正确的 SSID -> 继续
-    // 情况 C: 读不到 SSID (null) -> 继续 (交给后续的 HTTP 探测来决定是否登录)
-    
     const logSSID = currentWifi ? currentWifi : "未知(macOS/有线)";
-    console.log(`[CampusLogin] 🎯 环境符合 (${logSSID})，等待网络就绪 (${delaySec}s)...`);
+    console.log(`[CampusLogin] 🎯 环境符合 (${logSSID})，等待网络 (${delaySec}s)...`);
     
     await sleep(delaySec * 1000);
 
@@ -54,24 +45,22 @@ const DEFAULT_CONFIG = {
         const authInfo = await getAuthInfo();
         
         if (!authInfo) {
-            // 只有在 SSID 明确匹配时才输出“无需登录”，否则在家里(null)会刷屏
-            if (currentWifi === TARGET_SSID) {
-                console.log("[CampusLogin] ✅ 无需认证，网络已连通。");
-            }
+            // 如果 SSID 匹配但没检测到重定向，说明可能已经连上了
+            if (currentWifi === TARGET_SSID) console.log("[CampusLogin] ✅ 网络已连通或无需认证");
             $done();
             return;
         }
 
-        console.log(`[CampusLogin] 🔗 发现校园网认证页: ${authInfo.baseUrl}`);
+        console.log(`[CampusLogin] 🔗 捕获认证地址: ${authInfo.baseUrl}`);
 
         // --- 4. 执行登录 ---
         await login(args.username, args.password, authInfo);
         
     } catch (err) {
         console.log(`[CampusLogin] ❌ 异常: ${err.message}`);
-        // 仅在脚本成功发起了登录请求却失败时弹窗，避免探测阶段的常规错误弹窗干扰
-        if (err.message.includes("服务端") || err.message.includes("失败")) {
-             $notification.post("校园网登录异常", "执行失败", err.message);
+        // 过滤掉常见的超时噪音
+        if (!err.message.includes("timeout")) {
+            $notification.post("校园网登录异常", "执行失败", err.message);
         }
         $done();
     }
@@ -97,27 +86,31 @@ function parseArguments(argStr) {
 
 function getAuthInfo() {
     return new Promise((resolve, reject) => {
-        $httpClient.get({ url: CHECK_URL, headers: { 'User-Agent': USER_AGENT } }, (error, response, data) => {
+        $httpClient.get({ 
+            url: CHECK_URL, 
+            headers: { 'User-Agent': USER_AGENT },
+            timeout: 5 // 探测超时设置短一点
+        }, (error, response, data) => {
             if (error) {
-                // 网络不通，不做处理直接结束
-                resolve(null); 
+                // 网络不通 (DNS解析失败等)，直接返回 null，不抛错
+                console.log(`[CampusLogin] 探测失败 (可能无网络): ${error}`);
+                resolve(null);
                 return;
             }
 
-            // 1. 已经连通互联网
+            // 1. 正常连通百度
             if (response.status === 200 && data && data.includes('<title>百度一下，你就知道</title>')) {
                 resolve(null);
                 return;
             }
             
-            // 2. 检测是否是锐捷 ePortal 重定向
+            // 2. 锐捷重定向特征提取
             const regex = /href=['"]?(https?:\/\/.*?)\/eportal\/index\.jsp\?([^'"]+)['"]?/;
             const match = data.match(regex);
 
             if (match && match[1] && match[2]) {
                 resolve({ baseUrl: match[1], queryString: match[2] });
             } else {
-                // 既不是百度，也不是锐捷，可能是其他网络环境（如星巴克WiFi），忽略
                 resolve(null);
             }
         });
@@ -126,6 +119,7 @@ function getAuthInfo() {
 
 function login(username, password, authInfo) {
     return new Promise((resolve, reject) => {
+        // 双重编码逻辑
         const qsTwice = encodeURIComponent(encodeURIComponent(authInfo.queryString));
         const postBody = `userId=${username}&password=${password}&service=&queryString=${qsTwice}&operatorPwd=&operatorUserId=&validcode=&passwordEncrypt=false`;
 
@@ -137,12 +131,13 @@ function login(username, password, authInfo) {
                 "Referer": `${authInfo.baseUrl}/eportal/index.jsp`,
                 "Origin": authInfo.baseUrl
             },
-            body: postBody
+            body: postBody,
+            timeout: 15 // 登录请求给长一点时间
         };
 
         $httpClient.post(request, (error, response, data) => {
             if (error) {
-                reject(new Error("登录请求网络失败"));
+                reject(new Error(`请求失败: ${error}`));
             } else {
                 try {
                     const result = JSON.parse(data);

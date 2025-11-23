@@ -5,7 +5,7 @@
 #!arguments-desc=Username: [账号] 您的校园网登录学号\nPassword: [密码] 您的校园网登录密码\nSSID: [网络名称] 触发自动登录的 WiFi 名称 (例如 HebmuWlan)\nDelay: [DHCP延时] 连接 WiFi 后等待获取 IP 的缓冲时间 (秒)，建议 3-5 秒
 
 [Script]
-Campus Auto Login = type = event, event-name = network-changed, script-path = https://raw.githubusercontent.com/aoaim/luanqi_bazao/main/proxy_filter/js/ruijie_campuslogin.js, argument=username={{{Username}}}&password={{{Password}}}&ssid={{{SSID}}}&delay={{{Delay}}}
+Campus Auto Login = type = event, event-name = network-changed, script-path = https://raw.githubusercontent.com/aoaim/luanqi_bazao/main/proxy_filter/js/ruijie_campuslogin.js, timeout=60, argument=username={{{Username}}}&password={{{Password}}}&ssid={{{SSID}}}&delay={{{Delay}}}
 
 [General]
 skip-proxy = eportal.hebmu.edu.cn
