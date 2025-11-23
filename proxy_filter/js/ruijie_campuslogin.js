@@ -2,17 +2,18 @@
  * Surge Script: 校园网自动登录 (Ruijie ePortal)
  * 参考实现: https://www.cnblogs.com/0x000001/p/18766279
  * 功能:
- *  - 自动检测重定向并完成锐捷认证登录 (Ruijie ePortal)
+ *  - 自动检测重定向并完成锐捷认证登录
  *  - 支持通过参数传入 `username` 和 `password`
  *  - 可配置 `ssid`（目标无线名）和 `delay`（等待网络就绪秒数）
  *  - 在无法读取 SSID（如 macOS）时仍会尝试探测并登录
  *  - 登录成功/失败使用通知提醒，并包含简单的错误处理与重试友好延时
  * 为 HebMUer 编写，已在 HebMU 测试通过: 2025-11-23
  * Made by Gemini 3.0 Pro
- * Update: 2025-11-23  17:56
+ * Update: 2025-11-23  18:26
  */
 
-const CHECK_URL = 'http://www.baidu.com';
+const CHECK_URL_DOMAIN = 'http://www.baidu.com';
+const CHECK_URL_IP = 'http://110.242.68.3';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36 Edg/134.0.0.0';
 
 const DEFAULT_CONFIG = {
@@ -21,66 +22,235 @@ const DEFAULT_CONFIG = {
 };
 
 (async () => {
-    // --- 1. 参数解析 ---
+    log("========== 脚本启动 ==========");
+    log("📝 开始解析配置参数...");
     const args = parseArguments($argument);
     
     if (!args.username || !args.password) {
-        $notification.post("校园网登录", "配置缺失", "请在模块设置中填写账号和密码");
+        const errMsg = "❌ 配置缺失: 请在模块设置中填写账号和密码";
+        log(errMsg);
+        notify(errMsg);
         $done();
         return;
     }
+    log(`✓ 配置已加载: 用户名=${args.username}`);
 
     const TARGET_SSID = args.ssid || DEFAULT_CONFIG.ssid;
     let delaySec = parseInt(args.delay) || DEFAULT_CONFIG.delay;
     if (delaySec < 1) delaySec = 1;
+    log(`✓ 目标SSID: ${TARGET_SSID}, 延迟: ${delaySec}s`);
 
-    // --- 2. 环境预检 ---
+    // --- 1. 环境预检 ---
+    log("🔍 开始环境预检...");
     const currentWifi = $network.wifi.ssid;
+    log(`📡 当前Wi-Fi: ${currentWifi || "未检测到/有线网络"}`);
     
-    // 只有当明确读到 SSID 且不匹配时才退出
-    // currentWifi 为 null (macOS 无权限) 时继续执行
     if (currentWifi && currentWifi !== TARGET_SSID) {
+        log(`⏭️ 非目标网络(${currentWifi})，跳过检测`);
+        // 非目标网络，不通知直接退出，避免骚扰
         $done();
         return;
     }
 
     const logSSID = currentWifi ? currentWifi : "未知(macOS/有线)";
-    console.log(`[CampusLogin] 🎯 环境符合 (${logSSID})，等待网络 (${delaySec}s)...`);
+    log(`✓ 环境符合: ${logSSID}`);
+    log(`⏳ 等待网络稳定 ${delaySec}s...`);
     
     await sleep(delaySec * 1000);
+    log("✓ 等待完成，开始网络检测");
 
     try {
-        // --- 3. 探测认证 ---
-        const authInfo = await getAuthInfo();
+        // --- 2. 探测认证 (混合模式) ---
+        log("========== 开始认证探测 ==========");
+        let authInfo = await getAuthInfoHybrid();
         
+        // 如果依然失败，尝试最后一次 IP 暴力重试
         if (!authInfo) {
-            // 如果 SSID 匹配但没检测到重定向，说明可能已经连上了
-            if (currentWifi === TARGET_SSID) console.log("[CampusLogin] ✅ 网络已连通或无需认证");
+             log("⚠️ 混合探测无响应，等待 2s 后使用 IP 再次重试...");
+             await sleep(2000);
+             log(`🔄 重试检测: ${CHECK_URL_IP}`);
+             authInfo = await detect(CHECK_URL_IP);
+        }
+
+        if (!authInfo) {
+            const msg = "✅ 网络已连通，无需认证";
+            log(msg);
+            if (currentWifi === TARGET_SSID) {
+                notify(msg);
+            }
             $done();
             return;
         }
 
-        console.log(`[CampusLogin] 🔗 捕获认证地址: ${authInfo.baseUrl}`);
+        log(`🔗 捕获认证地址: ${authInfo.baseUrl}`);
+        notify(`🔗 检测到认证页面\n开始尝试登录...`);
 
-        // --- 4. 执行登录 ---
+        // --- 3. 执行登录 ---
+        log("========== 开始登录流程 ==========");
         await login(args.username, args.password, authInfo);
         
     } catch (err) {
-        console.log(`[CampusLogin] ❌ 异常: ${err.message}`);
-        // 过滤掉常见的超时噪音
-        if (!err.message.includes("timeout")) {
-            $notification.post("校园网登录异常", "执行失败", err.message);
-        }
+        const errMsg = `❌ 异常中止: ${err.message}`;
+        log(errMsg);
+        log(`错误堆栈: ${err.stack || '无'}`);
+        notify(errMsg);
         $done();
     }
 })();
 
-// ================= 工具函数 =================
+// ================= 核心逻辑 =================
 
+// 日志函数：仅打印到控制台
+function log(message) {
+    const time = new Date().toLocaleTimeString();
+    console.log(`[CampusLogin ${time}] ${message}`);
+}
+
+// 通知函数：发送重要通知
+function notify(message) {
+    $notification.post("校园网连接助手", "", message);
+    log(message); // 同时记录日志
+}
+
+async function getAuthInfoHybrid() {
+    // 1. 尝试域名检测
+    try {
+        log(`🔍 方式1: 尝试域名检测 (${CHECK_URL_DOMAIN})...`);
+        const result = await detect(CHECK_URL_DOMAIN);
+        if (result) {
+            log(`✓ 域名检测成功`);
+            return result;
+        }
+        log(`✓ 域名检测完成，未发现认证页面`);
+    } catch (e) {
+        log(`⚠️ 域名检测失败: ${e.message}`);
+    }
+
+    // 2. 域名失败，切换 IP 检测
+    try {
+        log(`🔍 方式2: 切换 IP 检测 (${CHECK_URL_IP})...`);
+        const result = await detect(CHECK_URL_IP);
+        if (result) {
+            log(`✓ IP 检测成功`);
+            return result;
+        }
+        log(`✓ IP 检测完成，未发现认证页面`);
+    } catch (e) {
+        log(`⚠️ IP 检测失败: ${e.message}`);
+    }
+
+    log(`ℹ️ 所有检测方式均未发现认证页面`);
+    return null;
+}
+
+function detect(url) {
+    return new Promise((resolve, reject) => {
+        log(`📡 发送HTTP请求: ${url}`);
+        $httpClient.get({ 
+            url: url, 
+            headers: { 'User-Agent': USER_AGENT },
+            timeout: 5 
+        }, (error, response, data) => {
+            if (error) {
+                log(`❌ 请求失败: ${error}`);
+                reject(new Error(error));
+                return;
+            }
+
+            log(`✓ 收到响应: HTTP ${response.status}`);
+            
+            // 已联网
+            if (response.status === 200 && data && data.includes('<title>百度一下，你就知道</title>')) {
+                log("✓ 检测到百度首页，网络已通");
+                resolve(null);
+                return;
+            }
+            
+            // 提取重定向
+            log("🔍 分析响应内容，查找认证重定向...");
+            const regex = /href=['"]?(https?:\/\/.*?)\/eportal\/index\.jsp\?([^'"]+)['"]?/;
+            const match = data.match(regex);
+
+            if (match && match[1] && match[2]) {
+                log(`✓ 发现认证重定向: ${match[1]}`);
+                resolve({ baseUrl: match[1], queryString: match[2] });
+            } else {
+                log(`ℹ️ 未找到认证重定向标记`);
+                resolve(null);
+            }
+        });
+    });
+}
+
+function login(username, password, authInfo) {
+    return new Promise((resolve, reject) => {
+        log(`📝 构建登录请求参数...`);
+        const qsTwice = encodeURIComponent(encodeURIComponent(authInfo.queryString));
+        const postBody = `userId=${username}&password=${password}&service=&queryString=${qsTwice}&operatorPwd=&operatorUserId=&validcode=&passwordEncrypt=false`;
+
+        const loginUrl = `${authInfo.baseUrl}/eportal/InterFace.do?method=login`;
+        const request = {
+            url: loginUrl,
+            headers: {
+                "User-Agent": USER_AGENT,
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                "Referer": `${authInfo.baseUrl}/eportal/index.jsp`,
+                "Origin": authInfo.baseUrl
+            },
+            body: postBody,
+            timeout: 15
+        };
+
+        log(`🚀 发起登录请求: ${loginUrl}`);
+        log(`📤 用户名: ${username}`);
+
+        $httpClient.post(request, (error, response, data) => {
+            if (error) {
+                const errMsg = `❌ 登录请求失败: ${error}`;
+                log(errMsg);
+                notify(errMsg);
+                reject(new Error(`请求失败: ${error}`));
+            } else {
+                log(`✓ 收到登录响应: HTTP ${response.status}`);
+                log(`📥 响应内容: ${data.substring(0, 200)}${data.length > 200 ? '...' : ''}`);
+                
+                try {
+                    const result = JSON.parse(data);
+                    log(`✓ 成功解析JSON响应`);
+                    if (result.result === "success") {
+                        const successMsg = "✅ 登录成功";
+                        log(successMsg);
+                        notify(successMsg);
+                        resolve();
+                    } else {
+                        const errMsg = `❌ 登录失败: ${result.message || "服务端返回失败"}`;
+                        log(errMsg);
+                        notify(errMsg);
+                        reject(new Error(result.message || "服务端返回失败"));
+                    }
+                } catch (e) {
+                    log(`⚠️ JSON解析失败: ${e.message}，尝试文本匹配`);
+                    if (data.includes('success')) {
+                         const successMsg = "✅ 登录成功 (文本匹配)";
+                         log(successMsg);
+                         notify(successMsg);
+                         resolve();
+                    } else {
+                        const errMsg = `❌ 响应解析失败，无法确认登录状态`;
+                        log(errMsg);
+                        notify(errMsg);
+                        reject(new Error("响应解析失败"));
+                    }
+                }
+            }
+        });
+    });
+}
+
+// 基础工具
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
-
 function parseArguments(argStr) {
     const args = {};
     if (!argStr) return args;
@@ -91,82 +261,4 @@ function parseArguments(argStr) {
         }
     });
     return args;
-}
-
-function getAuthInfo() {
-    return new Promise((resolve, reject) => {
-        $httpClient.get({ 
-            url: CHECK_URL, 
-            headers: { 'User-Agent': USER_AGENT },
-            timeout: 5 // 探测超时设置短一点
-        }, (error, response, data) => {
-            if (error) {
-                // 网络不通 (DNS解析失败等)，直接返回 null，不抛错
-                console.log(`[CampusLogin] 探测失败 (可能无网络): ${error}`);
-                resolve(null);
-                return;
-            }
-
-            // 1. 正常连通百度
-            if (response.status === 200 && data && data.includes('<title>百度一下，你就知道</title>')) {
-                resolve(null);
-                return;
-            }
-            
-            // 2. 锐捷重定向特征提取
-            const regex = /href=['"]?(https?:\/\/.*?)\/eportal\/index\.jsp\?([^'"]+)['"]?/;
-            const match = data.match(regex);
-
-            if (match && match[1] && match[2]) {
-                resolve({ baseUrl: match[1], queryString: match[2] });
-            } else {
-                resolve(null);
-            }
-        });
-    });
-}
-
-function login(username, password, authInfo) {
-    return new Promise((resolve, reject) => {
-        // 双重编码逻辑
-        const qsTwice = encodeURIComponent(encodeURIComponent(authInfo.queryString));
-        const postBody = `userId=${username}&password=${password}&service=&queryString=${qsTwice}&operatorPwd=&operatorUserId=&validcode=&passwordEncrypt=false`;
-
-        const request = {
-            url: `${authInfo.baseUrl}/eportal/InterFace.do?method=login`,
-            headers: {
-                "User-Agent": USER_AGENT,
-                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                "Referer": `${authInfo.baseUrl}/eportal/index.jsp`,
-                "Origin": authInfo.baseUrl
-            },
-            body: postBody,
-            timeout: 15 // 登录请求给长一点时间
-        };
-
-        $httpClient.post(request, (error, response, data) => {
-            if (error) {
-                reject(new Error(`请求失败: ${error}`));
-            } else {
-                try {
-                    const result = JSON.parse(data);
-                    if (result.result === "success") {
-                        console.log("✅ [CampusLogin] 登录成功");
-                        $notification.post("校园网登录成功", `账号: ${username}`, "验证通过");
-                        resolve();
-                    } else {
-                        reject(new Error(result.message || "服务端返回失败"));
-                    }
-                } catch (e) {
-                    if (data.includes('success')) {
-                         console.log("✅ [CampusLogin] 登录成功 (Text Match)");
-                         $notification.post("校园网登录成功", `账号: ${username}`, "验证通过");
-                         resolve();
-                    } else {
-                        reject(new Error("响应解析失败"));
-                    }
-                }
-            }
-        });
-    });
 }
