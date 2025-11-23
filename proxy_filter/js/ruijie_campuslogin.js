@@ -62,22 +62,37 @@ const DEFAULT_CONFIG = {
     try {
         // --- 2. 探测认证 (混合模式) ---
         log("========== 开始认证探测 ==========");
-        let authInfo = await getAuthInfoHybrid();
         
-        // 如果依然失败，尝试最后一次 IP 暴力重试
-        if (!authInfo) {
-             log("⚠️ 混合探测无响应，等待 2s 后使用 IP 再次重试...");
-             await sleep(2000);
-             log(`🔄 重试检测: ${CHECK_URL_IP}`);
-             authInfo = await detect(CHECK_URL_IP);
+        let authInfo = null;
+        const MAX_RETRIES = 5; // 最大重试次数
+        
+        for (let i = 1; i <= MAX_RETRIES; i++) {
+            const result = await getAuthInfoHybrid();
+            
+            if (result.status === 'portal') {
+                authInfo = result.data;
+                break;
+            } else if (result.status === 'online') {
+                const msg = "✅ 网络已连通，无需认证";
+                log(msg);
+                if (currentWifi === TARGET_SSID) {
+                    notify(msg);
+                }
+                $done();
+                return;
+            } else {
+                // status === 'error'
+                if (i < MAX_RETRIES) {
+                    log(`⚠️ 第 ${i} 次检测失败或网络不可达，等待 3s 后重试...`);
+                    await sleep(3000);
+                } else {
+                    log(`❌ 达到最大重试次数 (${MAX_RETRIES})，停止检测`);
+                }
+            }
         }
 
         if (!authInfo) {
-            const msg = "✅ 网络已连通，无需认证";
-            log(msg);
-            if (currentWifi === TARGET_SSID) {
-                notify(msg);
-            }
+            log("ℹ️ 未发现认证页面或网络不可用");
             $done();
             return;
         }
@@ -119,9 +134,10 @@ async function getAuthInfoHybrid() {
         const result = await detect(CHECK_URL_DOMAIN);
         if (result) {
             log(`✓ 域名检测成功`);
-            return result;
+            return { status: 'portal', data: result };
         }
         log(`✓ 域名检测完成，未发现认证页面`);
+        return { status: 'online' };
     } catch (e) {
         log(`⚠️ 域名检测失败: ${e.message}`);
     }
@@ -132,15 +148,16 @@ async function getAuthInfoHybrid() {
         const result = await detect(CHECK_URL_IP);
         if (result) {
             log(`✓ IP 检测成功`);
-            return result;
+            return { status: 'portal', data: result };
         }
         log(`✓ IP 检测完成，未发现认证页面`);
+        return { status: 'online' };
     } catch (e) {
         log(`⚠️ IP 检测失败: ${e.message}`);
     }
 
-    log(`ℹ️ 所有检测方式均未发现认证页面`);
-    return null;
+    log(`ℹ️ 所有检测方式均未发现认证页面 (网络可能不可达)`);
+    return { status: 'error' };
 }
 
 function detect(url) {
