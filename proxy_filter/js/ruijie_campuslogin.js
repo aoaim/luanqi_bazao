@@ -18,7 +18,7 @@ const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 
 const DEFAULT_CONFIG = {
     ssid: 'HebmuWlan',
-    delay: 2
+    delay: 1
 };
 
 (async () => {
