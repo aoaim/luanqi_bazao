@@ -44,8 +44,8 @@ const DEFAULT_CONFIG = {
         return $done();
     }
     if (readiness.status === 'timeout') {
-        notify(`⚠️ 等待网络就绪超时 (${readyTimeout}s)，未检测到 ${targetSsid}`);
-        return $done();
+        log(`⚠️ 等待网络就绪超时 (${readyTimeout}s)，SSID=${readiness.wifi || '未知'}, hasIP=${readiness.hasIP}`);
+        // 仍然继续后续探测，避免被卡死在 SSID 为 null 的场景
     }
 
     if (delaySec > 0) {
@@ -114,9 +114,14 @@ function notify(message) {
 }
 
 async function waitForNetworkReady(targetSsid, maxWaitSec) {
+    let lastWifi = null;
+    let lastHasIP = false;
+
     for (let i = 0; i < maxWaitSec; i++) {
         const wifi = $network && $network.wifi ? $network.wifi.ssid : null;
         const hasIP = Boolean($network && $network.v4 && $network.v4.primaryAddress);
+        lastWifi = wifi;
+        lastHasIP = hasIP;
 
         if (wifi && targetSsid && wifi !== targetSsid) {
             return { status: 'skip', wifi };
@@ -126,9 +131,12 @@ async function waitForNetworkReady(targetSsid, maxWaitSec) {
             log(`✓ 网络接口已就绪: SSID=${wifi || '未知'}, IP=${$network.v4.primaryAddress}`);
             return { status: 'ready', wifi };
         }
+        if (i === 0 || i % 3 === 0) {
+            log(`⏳ 等待网络就绪中: SSID=${wifi || 'null'}, hasIP=${hasIP}`);
+        }
         await sleep(1000);
     }
-    return { status: 'timeout', wifi: $network && $network.wifi ? $network.wifi.ssid : null };
+    return { status: 'timeout', wifi: lastWifi, hasIP: lastHasIP };
 }
 
 async function detectPortal() {
