@@ -13,7 +13,7 @@ const CHECK_TARGETS = [
 const DEFAULT_CONFIG = {
     ssid: 'HebmuWlan',
     delay: 1,              // 网络就绪后再等多少秒
-    readyTimeout: 18,      // 等待 Wi-Fi + IP 的最长时间
+    readyTimeout: 30,      // 等待 Wi-Fi + IP 的最长时间 (macOS 上 SSID 可能长时间为 null)
     maxRetries: 4,         // 探测/登录重试
     retryInterval: 4       // 重试间隔
 };
@@ -121,7 +121,8 @@ async function waitForNetworkReady(targetSsid, maxWaitSec) {
         if (wifi && targetSsid && wifi !== targetSsid) {
             return { status: 'skip', wifi };
         }
-        if ((wifi || !targetSsid) && hasIP) {
+        // macOS 有时拿不到 SSID，但已分配 IP；此时直接放行，避免超时
+        if (hasIP) {
             log(`✓ 网络接口已就绪: SSID=${wifi || '未知'}, IP=${$network.v4.primaryAddress}`);
             return { status: 'ready', wifi };
         }

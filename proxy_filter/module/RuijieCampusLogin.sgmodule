@@ -2,11 +2,11 @@
 #!desc=连接指定 WiFi 时自动进行锐捷校园网认证
 #!date = 2025-11-27 16:32
 #!category=Campus
-#!arguments=Username:"学号",Password:"密码",SSID:"HebmuWlan",Delay:"1",ReadyTimeout:"18",MaxRetries:"4",RetryInterval:"4"
-#!arguments-desc=Username: [账号] 您的校园网登录学号\nPassword: [密码] 您的校园网登录密码\nSSID: [网络名称] 触发自动登录的 WiFi 名称 (例如 HebmuWlan)\nDelay: [稳定等待] 网络接口就绪后额外等待的秒数，默认 1 秒\nReadyTimeout: [就绪超时] 等待 Wi-Fi 和 IP 获取的最长秒数，默认 18 秒\nMaxRetries: [重试次数] 探测/登录失败后重试次数，默认 4 次\nRetryInterval: [重试间隔] 每次重试间隔（秒），默认 4 秒
+#!arguments=Username:"学号",Password:"密码",SSID:"HebmuWlan",Delay:"1",ReadyTimeout:"30",MaxRetries:"4",RetryInterval:"4"
+#!arguments-desc=Username: [账号] 您的校园网登录学号\nPassword: [密码] 您的校园网登录密码\nSSID: [网络名称] 触发自动登录的 WiFi 名称 (例如 HebmuWlan)\nDelay: [稳定等待] 网络接口就绪后额外等待的秒数，默认 1 秒\nReadyTimeout: [就绪超时] 等待 Wi-Fi 和 IP 获取的最长秒数，默认 30 秒（macOS 上 SSID 可能长时间为 null）\nMaxRetries: [重试次数] 探测/登录失败后重试次数，默认 4 次\nRetryInterval: [重试间隔] 每次重试间隔（秒），默认 4 秒
 
 [Script]
-Ruijie Auto Login = type = event, event-name = network-changed, script-path = https://raw.githubusercontent.com/aoaim/luanqi_bazao/main/proxy_filter/js/ruijie_campuslogin.js, timeout=60, argument=username={{{Username}}}&password={{{Password}}}&ssid={{{SSID}}}&delay={{{Delay}}}&readyTimeout={{{ReadyTimeout}}}&maxRetries={{{MaxRetries}}}&retryInterval={{{RetryInterval}}}
+Ruijie Auto Login = type = event, event-name = network-changed, script-path = https://raw.githubusercontent.com/aoaim/luanqi_bazao/refs/heads/main/proxy_filter/js/ruijie_campuslogin.js, timeout=60, argument=username={{{Username}}}&password={{{Password}}}&ssid={{{SSID}}}&delay={{{Delay}}}&readyTimeout={{{ReadyTimeout}}}&maxRetries={{{MaxRetries}}}&retryInterval={{{RetryInterval}}}
 
 [Host]
 www.baidu.com = server:system
