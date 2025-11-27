@@ -1,355 +1,281 @@
 /**
  * Surge Script: 校园网自动登录 (Ruijie ePortal)
- * 更新: 2025-11-27 16:32
+ * 参考实现: https://www.cnblogs.com/0x000001/p/18766279
+ * 功能:
+ *  - 自动检测重定向并完成锐捷认证登录
+ *  - 支持通过参数传入 `username` 和 `password`
+ *  - 可配置 `ssid`（目标无线名）和 `delay`（等待网络就绪秒数）
+ *  - 在无法读取 SSID（如 macOS）时仍会尝试探测并登录
+ *  - 登录成功/失败使用通知提醒，并包含简单的错误处理与重试友好延时
+ * 为 HebMUer 编写，已在 HebMU 测试通过: 2025-11-23
+ * Made by Gemini 3.0 Pro
+ * Update: 2025-11-23  18:26
  */
 
+const CHECK_URL_DOMAIN = 'http://www.baidu.com';
+const CHECK_URL_IP = 'http://110.242.68.3';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36 Edg/134.0.0.0';
-const CHECK_TARGETS = [
-    // 中国可直连的 IP 站点，避免 DNS 依赖
-    { url: 'http://223.5.5.5/generate_204', online: (res) => res.status === 204 },
-    { url: 'http://14.215.177.38/generate_204', online: (res) => res.status === 204 }, // 百度 IP
-    // IP 兜底，避免 DNS
-    { url: 'http://110.242.68.3', online: () => false },
-    // 域名检测（在 DNS 可用时）
-    { url: 'http://connect.rom.miui.com/generate_204', online: (res) => res.status === 204 },
-    { url: 'http://www.baidu.com', online: (res, body) => res.status === 200 && body && body.includes('百度一下') }
-];
 
 const DEFAULT_CONFIG = {
     ssid: 'HebmuWlan',
-    delay: 1,              // 网络就绪后再等多少秒
-    readyTimeout: 30,      // 等待 Wi-Fi + IP 的最长时间 (macOS 上 SSID 可能长时间为 null)
-    maxRetries: 4,         // 探测/登录重试
-    retryInterval: 4       // 重试间隔
+    delay: 1
 };
 
 (async () => {
-    log('========== Ruijie Auto Login ==========');
+    log("========== 脚本启动 ==========");
+    log("📝 开始解析配置参数...");
     const args = parseArguments($argument);
-    const username = args.username;
-    const password = args.password;
+    
+    if (!args.username || !args.password) {
+        const errMsg = "❌ 配置缺失: 请在模块设置中填写账号和密码";
+        log(errMsg);
+        notify(errMsg);
+        $done();
+        return;
+    }
+    log(`✓ 配置已加载: 用户名=${args.username}`);
 
-    if (!username || !password) {
-        notify('❌ 请在模块参数中填写账号与密码');
-        return $done();
+    const TARGET_SSID = args.ssid || DEFAULT_CONFIG.ssid;
+    let delaySec = parseInt(args.delay) || DEFAULT_CONFIG.delay;
+    if (delaySec < 1) delaySec = 1;
+    log(`✓ 目标SSID: ${TARGET_SSID}, 延迟: ${delaySec}s`);
+
+    // --- 1. 环境预检 ---
+    log("🔍 开始环境预检...");
+    const currentWifi = $network.wifi.ssid;
+    log(`📡 当前Wi-Fi: ${currentWifi || "未检测到/有线网络"}`);
+    
+    if (currentWifi && currentWifi !== TARGET_SSID) {
+        log(`⏭️ 非目标网络(${currentWifi})，跳过检测`);
+        // 非目标网络，不通知直接退出，避免骚扰
+        $done();
+        return;
     }
 
-    const targetSsid = args.ssid || DEFAULT_CONFIG.ssid;
-    const delaySec = clampToInt(args.delay, DEFAULT_CONFIG.delay, 0, 60);
-    const readyTimeout = clampToInt(args.readyTimeout, DEFAULT_CONFIG.readyTimeout, 5, 60);
-    const maxRetries = clampToInt(args.maxRetries, DEFAULT_CONFIG.maxRetries, 1, 10);
-    const retryInterval = clampToInt(args.retryInterval, DEFAULT_CONFIG.retryInterval, 2, 30);
+    const logSSID = currentWifi ? currentWifi : "未知(macOS/有线)";
+    log(`✓ 环境符合: ${logSSID}`);
+    log(`⏳ 等待网络稳定 ${delaySec}s...`);
+    
+    await sleep(delaySec * 1000);
+    log("✓ 等待完成，开始网络检测");
 
-    log(`配置: SSID=${targetSsid}, readyTimeout=${readyTimeout}s, delay=${delaySec}s, retries=${maxRetries}/${retryInterval}s`);
-
-    // 1) 等待 Wi-Fi 和 IP 就绪
-    const readiness = await waitForNetworkReady(targetSsid, readyTimeout);
-    if (readiness.status === 'skip') {
-        log(`⏭️ 当前 Wi-Fi (${readiness.wifi || '未知'}) 非目标网络，退出`);
-        return $done();
-    }
-    if (readiness.status === 'timeout') {
-        log(`⚠️ 等待网络就绪超时 (${readyTimeout}s)，SSID=${readiness.wifi || '未知'}, hasIP=${readiness.hasIP}`);
-        // 仍然继续后续探测，避免被卡死在 SSID 为 null 的场景
-    }
-
-    if (delaySec > 0) {
-        log(`⏳ 再等待 ${delaySec}s 让网络稳定`);
-        await sleep(delaySec * 1000);
-    }
-
-    // 2) 探测是否需要认证
-    let portal = null;
-    let online = false;
-    for (let i = 1; i <= maxRetries; i++) {
-        log(`🔍 探测门户 (${i}/${maxRetries})`);
-        const result = await detectPortal();
-        if (result.status === 'portal') {
-            portal = result.data;
-            cachePortal(portal);
-            break;
-        }
-        if (result.status === 'online') {
-            online = true;
-            break;
-        }
-        if (i < maxRetries) {
-            log(`⚠️ 未捕获认证页面，${retryInterval}s 后重试`);
-            await sleep(retryInterval * 1000);
-        }
-    }
-
-    // 如果探测失败但有缓存 portal，尝试使用缓存
-    if (!portal) {
-        const cached = readCachedPortal();
-        if (cached) {
-            log(`ℹ️ 使用缓存的认证信息 (ts=${cached.ts})`);
-            portal = cached.data;
-        }
-    }
-
-    if (online) {
-        log('✅ 网络已连通，无需认证');
-        return $done();
-    }
-    if (!portal) {
-        notify('ℹ️ 未发现认证重定向，可能网络不可达');
-        return $done();
-    }
-
-    portal = await enrichPortal(portal);
-    notify('🔗 捕获到锐捷认证，开始登录...');
-    log(`🔎 portal base=${portal.baseUrl}, qs.len=${portal.queryString.length}, qs.head=${portal.queryString.slice(0, 120)}`);
-
-    // 3) 登录
-    for (let i = 1; i <= maxRetries; i++) {
-        try {
-            await login(username, password, portal);
-            notify('✅ 锐捷登录成功');
-            return $done();
-        } catch (e) {
-            log(`⚠️ 登录失败(${i}/${maxRetries}): ${e.message}`);
-            if (i < maxRetries) {
-                await sleep(retryInterval * 1000);
+    try {
+        // --- 2. 探测认证 (混合模式) ---
+        log("========== 开始认证探测 ==========");
+        
+        let authInfo = null;
+        const MAX_RETRIES = 5; // 最大重试次数
+        
+        for (let i = 1; i <= MAX_RETRIES; i++) {
+            const result = await getAuthInfoHybrid();
+            
+            if (result.status === 'portal') {
+                authInfo = result.data;
+                break;
+            } else if (result.status === 'online') {
+                const msg = "✅ 网络已连通，无需认证";
+                log(msg);
+                if (currentWifi === TARGET_SSID) {
+                    notify(msg);
+                }
+                $done();
+                return;
             } else {
-                notify(`❌ 登录失败: ${e.message}`);
+                // status === 'error'
+                if (i < MAX_RETRIES) {
+                    log(`⚠️ 第 ${i} 次检测失败或网络不可达，等待 3s 后重试...`);
+                    await sleep(3000);
+                } else {
+                    log(`❌ 达到最大重试次数 (${MAX_RETRIES})，停止检测`);
+                }
             }
         }
+
+        if (!authInfo) {
+            log("ℹ️ 未发现认证页面或网络不可用");
+            $done();
+            return;
+        }
+
+        log(`🔗 捕获认证地址: ${authInfo.baseUrl}`);
+        notify(`🔗 检测到认证页面\n开始尝试登录...`);
+
+        // --- 3. 执行登录 ---
+        log("========== 开始登录流程 ==========");
+        await login(args.username, args.password, authInfo);
+        
+    } catch (err) {
+        const errMsg = `❌ 异常中止: ${err.message}`;
+        log(errMsg);
+        log(`错误堆栈: ${err.stack || '无'}`);
+        notify(errMsg);
+        $done();
     }
-    $done();
 })();
 
 // ================= 核心逻辑 =================
+
+// 日志函数：仅打印到控制台
 function log(message) {
     const time = new Date().toLocaleTimeString();
     console.log(`[CampusLogin ${time}] ${message}`);
 }
 
+// 通知函数：发送重要通知
 function notify(message) {
-    $notification.post('校园网连接助手', '', message);
-    log(message);
+    $notification.post("校园网连接助手", "", message);
+    log(message); // 同时记录日志
 }
 
-async function waitForNetworkReady(targetSsid, maxWaitSec) {
-    let lastWifi = null;
-    let lastHasIP = false;
-
-    for (let i = 0; i < maxWaitSec; i++) {
-        const wifi = $network && $network.wifi ? $network.wifi.ssid : null;
-        const hasIP = Boolean($network && $network.v4 && $network.v4.primaryAddress);
-        lastWifi = wifi;
-        lastHasIP = hasIP;
-
-        if (wifi && targetSsid && wifi !== targetSsid) {
-            return { status: 'skip', wifi };
+async function getAuthInfoHybrid() {
+    // 1. 尝试域名检测
+    try {
+        log(`🔍 方式1: 尝试域名检测 (${CHECK_URL_DOMAIN})...`);
+        const result = await detect(CHECK_URL_DOMAIN);
+        if (result) {
+            log(`✓ 域名检测成功`);
+            return { status: 'portal', data: result };
         }
-        // macOS 有时拿不到 SSID，但已分配 IP；此时直接放行，避免超时
-        if (hasIP) {
-            log(`✓ 网络接口已就绪: SSID=${wifi || '未知'}, IP=${$network.v4.primaryAddress}`);
-            return { status: 'ready', wifi };
-        }
-        if (i === 0 || i % 3 === 0) {
-            log(`⏳ 等待网络就绪中: SSID=${wifi || 'null'}, hasIP=${hasIP}`);
-        }
-        await sleep(1000);
+        log(`✓ 域名检测完成，未发现认证页面`);
+        return { status: 'online' };
+    } catch (e) {
+        log(`⚠️ 域名检测失败: ${e.message}`);
     }
-    return { status: 'timeout', wifi: lastWifi, hasIP: lastHasIP };
-}
 
-async function detectPortal() {
-    for (const target of CHECK_TARGETS) {
-        const res = await httpGet(target.url);
-        if (!res) continue;
-
-        const portal = extractPortal(res);
-        if (portal) {
-            log(`✓ 捕获认证页面: ${portal.baseUrl}`);
-            return { status: 'portal', data: portal };
+    // 2. 域名失败，切换 IP 检测
+    try {
+        log(`🔍 方式2: 切换 IP 检测 (${CHECK_URL_IP})...`);
+        const result = await detect(CHECK_URL_IP);
+        if (result) {
+            log(`✓ IP 检测成功`);
+            return { status: 'portal', data: result };
         }
-
-        const isOnline = target.online && target.online(res.response, res.body);
-        if (isOnline) {
-            return { status: 'online' };
-        }
+        log(`✓ IP 检测完成，未发现认证页面`);
+        return { status: 'online' };
+    } catch (e) {
+        log(`⚠️ IP 检测失败: ${e.message}`);
     }
+
+    log(`ℹ️ 所有检测方式均未发现认证页面 (网络可能不可达)`);
     return { status: 'error' };
 }
 
-function httpGet(url) {
-    return new Promise((resolve) => {
-        $httpClient.get(
-            {
-                url,
-                headers: { 'User-Agent': USER_AGENT },
-                timeout: 8
-            },
-            (error, response, body = '') => {
-                if (error) {
-                    log(`❌ 请求失败: ${url} -> ${error}`);
-                    return resolve(null);
-                }
-                log(`📡 GET ${url} -> HTTP ${response.status}`);
-                resolve({ response, body });
+function detect(url) {
+    return new Promise((resolve, reject) => {
+        log(`📡 发送HTTP请求: ${url}`);
+        $httpClient.get({ 
+            url: url, 
+            headers: { 'User-Agent': USER_AGENT },
+            timeout: 5 
+        }, (error, response, data) => {
+            if (error) {
+                log(`❌ 请求失败: ${error}`);
+                reject(new Error(error));
+                return;
             }
-        );
+
+            log(`✓ 收到响应: HTTP ${response.status}`);
+            
+            // 已联网
+            if (response.status === 200 && data && data.includes('<title>百度一下，你就知道</title>')) {
+                log("✓ 检测到百度首页，网络已通");
+                resolve(null);
+                return;
+            }
+            
+            // 提取重定向
+            log("🔍 分析响应内容，查找认证重定向...");
+            const regex = /href=['"]?(https?:\/\/.*?)\/eportal\/index\.jsp\?([^'"]+)['"]?/;
+            const match = data.match(regex);
+
+            if (match && match[1] && match[2]) {
+                log(`✓ 发现认证重定向: ${match[1]}`);
+                resolve({ baseUrl: match[1], queryString: match[2] });
+            } else {
+                log(`ℹ️ 未找到认证重定向标记`);
+                resolve(null);
+            }
+        });
     });
-}
-
-function extractPortal(res) {
-    const { response, body } = res;
-
-    // 1) 302 Location
-    const location = getHeader(response.headers, 'Location');
-    if (location) {
-        const parsed = parsePortalUrl(location);
-        if (parsed) return parsed;
-    }
-
-    // 2) HTML 中的 eportal 链接
-    const bodyMatch = body.match(/https?:\/\/[^"'\\s]+\/eportal\/index\.jsp\?[^"'<>\\s]+/i);
-    if (bodyMatch) {
-        const parsed = parsePortalUrl(bodyMatch[0]);
-        if (parsed) return parsed;
-    }
-
-    return null;
-}
-
-function parsePortalUrl(urlStr) {
-    try {
-        const u = new URL(urlStr);
-        if (!u.pathname.includes('/eportal/index.jsp')) return null;
-        const qs = u.search ? u.search.substring(1) : '';
-        if (!qs) return null;
-        return { baseUrl: `${u.protocol}//${u.host}`, queryString: qs };
-    } catch (e) {
-        log(`⚠️ 解析认证地址失败: ${e.message}`);
-        return null;
-    }
 }
 
 function login(username, password, authInfo) {
     return new Promise((resolve, reject) => {
-        const variants = [
-            { name: 'none', qs: authInfo.queryString },
-            { name: 'single', qs: encodeURIComponent(authInfo.queryString) },
-            { name: 'double', qs: encodeURIComponent(encodeURIComponent(authInfo.queryString)) }
-        ];
+        log(`📝 构建登录请求参数...`);
+        const qsTwice = encodeURIComponent(encodeURIComponent(authInfo.queryString));
+        const postBody = `userId=${username}&password=${password}&service=&queryString=${qsTwice}&operatorPwd=&operatorUserId=&validcode=&passwordEncrypt=false`;
+
         const loginUrl = `${authInfo.baseUrl}/eportal/InterFace.do?method=login`;
-
-        const tryNext = (idx, lastErr) => {
-            if (idx >= variants.length) {
-                return reject(lastErr || new Error('认证失败'));
-            }
-            const v = variants[idx];
-            const body = `userId=${username}&password=${password}&service=&queryString=${v.qs}&operatorPwd=&operatorUserId=&validcode=&passwordEncrypt=false`;
-            log(`🚀 登录尝试 (${v.name}) qs.len=${v.qs.length}`);
-            $httpClient.post(
-                {
-                    url: loginUrl,
-                    headers: {
-                        'User-Agent': USER_AGENT,
-                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                        Referer: `${authInfo.baseUrl}/eportal/index.jsp`,
-                        Origin: authInfo.baseUrl
-                    },
-                    body,
-                    timeout: 12
-                },
-                (error, response, data = '') => {
-                    if (error) {
-                        return tryNext(idx + 1, new Error(error));
-                    }
-                    log(`📡 POST ${loginUrl} -> HTTP ${response.status}`);
-                    log(`📥 响应片段: ${data.substring(0, 180)}${data.length > 180 ? '...' : ''}`);
-
-                    try {
-                        const json = JSON.parse(data);
-                        if (json.result === 'success') return resolve();
-                        const msg = json.message || '服务端返回失败';
-                        if (/未注册/.test(msg) && idx + 1 < variants.length) {
-                            log(`🔁 服务端提示未注册，切换编码模式 -> ${variants[idx + 1].name}`);
-                            return tryNext(idx + 1, new Error(msg));
-                        }
-                        return reject(new Error(msg));
-                    } catch (e) {
-                        if (data.includes('success')) return resolve();
-                        return tryNext(idx + 1, new Error('响应解析失败'));
-                    }
-                }
-            );
+        const request = {
+            url: loginUrl,
+            headers: {
+                "User-Agent": USER_AGENT,
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                "Referer": `${authInfo.baseUrl}/eportal/index.jsp`,
+                "Origin": authInfo.baseUrl
+            },
+            body: postBody,
+            timeout: 15
         };
 
-        tryNext(0, null);
+        log(`🚀 发起登录请求: ${loginUrl}`);
+        log(`📤 用户名: ${username}`);
+
+        $httpClient.post(request, (error, response, data) => {
+            if (error) {
+                const errMsg = `❌ 登录请求失败: ${error}`;
+                log(errMsg);
+                notify(errMsg);
+                reject(new Error(`请求失败: ${error}`));
+            } else {
+                log(`✓ 收到登录响应: HTTP ${response.status}`);
+                log(`📥 响应内容: ${data.substring(0, 200)}${data.length > 200 ? '...' : ''}`);
+                
+                try {
+                    const result = JSON.parse(data);
+                    log(`✓ 成功解析JSON响应`);
+                    if (result.result === "success") {
+                        const successMsg = "✅ 登录成功";
+                        log(successMsg);
+                        notify(successMsg);
+                        resolve();
+                    } else {
+                        const errMsg = `❌ 登录失败: ${result.message || "服务端返回失败"}`;
+                        log(errMsg);
+                        notify(errMsg);
+                        reject(new Error(result.message || "服务端返回失败"));
+                    }
+                } catch (e) {
+                    log(`⚠️ JSON解析失败: ${e.message}，尝试文本匹配`);
+                    if (data.includes('success')) {
+                         const successMsg = "✅ 登录成功 (文本匹配)";
+                         log(successMsg);
+                         notify(successMsg);
+                         resolve();
+                    } else {
+                        const errMsg = `❌ 响应解析失败，无法确认登录状态`;
+                        log(errMsg);
+                        notify(errMsg);
+                        reject(new Error("响应解析失败"));
+                    }
+                }
+            }
+        });
     });
 }
 
-// ================= 工具函数 =================
+// 基础工具
 function sleep(ms) {
-    return new Promise((r) => setTimeout(r, ms));
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
-
-function clampToInt(value, fallback, min, max) {
-    const n = parseInt(value, 10);
-    if (Number.isNaN(n)) return fallback;
-    return Math.min(Math.max(n, min), max);
-}
-
-function getHeader(headers, key) {
-    if (!headers) return null;
-    const lower = key.toLowerCase();
-    const found = Object.keys(headers).find((k) => k.toLowerCase() === lower);
-    return found ? headers[found] : null;
-}
-
 function parseArguments(argStr) {
     const args = {};
     if (!argStr) return args;
-    argStr.split('&').forEach((pair) => {
+    argStr.split('&').forEach(pair => {
         const [key, value] = pair.split('=');
-        if (key && value !== undefined) {
+        if (key && value) {
             args[key.trim()] = value.trim().replace(/^["']|["']$/g, '');
         }
     });
     return args;
-}
-
-// 缓存 portal 信息，方便 DNS 不可用时重用
-function cachePortal(portal) {
-    try {
-        const obj = { ts: Date.now(), data: portal };
-        $persistentStore.write(JSON.stringify(obj), 'ruijie_last_portal');
-    } catch (e) {
-        log(`⚠️ 缓存 portal 失败: ${e.message}`);
-    }
-}
-
-function readCachedPortal() {
-    try {
-        const raw = $persistentStore.read('ruijie_last_portal');
-        if (!raw) return null;
-        const obj = JSON.parse(raw);
-        // 只保留 2 小时内的缓存
-        if (!obj || !obj.ts || Date.now() - obj.ts > 2 * 60 * 60 * 1000) return null;
-        return obj;
-    } catch (e) {
-        log(`⚠️ 读取缓存 portal 失败: ${e.message}`);
-        return null;
-    }
-}
-
-// 若捕获的 queryString 过短，尝试从 index.jsp 再抓一次完整参数
-async function enrichPortal(portal) {
-    if (portal.queryString && portal.queryString.length > 30) return portal;
-    const url = `${portal.baseUrl}/eportal/index.jsp`;
-    log(`🔧 补全查询参数: 请求 ${url}`);
-    const res = await httpGet(url);
-    if (!res) return portal;
-    const extra = extractPortal(res);
-    if (extra && extra.queryString && extra.queryString.length > portal.queryString.length) {
-        log(`✓ 补全成功，qs.len ${portal.queryString.length} -> ${extra.queryString.length}`);
-        return extra;
-    }
-    log('ℹ️ 补全失败，继续使用原始参数');
-    return portal;
 }
