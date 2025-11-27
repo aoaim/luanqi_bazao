@@ -1,13 +1,12 @@
 #!name=🏫 校园网自动登录 (Ruijie)
 #!desc=连接指定 WiFi 时自动进行锐捷校园网认证
-#!desc=注意: 脚本会在用户第一次或成功登录后将登录时间写入 Surge 的持久化存储，键名为 `ruijie_last_success_ts_{SSID}`，用于区分"冷启动"与正常变更，若需清除该状态，请在 Surge 的模块设置中清除或重新安装模块
-#!date = 2025-11-27 13:00
+#!date = 2025-11-27 16:32
 #!category=Campus
-#!arguments=Username:"学号",Password:"密码",SSID:"HebmuWlan",Delay:"1",ColdBootDelay:"8",MaxRetries:"10",RetryInterval:"5",Reset:"false"
-#!arguments-desc=Username: [账号] 您的校园网登录学号\nPassword: [密码] 您的校园网登录密码\nSSID: [网络名称] 触发自动登录的 WiFi 名称 (例如 HebmuWlan)\nDelay: [正常延迟] 连接 WiFi 后等待获取 IP 的缓冲时间 (秒)，默认 1 秒\nColdBootDelay: [冷启动延迟] 开机/系统重启后首次连接 WiFi 时额外等待的时间（秒），默认 8 秒\nMaxRetries: [最大重试次数] 探测认证门户和请求失败后的最大重试次数，默认 10 次\nRetryInterval: [重试间隔] 每次重试间隔（秒），默认 5 秒\nReset: [清除持久化状态] 若设置为 `true`，会清空已存的登录成功时间戳 (ruijie_last_success_ts_{SSID})。
+#!arguments=Username:"学号",Password:"密码",SSID:"HebmuWlan",Delay:"1",ReadyTimeout:"18",MaxRetries:"4",RetryInterval:"4"
+#!arguments-desc=Username: [账号] 您的校园网登录学号\nPassword: [密码] 您的校园网登录密码\nSSID: [网络名称] 触发自动登录的 WiFi 名称 (例如 HebmuWlan)\nDelay: [稳定等待] 网络接口就绪后额外等待的秒数，默认 1 秒\nReadyTimeout: [就绪超时] 等待 Wi-Fi 和 IP 获取的最长秒数，默认 18 秒\nMaxRetries: [重试次数] 探测/登录失败后重试次数，默认 4 次\nRetryInterval: [重试间隔] 每次重试间隔（秒），默认 4 秒
 
 [Script]
-Ruijie Auto Login = type = event, event-name = network-changed, script-path = https://raw.githubusercontent.com/aoaim/luanqi_bazao/main/proxy_filter/js/ruijie_campuslogin.js, timeout=60, argument=username={{{Username}}}&password={{{Password}}}&ssid={{{SSID}}}&delay={{{Delay}}}&coldBootDelay={{{ColdBootDelay}}}&maxRetries={{{MaxRetries}}}&retryInterval={{{RetryInterval}}}&reset={{{Reset}}}
+Ruijie Auto Login = type = event, event-name = network-changed, script-path = https://raw.githubusercontent.com/aoaim/luanqi_bazao/main/proxy_filter/js/ruijie_campuslogin.js, timeout=60, argument=username={{{Username}}}&password={{{Password}}}&ssid={{{SSID}}}&delay={{{Delay}}}&readyTimeout={{{ReadyTimeout}}}&maxRetries={{{MaxRetries}}}&retryInterval={{{RetryInterval}}}
 
 [Host]
 www.baidu.com = server:system
