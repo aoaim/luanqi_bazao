@@ -97,6 +97,7 @@ const DEFAULT_CONFIG = {
         return $done();
     }
 
+    portal = await enrichPortal(portal);
     notify('🔗 捕获到锐捷认证，开始登录...');
     log(`🔎 portal base=${portal.baseUrl}, qs.len=${portal.queryString.length}, qs.head=${portal.queryString.slice(0, 120)}`);
 
@@ -335,4 +336,20 @@ function readCachedPortal() {
         log(`⚠️ 读取缓存 portal 失败: ${e.message}`);
         return null;
     }
+}
+
+// 若捕获的 queryString 过短，尝试从 index.jsp 再抓一次完整参数
+async function enrichPortal(portal) {
+    if (portal.queryString && portal.queryString.length > 30) return portal;
+    const url = `${portal.baseUrl}/eportal/index.jsp`;
+    log(`🔧 补全查询参数: 请求 ${url}`);
+    const res = await httpGet(url);
+    if (!res) return portal;
+    const extra = extractPortal(res);
+    if (extra && extra.queryString && extra.queryString.length > portal.queryString.length) {
+        log(`✓ 补全成功，qs.len ${portal.queryString.length} -> ${extra.queryString.length}`);
+        return extra;
+    }
+    log('ℹ️ 补全失败，继续使用原始参数');
+    return portal;
 }
