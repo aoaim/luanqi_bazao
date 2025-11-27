@@ -42,18 +42,27 @@ const DEFAULT_CONFIG = {
 
     // --- 1. 环境预检 ---
     log("🔍 开始环境预检...");
-    const currentWifi = $network.wifi.ssid;
+    let currentWifi = $network.wifi.ssid;
     log(`📡 当前Wi-Fi: ${currentWifi || "未检测到/有线网络"}`);
-    
-    if (currentWifi && currentWifi !== TARGET_SSID) {
-        log(`⏭️ 非目标网络(${currentWifi})，跳过检测`);
-        // 非目标网络，不通知直接退出，避免骚扰
-        $done();
-        return;
+    const readyTimeout = parseInt(args.readyTimeout) || 20; // 额外等待获取 IP（macOS 冷启动常见）
+    let hasIP = Boolean($network && $network.v4 && $network.v4.primaryAddress);
+
+    for (let i = 0; i < readyTimeout && !hasIP; i++) {
+        await sleep(1000);
+        currentWifi = $network.wifi.ssid;
+        hasIP = Boolean($network && $network.v4 && $network.v4.primaryAddress);
+        if (currentWifi && currentWifi !== TARGET_SSID) {
+            log(`⏭️ 非目标网络(${currentWifi})，跳过检测`);
+            $done();
+            return;
+        }
+        if (i === 0 || (i + 1) % 3 === 0) {
+            log(`⏳ 等待网络就绪: SSID=${currentWifi || "null"}, hasIP=${hasIP}`);
+        }
     }
 
     const logSSID = currentWifi ? currentWifi : "未知(macOS/有线)";
-    log(`✓ 环境符合: ${logSSID}`);
+    log(`✓ 环境符合: ${logSSID}, hasIP=${hasIP}`);
     log(`⏳ 等待网络稳定 ${delaySec}s...`);
     
     await sleep(delaySec * 1000);
@@ -175,6 +184,15 @@ function detect(url) {
             }
 
             log(`✓ 收到响应: HTTP ${response.status}`);
+            const loc = getHeader(response.headers, 'Location');
+            if (loc) {
+                const parsed = parsePortalUrl(loc);
+                if (parsed) {
+                    log(`✓ 通过重定向捕获认证: ${parsed.baseUrl}`);
+                    resolve(parsed);
+                    return;
+                }
+            }
             
             // 已联网
             if (response.status === 200 && data && data.includes('<title>百度一下，你就知道</title>')) {
@@ -185,12 +203,10 @@ function detect(url) {
             
             // 提取重定向
             log("🔍 分析响应内容，查找认证重定向...");
-            const regex = /href=['"]?(https?:\/\/.*?)\/eportal\/index\.jsp\?([^'"]+)['"]?/;
-            const match = data.match(regex);
-
-            if (match && match[1] && match[2]) {
-                log(`✓ 发现认证重定向: ${match[1]}`);
-                resolve({ baseUrl: match[1], queryString: match[2] });
+            const bodyMatch = parsePortalFromString(data);
+            if (bodyMatch) {
+                log(`✓ 发现认证重定向: ${bodyMatch.baseUrl}`);
+                resolve(bodyMatch);
             } else {
                 log(`ℹ️ 未找到认证重定向标记`);
                 resolve(null);
@@ -278,4 +294,32 @@ function parseArguments(argStr) {
         }
     });
     return args;
+}
+
+function getHeader(headers, key) {
+    if (!headers) return null;
+    const lower = key.toLowerCase();
+    const found = Object.keys(headers).find(k => k.toLowerCase() === lower);
+    return found ? headers[found] : null;
+}
+
+function parsePortalFromString(str) {
+    if (!str) return null;
+    const re = /(https?:\/\/[^\s'"<>]+?\/eportal\/index\.jsp\?[^'"<>]+)/i;
+    const m = str.match(re);
+    if (m && m[1]) return parsePortalUrl(m[1]);
+    return null;
+}
+
+function parsePortalUrl(urlStr) {
+    try {
+        const u = new URL(urlStr);
+        if (!u.pathname.includes('/eportal/index.jsp')) return null;
+        const qs = u.search ? u.search.substring(1) : '';
+        if (!qs) return null;
+        return { baseUrl: `${u.protocol}//${u.host}`, queryString: qs };
+    } catch (e) {
+        log(`⚠️ 解析重定向失败: ${e.message}`);
+        return null;
+    }
 }
