@@ -1,12 +1,12 @@
 #!name=🏫 校园网自动登录 (Ruijie)
-#!desc=旧版稳定逻辑: 直接探测并双重编码登录 (2025-11-23)；readyTimeout 可配置
-#!date = 2025-11-27 17:10
+#!desc=连接指定 WiFi 时自动进行锐捷校园网认证
+#!date = 2025-11-23 18:26
 #!category=Campus
-#!arguments=Username:"学号",Password:"密码",SSID:"HebmuWlan",Delay:"1",ReadyTimeout:"20"
-#!arguments-desc=Username: [账号] 您的校园网登录学号\nPassword: [密码] 您的校园网登录密码\nSSID: [网络名称] 触发自动登录的 WiFi 名称 (例如 HebmuWlan)\nDelay: [延迟] 连接 WiFi 后等待获取 IP 的缓冲时间 (秒)，默认 1 秒\nReadyTimeout: [就绪超时] 冷启动时额外等待获取 IP 的最长秒数，默认 10 秒
+#!arguments=Username:"学号",Password:"密码",SSID:"HebmuWlan",Delay:"1"
+#!arguments-desc=Username: [账号] 您的校园网登录学号\nPassword: [密码] 您的校园网登录密码\nSSID: [网络名称] 触发自动登录的 WiFi 名称 (例如 HebmuWlan)\nDelay: [DHCP延时] 连接 WiFi 后等待获取 IP 的缓冲时间 (秒)，建议 3-5 秒
 
 [Script]
-Ruijie Auto Login = type = event, event-name = network-changed, script-path = https://raw.githubusercontent.com/aoaim/luanqi_bazao/refs/heads/main/proxy_filter/js/ruijie_campuslogin.js, timeout=60, argument=username={{{Username}}}&password={{{Password}}}&ssid={{{SSID}}}&delay={{{Delay}}}&readyTimeout={{{ReadyTimeout}}}
+Ruijie Auto Login = type = event, event-name = network-changed, script-path = https://raw.githubusercontent.com/aoaim/luanqi_bazao/main/proxy_filter/js/ruijie_campuslogin.js, timeout=60, argument=username={{{Username}}}&password={{{Password}}}&ssid={{{SSID}}}&delay={{{Delay}}}
 
 [Host]
 www.baidu.com = server:system
@@ -15,7 +15,8 @@ eportal.hebmu.edu.cn = server:system
 [Rule]
 # 域名方案直连
 DOMAIN,www.baidu.com,DIRECT
+# IP 兜底方案直连
+IP-CIDR,110.242.68.3/32,DIRECT
+
 # 认证服务器直连
 DOMAIN,eportal.hebmu.edu.cn,DIRECT
-# IP 兜底方案直连
-IP-CIDR,110.242.68.3/32,DIRECT,no-resolve
