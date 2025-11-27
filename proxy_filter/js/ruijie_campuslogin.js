@@ -7,7 +7,7 @@ const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 const CHECK_TARGETS = [
     // 中国可直连的 IP 站点，避免 DNS 依赖
     { url: 'http://223.5.5.5/generate_204', online: (res) => res.status === 204 },
-    { url: 'http://114.114.114.114/generate_204', online: (res) => res.status === 204 },
+    { url: 'http://14.215.177.38/generate_204', online: (res) => res.status === 204 }, // 百度 IP
     // IP 兜底，避免 DNS
     { url: 'http://110.242.68.3', online: () => false },
     // 域名检测（在 DNS 可用时）
@@ -229,40 +229,57 @@ function parsePortalUrl(urlStr) {
 
 function login(username, password, authInfo) {
     return new Promise((resolve, reject) => {
-        // 部分校园网只需要单次 encode；双重 encode 在此站点返回“设备未注册”，先改为单次
-        const qsEncoded = encodeURIComponent(authInfo.queryString);
-        const body = `userId=${username}&password=${password}&service=&queryString=${qsEncoded}&operatorPwd=&operatorUserId=&validcode=&passwordEncrypt=false`;
+        const variants = [
+            { name: 'none', qs: authInfo.queryString },
+            { name: 'single', qs: encodeURIComponent(authInfo.queryString) },
+            { name: 'double', qs: encodeURIComponent(encodeURIComponent(authInfo.queryString)) }
+        ];
         const loginUrl = `${authInfo.baseUrl}/eportal/InterFace.do?method=login`;
 
-        $httpClient.post(
-            {
-                url: loginUrl,
-                headers: {
-                    'User-Agent': USER_AGENT,
-                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                    Referer: `${authInfo.baseUrl}/eportal/index.jsp`,
-                    Origin: authInfo.baseUrl
-                },
-                body,
-                timeout: 12
-            },
-            (error, response, data = '') => {
-                if (error) {
-                    return reject(new Error(error));
-                }
-                log(`📡 POST ${loginUrl} -> HTTP ${response.status}`);
-                log(`📥 响应片段: ${data.substring(0, 120)}${data.length > 120 ? '...' : ''}`);
-
-                try {
-                    const json = JSON.parse(data);
-                    if (json.result === 'success') return resolve();
-                    return reject(new Error(json.message || '服务端返回失败'));
-                } catch (e) {
-                    if (data.includes('success')) return resolve();
-                    return reject(new Error('响应解析失败'));
-                }
+        const tryNext = (idx, lastErr) => {
+            if (idx >= variants.length) {
+                return reject(lastErr || new Error('认证失败'));
             }
-        );
+            const v = variants[idx];
+            const body = `userId=${username}&password=${password}&service=&queryString=${v.qs}&operatorPwd=&operatorUserId=&validcode=&passwordEncrypt=false`;
+            log(`🚀 登录尝试 (${v.name}) qs.len=${v.qs.length}`);
+            $httpClient.post(
+                {
+                    url: loginUrl,
+                    headers: {
+                        'User-Agent': USER_AGENT,
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                        Referer: `${authInfo.baseUrl}/eportal/index.jsp`,
+                        Origin: authInfo.baseUrl
+                    },
+                    body,
+                    timeout: 12
+                },
+                (error, response, data = '') => {
+                    if (error) {
+                        return tryNext(idx + 1, new Error(error));
+                    }
+                    log(`📡 POST ${loginUrl} -> HTTP ${response.status}`);
+                    log(`📥 响应片段: ${data.substring(0, 180)}${data.length > 180 ? '...' : ''}`);
+
+                    try {
+                        const json = JSON.parse(data);
+                        if (json.result === 'success') return resolve();
+                        const msg = json.message || '服务端返回失败';
+                        if (/未注册/.test(msg) && idx + 1 < variants.length) {
+                            log(`🔁 服务端提示未注册，切换编码模式 -> ${variants[idx + 1].name}`);
+                            return tryNext(idx + 1, new Error(msg));
+                        }
+                        return reject(new Error(msg));
+                    } catch (e) {
+                        if (data.includes('success')) return resolve();
+                        return tryNext(idx + 1, new Error('响应解析失败'));
+                    }
+                }
+            );
+        };
+
+        tryNext(0, null);
     });
 }
 
