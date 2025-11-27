@@ -83,6 +83,7 @@ const DEFAULT_CONFIG = {
     }
 
     notify('🔗 捕获到锐捷认证，开始登录...');
+    log(`🔎 portal base=${portal.baseUrl}, qs.len=${portal.queryString.length}, qs.head=${portal.queryString.slice(0, 120)}`);
 
     // 3) 登录
     for (let i = 1; i <= maxRetries; i++) {
@@ -213,7 +214,8 @@ function parsePortalUrl(urlStr) {
 
 function login(username, password, authInfo) {
     return new Promise((resolve, reject) => {
-        const qsEncoded = encodeURIComponent(encodeURIComponent(authInfo.queryString));
+        // 部分校园网只需要单次 encode；双重 encode 在此站点返回“设备未注册”，先改为单次
+        const qsEncoded = encodeURIComponent(authInfo.queryString);
         const body = `userId=${username}&password=${password}&service=&queryString=${qsEncoded}&operatorPwd=&operatorUserId=&validcode=&passwordEncrypt=false`;
         const loginUrl = `${authInfo.baseUrl}/eportal/InterFace.do?method=login`;
 
