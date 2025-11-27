@@ -5,9 +5,14 @@
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36 Edg/134.0.0.0';
 const CHECK_TARGETS = [
+    // 中国可直连的 IP 站点，避免 DNS 依赖
+    { url: 'http://223.5.5.5/generate_204', online: (res) => res.status === 204 },
+    { url: 'http://114.114.114.114/generate_204', online: (res) => res.status === 204 },
+    // IP 兜底，避免 DNS
+    { url: 'http://110.242.68.3', online: () => false },
+    // 域名检测（在 DNS 可用时）
     { url: 'http://connect.rom.miui.com/generate_204', online: (res) => res.status === 204 },
-    { url: 'http://www.baidu.com', online: (res, body) => res.status === 200 && body && body.includes('百度一下') },
-    { url: 'http://110.242.68.3', online: () => false } // 兜底 IP
+    { url: 'http://www.baidu.com', online: (res, body) => res.status === 200 && body && body.includes('百度一下') }
 ];
 
 const DEFAULT_CONFIG = {
@@ -61,6 +66,7 @@ const DEFAULT_CONFIG = {
         const result = await detectPortal();
         if (result.status === 'portal') {
             portal = result.data;
+            cachePortal(portal);
             break;
         }
         if (result.status === 'online') {
@@ -70,6 +76,15 @@ const DEFAULT_CONFIG = {
         if (i < maxRetries) {
             log(`⚠️ 未捕获认证页面，${retryInterval}s 后重试`);
             await sleep(retryInterval * 1000);
+        }
+    }
+
+    // 如果探测失败但有缓存 portal，尝试使用缓存
+    if (!portal) {
+        const cached = readCachedPortal();
+        if (cached) {
+            log(`ℹ️ 使用缓存的认证信息 (ts=${cached.ts})`);
+            portal = cached.data;
         }
     }
 
@@ -169,7 +184,7 @@ function httpGet(url) {
             },
             (error, response, body = '') => {
                 if (error) {
-                    log(`❌ 请求失败: ${error}`);
+                    log(`❌ 请求失败: ${url} -> ${error}`);
                     return resolve(null);
                 }
                 log(`📡 GET ${url} -> HTTP ${response.status}`);
@@ -279,4 +294,28 @@ function parseArguments(argStr) {
         }
     });
     return args;
+}
+
+// 缓存 portal 信息，方便 DNS 不可用时重用
+function cachePortal(portal) {
+    try {
+        const obj = { ts: Date.now(), data: portal };
+        $persistentStore.write(JSON.stringify(obj), 'ruijie_last_portal');
+    } catch (e) {
+        log(`⚠️ 缓存 portal 失败: ${e.message}`);
+    }
+}
+
+function readCachedPortal() {
+    try {
+        const raw = $persistentStore.read('ruijie_last_portal');
+        if (!raw) return null;
+        const obj = JSON.parse(raw);
+        // 只保留 2 小时内的缓存
+        if (!obj || !obj.ts || Date.now() - obj.ts > 2 * 60 * 60 * 1000) return null;
+        return obj;
+    } catch (e) {
+        log(`⚠️ 读取缓存 portal 失败: ${e.message}`);
+        return null;
+    }
 }
