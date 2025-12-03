@@ -15,8 +15,7 @@ eportal.hebmu.edu.cn = server:system
 [Rule]
 # 域名方案直连
 DOMAIN,www.baidu.com,DIRECT
-# IP 兜底方案直连
-IP-CIDR,110.242.68.3/32,DIRECT
-
 # 认证服务器直连
 DOMAIN,eportal.hebmu.edu.cn,DIRECT
+# IP 兜底方案直连
+IP-CIDR,110.242.68.3/32,DIRECT,no-resolve
