@@ -2,7 +2,7 @@
 ## Sources:
 ## - https://raw.githubusercontent.com/Ruddernation-Designs/Adobe-URL-Block-List/master/hosts
 ## - https://raw.githubusercontent.com/ignaciocastro/a-dove-is-dumb/main/list.txt
-## Updated: 2025-12-03T00:23:14.297Z
+## Updated: 2025-12-04T00:23:23.906Z
 DOMAIN,00nllmoilmti.p5jr3.adobestats.io
 DOMAIN,017sxef5kv.adobestats.io
 DOMAIN,019n8v7a8f.adobestats.io
@@ -663,6 +663,7 @@ DOMAIN,78wdyt44u1e.7kdvx.hstatic.io
 DOMAIN,796qm8i4o6.adobestats.io
 DOMAIN,797jfb62u.4p4bv.adobestats.io
 DOMAIN,79j7psfqg5.adobestats.io
+DOMAIN,7agfyo8x2k.adobestats.io
 DOMAIN,7apa7t871vv.zavjl.adobestats.io
 DOMAIN,7ayavd167e.adobestats.io
 DOMAIN,7b4jms3jyg5.lpst4.hstatic.io
@@ -752,6 +753,7 @@ DOMAIN,89wqmeiix8.adobestats.io
 DOMAIN,8bm7q3s69i.adobestats.io
 DOMAIN,8burj9rb4s.adobestats.io
 DOMAIN,8crqaqf9qn.adobestats.io
+DOMAIN,8d76t8bbqx.adobestats.io
 DOMAIN,8eptecerpq.adobestats.io
 DOMAIN,8i0054vizg.adobestats.io
 DOMAIN,8i88bcggu6.adobestats.io
@@ -1069,6 +1071,7 @@ DOMAIN,bb2o99437muh.h2uqz.adobestats.io
 DOMAIN,bb6odaqr7i.xwk4b.adobestats.io
 DOMAIN,bb6odaqr7i4v.xwk4b.adobestats.io
 DOMAIN,bbkb3bghswe.4p4bv.adobestats.io
+DOMAIN,bbkxa1z67s.lqn0m.adobestats.io
 DOMAIN,bbraowhh29.adobestats.io
 DOMAIN,bc27a8e3zw.adobestats.io
 DOMAIN,bcmegu2xw.4e2id.adobestats.io
@@ -1378,6 +1381,7 @@ DOMAIN,ee95jyf92b.adobestats.io
 DOMAIN,ef07bhgww2.adobestats.io
 DOMAIN,ef7ljzifjx.adobestats.io
 DOMAIN,ef7m2t2zz9.adobestats.io
+DOMAIN,efgbo3j9y7.adobestats.io
 DOMAIN,efqh7gir.a13cy.adobestats.io
 DOMAIN,eftcpaiu36.adobestats.io
 DOMAIN,eg9alh49glp6.6u13v.adobestats.io
@@ -3204,6 +3208,7 @@ DOMAIN,xbhspynj8t.adobestats.io
 DOMAIN,xbps2ycbaj.adobestats.io
 DOMAIN,xbuvoorv9.3xjvl.adobestats.io
 DOMAIN,xcna71ygzo.adobestats.io
+DOMAIN,xdj68ah97o.sf7e3.adobestats.io
 DOMAIN,xeh65lseqp.adobestats.io
 DOMAIN,xesnl0ss94.adobestats.io
 DOMAIN,xewyq9kq8v.2cmyg.adobestats.io
@@ -3296,6 +3301,7 @@ DOMAIN,ybnt1hdy.4p4bv.adobestats.io
 DOMAIN,ycav246b04.adobestats.io
 DOMAIN,ycurbaa5ab.adobestats.io
 DOMAIN,ydbrfzqkyw.adobestats.io
+DOMAIN,ydkrl0i5uz.xwk4b.adobestats.io
 DOMAIN,ydoo3l4rel.adobestats.io
 DOMAIN,ye60h3ynxmpb.bmysp.hstatic.io
 DOMAIN,yf9inv4f4a.adobestats.io
@@ -3393,6 +3399,7 @@ DOMAIN,zd94axvxib.adobestats.io
 DOMAIN,ze88kiyu2.zavjl.adobestats.io
 DOMAIN,zeg3f5j2umh.lqn0m.adobestats.io
 DOMAIN,zekdqanici.adobestats.io
+DOMAIN,zerdivcnd0.adobestats.io
 DOMAIN,zf1aegmmle.adobestats.io
 DOMAIN,zf37mp80xx.adobestats.io
 DOMAIN,zfkju3qu.xwk4b.adobestats.io
