@@ -4,13 +4,13 @@
 .ib.snssdk.com
 .xlog.snssdk.com
 .log.snssdk.com
+.tracker.zmaticoo.com
 .tags.mlytics.com
 .tncid.app
 .rampanel.com
 .l5id.com
 .evorra.net
 .yext.com
-.hackle.io
 .track.aimroas.com
 .upsellit.com
 .assetsconfigcdn.org
@@ -49397,6 +49397,9 @@
 .tagman.britishairways.com
 .ct.pinterest.com
 .incoming.telemetry.mozilla.org
+.analytics.claudelog.com
+.i.go.sohu.com
+.tagbridge.vlp.cz
 .advancedanalytics-websocket-pri-001.hexaglobe.net
 .valencia-beacons.xumo.com
 .sync.getpublica.com
@@ -53645,6 +53648,7 @@
 .canvasandsocks.com
 .capablecup.com
 .capriciouscorn.com
+.captainstick.com
 .captivatingcanyon.com
 .captivatingillusion.com
 .captivatingpanorama.com
@@ -53872,6 +53876,7 @@
 .dinnerquartz.com
 .direfuldesk.com
 .disagreeabledrop.com
+.discopond.com
 .discreetfield.com
 .discreetquarter.com
 .distributionpocket.com
@@ -54029,6 +54034,7 @@
 .fixedfold.com
 .flakyfeast.com
 .flameuncle.com
+.flashtexting.com
 .fleetbegin.com
 .flimsycircle.com
 .flimsythought.com
@@ -54135,6 +54141,7 @@
 .gorgeousedge.com
 .gorillapage.com
 .gossamerwing.com
+.gotlunched.com
 .gracefulmilk.com
 .grainmass.com
 .grandfatherguitar.com
@@ -54259,6 +54266,7 @@
 .inputicicle.com
 .inquisitiveice.com
 .inquisitiveinvention.com
+.insectmacros.com
 .inspirebees.com
 .insulatech.com
 .intelligentscissors.com
@@ -54460,6 +54468,7 @@
 .modularmental.com
 .momentfilter.com
 .monacobeatles.com
+.monkeyapes.com
 .monkeystyping.com
 .monstermemes.com
 .monthlyhat.com
