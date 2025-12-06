@@ -517,7 +517,9 @@ alias vi='hx'
 alias vim='hx'
 EOF
         chmod 644 /etc/profile.d/helix-alias.sh
-        print_success "Helix installed and aliased to vi/vim"
+        # Source aliases in current shell
+        source /etc/profile.d/helix-alias.sh 2>/dev/null || true
+        print_success "Helix installed (aliases: vi, vim, hx)"
     else
         print_error "Helix installation failed"
     fi
@@ -550,7 +552,9 @@ alias lt='eza -lh --icons --git --tree'
 alias l='eza -lah --icons --git'
 EOF
             chmod 644 /etc/profile.d/eza-alias.sh
-            print_success "Eza installed with shell aliases"
+            # Source aliases in current shell
+            source /etc/profile.d/eza-alias.sh 2>/dev/null || true
+            print_success "Eza installed (aliases: ls, ll, la, lt, l)"
         else
             print_error "Eza binary not found in archive"
         fi
@@ -1215,9 +1219,21 @@ show_report() {
     [ -f "$SYSCTL_FORWARDING_FILE" ] && echo -e "  ${GREEN}•${RESET} $SYSCTL_FORWARDING_FILE"
     [ -f "$SYSCTL_IPV6_FILE" ] && echo -e "  ${GREEN}•${RESET} $SYSCTL_IPV6_FILE"
     echo ""
-    print_kv "Eza" "$EZA_VER"
-    print_kv "Helix" "$HELIX_VER"
-    print_kv "Speedtest" "$SPEEDTEST_VER"
+    if [ "$EZA_VER" != "Not installed" ]; then
+        print_kv "Eza" "$EZA_VER (use: ls, ll, la, tree)"
+    else
+        print_kv "Eza" "$EZA_VER"
+    fi
+    if [ "$HELIX_VER" != "Not installed" ]; then
+        print_kv "Helix" "$HELIX_VER (use: vi, vim, hx)"
+    else
+        print_kv "Helix" "$HELIX_VER"
+    fi
+    if [ "$SPEEDTEST_VER" != "Not installed" ]; then
+        print_kv "Speedtest" "$SPEEDTEST_VER (use: speedtest)"
+    else
+        print_kv "Speedtest" "$SPEEDTEST_VER"
+    fi
     print_kv "chrony" "$(systemctl is-active chrony 2>/dev/null || echo '?')"
     print_kv "fail2ban" "$(systemctl is-active fail2ban 2>/dev/null || echo '?')"
     if command_exists unattended-upgrade; then
@@ -1235,9 +1251,21 @@ show_report() {
 
 show_tools_summary() {
     print_banner "${ICON_DOC} Summary (lite mode)"
-    print_kv "Eza" "$EZA_VER"
-    print_kv "Helix" "$HELIX_VER"
-    print_kv "Speedtest" "$SPEEDTEST_VER"
+    if [ "$EZA_VER" != "Not installed" ]; then
+        print_kv "Eza" "$EZA_VER (use: ls, ll, la, tree)"
+    else
+        print_kv "Eza" "$EZA_VER"
+    fi
+    if [ "$HELIX_VER" != "Not installed" ]; then
+        print_kv "Helix" "$HELIX_VER (use: vi, vim, hx)"
+    else
+        print_kv "Helix" "$HELIX_VER"
+    fi
+    if [ "$SPEEDTEST_VER" != "Not installed" ]; then
+        print_kv "Speedtest" "$SPEEDTEST_VER (use: speedtest)"
+    else
+        print_kv "Speedtest" "$SPEEDTEST_VER"
+    fi
     print_kv "zram swap" "${ZRAM_STATUS:-not detected}"
     print_kv "IP forwarding" "$(sysctl -n net.ipv4.ip_forward 2>/dev/null | grep -q 1 && echo 'enabled' || echo 'disabled')"
     print_kv "IPv6" "$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null | grep -q 1 && echo 'disabled' || echo 'enabled')"
@@ -1300,6 +1328,7 @@ main() {
     apply_all_sysctl
     detect_docker_status
     detect_zram_status
+    detect_versions
     write_marker
     show_report
 }
