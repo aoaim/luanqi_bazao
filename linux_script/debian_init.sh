@@ -381,7 +381,7 @@ detect_docker_status() {
     if command_exists docker; then
         DOCKER_STATUS=$(docker --version 2>/dev/null | head -n1 || echo "installed")
     else
-        DOCKER_STATUS="not installed"
+        DOCKER_STATUS="Not installed"
     fi
 }
 
