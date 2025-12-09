@@ -690,14 +690,14 @@ show_installed_menu() {
     echo "Latest version:  v${latest_version}"
     
     if systemctl is-active --quiet snell.service; then
-        echo "Service status:  ✓ Running"
+        echo -e "Service status:  \033[32m✓ Running\033[0m"
     else
-        echo "Service status:  ✗ Stopped"
+        echo -e "Service status:  \033[31m✗ Stopped\033[0m"
     fi
     
     if [ "$installed_version" != "$latest_version" ]; then
         echo ""
-        echo "⚠️  New version available!"
+        echo -e "\033[33m⚠️  New version available!\033[0m"
     fi
     
     echo ""
