@@ -1319,6 +1319,9 @@ main() {
     # 提示用户可选参数
     echo -e "提示: 使用 -h 仅硬件，-n 仅网络，-nt 仅路由追踪"
     
+    # 致谢
+    echo -e "感谢 JamChoi 提供的源代码，由 aoaim 和 Gemini 3.0 Pro 进行改写"
+    
     # Initialize Report
     init_report
     log "输出文件: $REPORT_FILE"
