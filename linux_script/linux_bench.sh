@@ -9,6 +9,25 @@ if [ "$(uname)" != "Linux" ]; then
     exit 1
 fi
 
+# 检查是否为 Debian/Ubuntu 系统
+if [ ! -f /etc/os-release ]; then
+    echo "错误: 无法识别系统类型。"
+    exit 1
+fi
+
+source /etc/os-release
+if [[ "$ID" != "debian" && "$ID" != "ubuntu" ]]; then
+    echo "错误: 本脚本仅支持 Debian 和 Ubuntu 系统。"
+    echo "当前系统: $PRETTY_NAME"
+    exit 1
+fi
+
+# 检查是否为 root 或有 sudo 权限
+if [ "$EUID" -ne 0 ] && ! sudo -n true 2>/dev/null; then
+    echo "错误: 本脚本需要 root 权限或 sudo 权限。"
+    exit 1
+fi
+
 # =========================
 # 配置 & 全局变量
 # =========================
@@ -66,18 +85,8 @@ cleanup() {
     # 2. 移除脚本安装的依赖
     if [ ${#CLEANUP_PKGS[@]} -gt 0 ]; then
         echo -e "\n[$(get_time)] 正在清理安装的依赖 (${CLEANUP_PKGS[*]}) ..."
-        if check_cmd apt-get; then
-            apt-get remove -y "${CLEANUP_PKGS[@]}" >/dev/null 2>&1
-            apt-get autoremove -y >/dev/null 2>&1
-        elif check_cmd dnf; then
-            dnf remove -y "${CLEANUP_PKGS[@]}" >/dev/null 2>&1
-        elif check_cmd yum; then
-            yum remove -y "${CLEANUP_PKGS[@]}" >/dev/null 2>&1
-        elif check_cmd pacman; then
-            pacman -Rns --noconfirm "${CLEANUP_PKGS[@]}" >/dev/null 2>&1
-        elif check_cmd apk; then
-            apk del "${CLEANUP_PKGS[@]}" >/dev/null 2>&1
-        fi
+        apt-get remove -y "${CLEANUP_PKGS[@]}" >/dev/null 2>&1
+        apt-get autoremove -y >/dev/null 2>&1
         echo -e "[$(get_time)] 清理完成"
     fi
 }
@@ -146,33 +155,21 @@ ensure_dependencies() {
     if [ -n "$missing_pkgs" ]; then
         info "安装缺失依赖:$missing_pkgs"
         
-        local install_success=false
+        export DEBIAN_FRONTEND=noninteractive
         
-        if check_cmd apt-get; then
-            export DEBIAN_FRONTEND=noninteractive
-            apt-get update -y -q >/dev/null 2>&1
-            if apt-get install -y -q $missing_pkgs >/dev/null 2>&1; then install_success=true; fi
-            
-        elif check_cmd dnf; then
-            if dnf install -y -q $missing_pkgs >/dev/null 2>&1; then install_success=true; fi
-            
-        elif check_cmd yum; then
-            yum install -y -q epel-release >/dev/null 2>&1
-            if yum install -y -q $missing_pkgs >/dev/null 2>&1; then install_success=true; fi
-            
-        elif check_cmd pacman; then
-            if pacman -Sy --noconfirm $missing_pkgs >/dev/null 2>&1; then install_success=true; fi
-            
-        elif check_cmd apk; then
-            if apk add $missing_pkgs >/dev/null 2>&1; then install_success=true; fi
+        # 更新软件源
+        if ! apt-get update -y -q >/dev/null 2>&1; then
+            fail "软件源更新失败，请检查网络连接。"
+            exit 1
         fi
         
-        if [ "$install_success" = "true" ]; then
+        # 安装依赖包
+        if apt-get install -y -q $missing_pkgs >/dev/null 2>&1; then
             # 记录安装的包以便清理
-            # 注意：这里的 missing_pkgs 是字符串，转为数组
             for p in $missing_pkgs; do CLEANUP_PKGS+=("$p"); done
         else
-            fail "依赖安装失败，请检查网络或软件源。"
+            fail "依赖安装失败，请检查网络或软件源配置。"
+            fail "尝试手动安装: sudo apt-get install $missing_pkgs"
             exit 1
         fi
     fi
