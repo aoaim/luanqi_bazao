@@ -181,7 +181,7 @@ get_timezone() {
     elif [ -L /etc/localtime ]; then
         readlink /etc/localtime | sed 's|/usr/share/zoneinfo/||'
     else
-        echo "Asia/Shanghai"
+        echo "UTC"
     fi
 }
 
