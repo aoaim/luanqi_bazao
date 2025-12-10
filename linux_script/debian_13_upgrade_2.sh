@@ -107,37 +107,39 @@ echo ""
 apt modernize-sources -y
 echo "✓ Sources modernized to deb822 format"
 
-# 步骤 3: 修复 trixie-backports 的签名密钥
+# 步骤 3: 修复 trixie-backports 的签名密钥 (如果存在)
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Step 3/3: Fixing backports Signed-By field..."
+echo "Step 3/3: Checking backports configuration..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 BACKPORTS_FILE="/etc/apt/sources.list.d/debian-backports.sources"
 
 if [ ! -f "$BACKPORTS_FILE" ]; then
-    echo "❌ Error: $BACKPORTS_FILE not found"
-    echo "   Please run 'apt modernize-sources' first"
-    exit 1
-fi
-
-# 检查 Signed-By 字段是否为空
-if grep -q "^Signed-By:\s*$" "$BACKPORTS_FILE"; then
-    echo "⚠️  Backports Signed-By field is empty, fixing..."
-    
-    # 替换空的 Signed-By 行为正确的值
-    sed -i 's|^Signed-By:\s*$|Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg|' "$BACKPORTS_FILE"
-    
-    echo "✓ Fixed Signed-By in debian-backports.sources"
-elif ! grep -q "^Signed-By:" "$BACKPORTS_FILE"; then
-    echo "⚠️  Backports file missing Signed-By field, adding..."
-    
-    # 如果完全没有 Signed-By 字段，则添加
-    sed -i '1i Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' "$BACKPORTS_FILE"
-    
-    echo "✓ Added Signed-By to debian-backports.sources"
+    echo "ℹ️  No backports configuration found (this is normal)"
+    echo "   Backports are optional and not included by default"
+    echo "   Skipping backports configuration..."
 else
-    echo "✓ Signed-By field already configured correctly"
+    echo "✓ Found backports configuration, checking Signed-By field..."
+    
+    # 检查 Signed-By 字段是否为空
+    if grep -q "^Signed-By:\s*$" "$BACKPORTS_FILE"; then
+        echo "⚠️  Backports Signed-By field is empty, fixing..."
+        
+        # 替换空的 Signed-By 行为正确的值
+        sed -i 's|^Signed-By:\s*$|Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg|' "$BACKPORTS_FILE"
+        
+        echo "✓ Fixed Signed-By in debian-backports.sources"
+    elif ! grep -q "^Signed-By:" "$BACKPORTS_FILE"; then
+        echo "⚠️  Backports file missing Signed-By field, adding..."
+        
+        # 如果完全没有 Signed-By 字段，则添加
+        sed -i '1i Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' "$BACKPORTS_FILE"
+        
+        echo "✓ Added Signed-By to debian-backports.sources"
+    else
+        echo "✓ Signed-By field already configured correctly"
+    fi
 fi
 
 # 更新包列表以验证配置
