@@ -384,6 +384,155 @@ cleanup_firewall_rules() {
     esac
 }
 
+# 检测 WireGuard Docker 容器（扫描所有可能的安装）
+# 返回格式: container_name|container_id|image|install_path|is_standard
+# 如果没有安装返回空
+detect_wireguard_containers() {
+    local result=""
+    
+    # 检查 Docker 是否可用
+    if ! command -v docker &>/dev/null; then
+        echo ""
+        return
+    fi
+    
+    # 扫描所有使用 wireguard 镜像的容器（包括已停止的）
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        
+        local container_id=$(echo "$line" | awk '{print $1}')
+        local container_name=$(echo "$line" | awk '{print $NF}')
+        local image=$(echo "$line" | awk '{print $2}')
+        
+        # 检查镜像是否为 WireGuard 相关
+        if [[ "$image" == *wireguard* ]] || [[ "$container_name" == *wireguard* ]]; then
+            # 尝试获取容器的挂载路径来确定安装目录
+            local install_path=""
+            local mount_info
+            mount_info=$(docker inspect "$container_id" --format '{{range .Mounts}}{{if eq .Destination "/config"}}{{.Source}}{{end}}{{end}}' 2>/dev/null)
+            
+            if [ -n "$mount_info" ]; then
+                # 从挂载路径推断安装目录（去掉 /config 后缀）
+                install_path=$(dirname "$mount_info")
+            fi
+            
+            # 判断是否为标准安装路径
+            local is_standard="false"
+            if [ "$install_path" = "$INSTALL_DIR" ]; then
+                is_standard="true"
+            fi
+            
+            result="${result}${container_name}|${container_id}|${image}|${install_path}|${is_standard}"$'\n'
+        fi
+    done < <(docker ps -a --format "{{.ID}} {{.Image}} {{.Names}}" 2>/dev/null)
+    
+    echo "$result"
+}
+
+# 获取非标准路径的 WireGuard 安装信息
+# 返回: 非标准安装的信息列表，每行一个
+get_nonstandard_wireguard_installs() {
+    local containers
+    containers=$(detect_wireguard_containers)
+    
+    local nonstandard=""
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        local is_standard=$(echo "$line" | cut -d'|' -f5)
+        if [ "$is_standard" = "false" ]; then
+            nonstandard="${nonstandard}${line}"$'\n'
+        fi
+    done <<< "$containers"
+    
+    echo "$nonstandard"
+}
+
+# 清理非标准路径的 WireGuard 安装
+# 仅提供卸载功能，不提供管理功能
+cleanup_nonstandard_wireguard() {
+    check_root
+    
+    local nonstandard
+    nonstandard=$(get_nonstandard_wireguard_installs)
+    
+    if [ -z "$nonstandard" ]; then
+        print_info "No non-standard WireGuard installations detected"
+        return 0
+    fi
+    
+    print_separator
+    print_warning "Non-standard WireGuard Installation Detected"
+    print_separator
+    echo ""
+    print_info "The following WireGuard installations are not managed by this script:"
+    echo ""
+    
+    local count=0
+    local containers_info=()
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        count=$((count + 1))
+        local container_name=$(echo "$line" | cut -d'|' -f1)
+        local container_id=$(echo "$line" | cut -d'|' -f2)
+        local image=$(echo "$line" | cut -d'|' -f3)
+        local install_path=$(echo "$line" | cut -d'|' -f4)
+        
+        containers_info+=("$line")
+        echo "  ${count}) Container: ${container_name}"
+        echo "     Image: ${image}"
+        echo "     ID: ${container_id:0:12}"
+        [ -n "$install_path" ] && echo "     Path: ${install_path}"
+        echo ""
+    done <<< "$nonstandard"
+    
+    print_separator
+    echo ""
+    print_warning "These installations can only be cleaned up (uninstalled)."
+    print_info "Management features are only available for standard installations."
+    echo ""
+    
+    read -p "Clean up all non-standard installations? (y/N): " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        print_info "Cleanup cancelled"
+        return 0
+    fi
+    
+    # 逐个清理
+    for info in "${containers_info[@]}"; do
+        local container_name=$(echo "$info" | cut -d'|' -f1)
+        local container_id=$(echo "$info" | cut -d'|' -f2)
+        local install_path=$(echo "$info" | cut -d'|' -f4)
+        
+        print_info "Stopping and removing container: ${container_name}..."
+        docker stop "$container_id" 2>/dev/null || true
+        docker rm "$container_id" 2>/dev/null || true
+        
+        # 如果有安装路径，询问是否删除
+        if [ -n "$install_path" ] && [ -d "$install_path" ]; then
+            read -p "Delete installation directory ${install_path}? (y/N): " del_dir
+            if [[ "$del_dir" =~ ^[Yy]$ ]]; then
+                rm -rf "$install_path"
+                print_success "Removed directory: ${install_path}"
+            fi
+        fi
+        
+        print_success "Cleaned up: ${container_name}"
+    done
+    
+    print_separator
+    print_success "Non-standard WireGuard installations cleaned up"
+    
+    # 询问是否清理镜像
+    echo ""
+    read -p "Also remove WireGuard Docker image? (y/N): " remove_image
+    if [[ "$remove_image" =~ ^[Yy]$ ]]; then
+        if docker images | grep -q "linuxserver/wireguard"; then
+            docker rmi $(docker images linuxserver/wireguard -q) 2>/dev/null || \
+                print_warning "Image removal failed, may be in use"
+        fi
+    fi
+}
+
 # 过滤用户粘贴的 WireGuard 配置内容
 filter_wireguard_config() {
     local temp_file="$1"
@@ -1511,14 +1660,40 @@ show_menu() {
     # 避免 shell 缓存命令路径导致状态误判
     hash -r 2>/dev/null || true
     
-    # 检测服务端状态
+    # 检测服务端状态（使用 Docker 容器扫描）
     local server_status=""
-    if [ -d "$INSTALL_DIR" ]; then
-        if docker ps | grep -q wireguard; then
+    local nonstandard_installs=""
+    local containers
+    containers=$(detect_wireguard_containers)
+    
+    # 检查标准路径安装
+    local has_standard_install=false
+    local standard_running=false
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        local is_standard=$(echo "$line" | cut -d'|' -f5)
+        local container_id=$(echo "$line" | cut -d'|' -f2)
+        if [ "$is_standard" = "true" ]; then
+            has_standard_install=true
+            # 检查是否运行中
+            if docker ps -q --filter "id=$container_id" 2>/dev/null | grep -q .; then
+                standard_running=true
+            fi
+        else
+            # 记录非标准安装
+            nonstandard_installs="${nonstandard_installs}${line}"$'\n'
+        fi
+    done <<< "$containers"
+    
+    if [ "$has_standard_install" = true ]; then
+        if [ "$standard_running" = true ]; then
             server_status="${GREEN}Installed | Running${NC}"
         else
             server_status="${YELLOW}Installed | Stopped${NC}"
         fi
+    elif [ -d "$INSTALL_DIR" ]; then
+        # 目录存在但容器不存在（可能被手动删除）
+        server_status="${YELLOW}Directory exists | No container${NC}"
     else
         server_status="${RED}Not installed${NC}"
     fi
@@ -1570,6 +1745,13 @@ show_menu() {
     echo -e "    Client: $client_status"
     echo -e "    Public IPv4: $ipv4_display"
     echo -e "    Public IPv6: $ipv6_display"
+    
+    # 显示非标准安装警告
+    if [ -n "$nonstandard_installs" ]; then
+        echo ""
+        echo -e "    ${YELLOW}⚠ Non-standard WireGuard installation detected!${NC}"
+        echo -e "    ${YELLOW}  Use option 12 to clean up${NC}"
+    fi
     echo ""
     print_separator
     echo ""
@@ -1588,6 +1770,9 @@ show_menu() {
     echo "   10) Start Client"
     echo "   11) Uninstall Client"
     echo ""
+    echo "  Other:"
+    echo "   12) Clean Up Non-standard Installations"
+    echo ""
     echo "    0) Exit"
     echo ""
     print_separator
@@ -1597,7 +1782,7 @@ main() {
     # 仅交互式菜单模式
     while true; do
         show_menu
-        read -p "Select option [0-11]: " choice
+        read -p "Select option [0-12]: " choice
         echo ""
 
         # 选择后先清屏，保持界面简洁
@@ -1646,6 +1831,10 @@ main() {
                 ;;
             11)
                 uninstall_client
+                read -p "Press Enter to continue..."
+                ;;
+            12)
+                cleanup_nonstandard_wireguard
                 read -p "Press Enter to continue..."
                 ;;
             0)
