@@ -1771,7 +1771,7 @@ show_menu() {
     echo "   11) Uninstall Client"
     echo ""
     echo "  Other:"
-    echo "   12) Clean Up Non-standard Installations"
+    echo "   12) Clean Up Non-standard Server Installations"
     echo ""
     echo "    0) Exit"
     echo ""
