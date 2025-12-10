@@ -1247,6 +1247,9 @@ show_report() {
     print_kv "Marker" "$MARKER_FILE"
     echo ""
     print_success "All steps complete. Reboot recommended for full effect."
+    echo ""
+    print_info "To activate new aliases (ls, ll, vi, hx, etc.) in this session:"
+    echo -e "   ${CYAN}for f in /etc/profile.d/*.sh; do source \"\$f\"; done${RESET}"
 }
 
 show_tools_summary() {
