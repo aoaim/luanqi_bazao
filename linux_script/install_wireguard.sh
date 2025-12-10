@@ -1749,8 +1749,8 @@ show_menu() {
     # 显示非标准安装警告
     if [ -n "$nonstandard_installs" ]; then
         echo ""
-        echo -e "    ${YELLOW}⚠ Non-standard WireGuard installation detected!${NC}"
-        echo -e "    ${YELLOW}  Use option 12 to clean up${NC}"
+        echo -e "  ${YELLOW}⚠ Non-standard WireGuard Server installation detected!${NC}"
+        echo -e "  ${YELLOW}  Use option 12 to clean up${NC}"
     fi
     echo ""
     print_separator
