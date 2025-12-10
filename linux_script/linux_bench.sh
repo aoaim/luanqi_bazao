@@ -612,9 +612,9 @@ run_iperf_test() {
     if [ "$HAS_V4" = "true" ] && [ ${#locs_cn[@]} -gt 0 ]; then
         {
             echo "### 国内节点（感谢青毅云提供测试节点）"
-            echo "> 🌐 青毅云计算 (YOUTHIDC)"
-            echo "> 国内大带宽独享服务器，IEPL 跨境专线"
-            echo "> 💬 Telegram 群组：https://t.me/YouthIDC"
+            echo "> 🌐 青毅云计算 (YOUTHIDC)  "
+            echo "> ⚡️ 国内大带宽独享服务器，IEPL 跨境专线  "
+            echo "> 💬 Telegram 群组：https://t.me/YouthIDC  "
             echo ""
             echo "| 节点 | 线程 | 发送带宽 | 接收带宽 |"
             echo "| :--- | :--- | :--- | :--- |"
@@ -1317,10 +1317,10 @@ main() {
     clear
     
     # 提示用户可选参数
-    echo -e "提示: 使用 -h 仅硬件，-n 仅网络，-nt 仅路由追踪"
+    echo -e "💡 提示: 使用 -h 仅硬件，-n 仅网络，-nt 仅路由追踪"
     
     # 致谢
-    echo -e "感谢 JamChoi 提供的源代码，由 aoaim 和 Gemini 3.0 Pro 进行改写"
+    echo -e "✨ 感谢 JamChoi 提供的源代码，由 aoaim 和 Gemini 3.0 Pro 进行改写"
     
     # Initialize Report
     init_report
