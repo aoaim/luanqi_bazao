@@ -1474,7 +1474,7 @@ install_client() {
     read -p "Start WireGuard now? (Y/n): " start_now
     
     if [[ ! "$start_now" =~ ^[Nn]$ ]]; then
-        start_wireguard_client
+        restart_wireguard_client
         
         # 自动检测最佳 MTU
         echo ""
@@ -1490,9 +1490,9 @@ install_client() {
     fi
 }
 
-# 启动 WireGuard 客户端
-start_wireguard_client() {
-    print_info "Starting WireGuard..."
+# 重启 WireGuard 客户端
+restart_wireguard_client() {
+    print_info "Restarting WireGuard..."
     
     local config_file="/etc/wireguard/wg0.conf"
     
@@ -1682,7 +1682,7 @@ reconfigure_client() {
     read -p "Start WireGuard now? (Y/n): " start_now
     
     if [[ ! "$start_now" =~ ^[Nn]$ ]]; then
-        start_wireguard_client
+        restart_wireguard_client
         
         # 自动检测最佳 MTU
         echo ""
@@ -2190,7 +2190,7 @@ show_menu() {
     echo "    7) Reconfigure Client"
     echo "    8) View Client Status"
     echo "    9) Stop Client"
-    echo "   10) Start Client"
+    echo "   10) Restart Client"
     echo "   11) Uninstall Client"
     echo ""
     echo "  MTU Management:"
@@ -2254,7 +2254,7 @@ main() {
                 read -p "Press Enter to continue..."
                 ;;
             10)
-                start_wireguard_client
+                restart_wireguard_client
                 read -p "Press Enter to continue..."
                 ;;
             11)
