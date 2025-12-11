@@ -40,6 +40,7 @@ RUN_DISK=true
 RUN_NET_INFO=true
 RUN_IPERF=true
 RUN_TRACE=true
+RUN_IP_QUALITY=true
 
 # 参数解析
 for arg in "$@"; do
@@ -50,6 +51,7 @@ for arg in "$@"; do
             RUN_NET_INFO=true
             RUN_IPERF=true
             RUN_TRACE=true
+            RUN_IP_QUALITY=true
             shift
             ;;
         --hardware|-h)
@@ -58,6 +60,7 @@ for arg in "$@"; do
             RUN_NET_INFO=false
             RUN_IPERF=false
             RUN_TRACE=false
+            RUN_IP_QUALITY=false
             shift
             ;;
         --nexttrace|-nt)
@@ -66,6 +69,16 @@ for arg in "$@"; do
             RUN_NET_INFO=true
             RUN_IPERF=false
             RUN_TRACE=true
+            RUN_IP_QUALITY=false
+            shift
+            ;;
+        --ip-quality|-ip)
+            RUN_CPU=false
+            RUN_DISK=false
+            RUN_NET_INFO=true
+            RUN_IPERF=false
+            RUN_TRACE=false
+            RUN_IP_QUALITY=true
             shift
             ;;
     esac
@@ -378,6 +391,212 @@ collect_network_info() {
         fi
         echo ""
     } >> "$REPORT_FILE"
+}
+
+# =========================
+# IP 质量检测
+# =========================
+collect_ip_quality() {
+    log "开始 IP 质量检测..."
+    
+    # 定义风险评分格式化函数
+    format_risk_level() {
+        local score="$1"
+        local max="$2"
+        if [ -z "$score" ] || [ "$score" = "null" ]; then
+            echo "N/A"
+            return
+        fi
+        
+        # 根据分数计算风险等级
+        local pct=$((score * 100 / max))
+        if [ "$pct" -lt 25 ]; then
+            echo "🟢 低风险 ($score)"
+        elif [ "$pct" -lt 50 ]; then
+            echo "🟡 中等 ($score)"
+        elif [ "$pct" -lt 75 ]; then
+            echo "🟠 较高 ($score)"
+        else
+            echo "🔴 高风险 ($score)"
+        fi
+    }
+    
+    # 格式化布尔值
+    format_bool() {
+        local val="$1"
+        case "$val" in
+            "true"|"True"|"TRUE"|"yes"|"1") echo "✅ 是" ;;
+            "false"|"False"|"FALSE"|"no"|"0") echo "❌ 否" ;;
+            *) echo "—" ;;
+        esac
+    }
+    
+    # 格式化 IP 类型
+    format_ip_type() {
+        local type="$1"
+        case "$type" in
+            "isp"|"ISP") echo "🏠 家宽 (ISP)" ;;
+            "hosting"|"Hosting") echo "🖥️ 机房 (Hosting)" ;;
+            "business"|"Business") echo "🏢 商业 (Business)" ;;
+            "education"|"Education") echo "🎓 教育 (Education)" ;;
+            "government"|"Government") echo "🏛️ 政府 (Government)" ;;
+            "mobile"|"Mobile") echo "📱 移动网络 (Mobile)" ;;
+            *) echo "$type" ;;
+        esac
+    }
+    
+    # === IPv4 检测 ===
+    if [ "$HAS_V4" = "true" ]; then
+        local ip="$NET_V4_IP"
+        echo "  ├─ [IPv4] 查询质量信息: $ip"
+        
+        # 1. IPinfo.io - 类型和隐私信息
+        echo "  │  ├─ 查询 IPinfo.io..."
+        local ipinfo_json=$(curl -s --max-time 10 "https://ipinfo.io/widget/demo/$ip" 2>/dev/null)
+        local ipinfo_use_type="" ipinfo_com_type="" ipinfo_proxy="" ipinfo_vpn="" ipinfo_tor="" ipinfo_hosting=""
+        if [ -n "$ipinfo_json" ] && echo "$ipinfo_json" | jq -e '.data' >/dev/null 2>&1; then
+            ipinfo_use_type=$(echo "$ipinfo_json" | jq -r '.data.asn.type // empty')
+            ipinfo_com_type=$(echo "$ipinfo_json" | jq -r '.data.company.type // empty')
+            ipinfo_proxy=$(echo "$ipinfo_json" | jq -r '.data.privacy.proxy // empty')
+            ipinfo_vpn=$(echo "$ipinfo_json" | jq -r '.data.privacy.vpn // empty')
+            ipinfo_tor=$(echo "$ipinfo_json" | jq -r '.data.privacy.tor // empty')
+            ipinfo_hosting=$(echo "$ipinfo_json" | jq -r '.data.privacy.hosting // empty')
+        fi
+        
+        # 2. ipapi.is - 风险评分
+        echo "  │  ├─ 查询 ipapi.is..."
+        local ipapi_json=$(curl -s --max-time 10 "https://api.ipapi.is/?q=$ip" 2>/dev/null)
+        local ipapi_risk="" ipapi_datacenter="" ipapi_abuser="" ipapi_proxy="" ipapi_tor="" ipapi_vpn="" ipapi_crawler=""
+        if [ -n "$ipapi_json" ] && echo "$ipapi_json" | jq -e '.ip' >/dev/null 2>&1; then
+            ipapi_risk=$(echo "$ipapi_json" | jq -r '.company.abuser_score // empty')
+            ipapi_datacenter=$(echo "$ipapi_json" | jq -r '.is_datacenter // empty')
+            ipapi_abuser=$(echo "$ipapi_json" | jq -r '.is_abuser // empty')
+            ipapi_proxy=$(echo "$ipapi_json" | jq -r '.is_proxy // empty')
+            ipapi_tor=$(echo "$ipapi_json" | jq -r '.is_tor // empty')
+            ipapi_vpn=$(echo "$ipapi_json" | jq -r '.is_vpn // empty')
+            ipapi_crawler=$(echo "$ipapi_json" | jq -r '.is_crawler // empty')
+        fi
+        
+        # 3. DB-IP - 威胁等级 (HTML scraping)
+        echo "  │  ├─ 查询 DB-IP..."
+        local dbip_html=$(curl -s --max-time 10 "https://db-ip.com/$ip" 2>/dev/null)
+        local dbip_threat=""
+        if [ -n "$dbip_html" ]; then
+            dbip_threat=$(echo "$dbip_html" | sed -n 's/.*Estimated threat level for this IP address is[[:space:]]*<span[^>]*>\([^<]*\)<.*/\1/p')
+        fi
+        
+        # 4. IPWHOIS - 安全标记
+        echo "  │  ├─ 查询 IPWHOIS..."
+        local ipwhois_json=$(curl -s --max-time 10 --compressed \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0" \
+            -H "Accept: */*" \
+            -H "Referer: https://ipwhois.io/" \
+            "https://ipwhois.io/widget?ip=$ip&lang=en" 2>/dev/null)
+        local ipwhois_proxy="" ipwhois_tor="" ipwhois_vpn="" ipwhois_hosting=""
+        if [ -n "$ipwhois_json" ] && echo "$ipwhois_json" | jq -e '.ip' >/dev/null 2>&1; then
+            ipwhois_proxy=$(echo "$ipwhois_json" | jq -r '.security.proxy // empty')
+            ipwhois_tor=$(echo "$ipwhois_json" | jq -r '.security.tor // empty')
+            ipwhois_vpn=$(echo "$ipwhois_json" | jq -r '.security.vpn // empty')
+            ipwhois_hosting=$(echo "$ipwhois_json" | jq -r '.security.hosting // empty')
+        fi
+        
+        # 输出汇总
+        echo "  │  └─ 类型: $(format_ip_type "$ipinfo_use_type") / 威胁: ${dbip_threat:-N/A}"
+        
+        # 保存 IPv4 结果
+        V4_USE_TYPE="$ipinfo_use_type"
+        V4_COM_TYPE="$ipinfo_com_type"
+        V4_RISK_SCORE="$ipapi_risk"
+        V4_THREAT_LEVEL="$dbip_threat"
+        
+        # 合并多数据源的风险因子 (任一为 true 则标记)
+        V4_IS_PROXY="$([[ "$ipinfo_proxy" = "true" || "$ipapi_proxy" = "true" || "$ipwhois_proxy" = "true" ]] && echo "true" || echo "false")"
+        V4_IS_VPN="$([[ "$ipinfo_vpn" = "true" || "$ipapi_vpn" = "true" || "$ipwhois_vpn" = "true" ]] && echo "true" || echo "false")"
+        V4_IS_TOR="$([[ "$ipinfo_tor" = "true" || "$ipapi_tor" = "true" || "$ipwhois_tor" = "true" ]] && echo "true" || echo "false")"
+        V4_IS_HOSTING="$([[ "$ipinfo_hosting" = "true" || "$ipapi_datacenter" = "true" || "$ipwhois_hosting" = "true" ]] && echo "true" || echo "false")"
+        V4_IS_ABUSER="$ipapi_abuser"
+        V4_IS_CRAWLER="$ipapi_crawler"
+    fi
+    
+    # === IPv6 检测 ===
+    if [ "$HAS_V6" = "true" ]; then
+        local ip="$NET_V6_IP"
+        echo "  ├─ [IPv6] 查询质量信息: ${ip:0:20}..."
+        
+        # IPv6 仅查询支持的 API
+        # 1. ipapi.is
+        echo "  │  ├─ 查询 ipapi.is..."
+        local ipapi_json=$(curl -s -6 --max-time 10 "https://api.ipapi.is/?q=$ip" 2>/dev/null)
+        local ipapi_risk="" ipapi_datacenter="" ipapi_abuser="" ipapi_proxy="" ipapi_tor="" ipapi_vpn=""
+        if [ -n "$ipapi_json" ] && echo "$ipapi_json" | jq -e '.ip' >/dev/null 2>&1; then
+            ipapi_risk=$(echo "$ipapi_json" | jq -r '.company.abuser_score // empty')
+            ipapi_datacenter=$(echo "$ipapi_json" | jq -r '.is_datacenter // empty')
+            ipapi_abuser=$(echo "$ipapi_json" | jq -r '.is_abuser // empty')
+            ipapi_proxy=$(echo "$ipapi_json" | jq -r '.is_proxy // empty')
+            ipapi_tor=$(echo "$ipapi_json" | jq -r '.is_tor // empty')
+            ipapi_vpn=$(echo "$ipapi_json" | jq -r '.is_vpn // empty')
+        fi
+        
+        # 2. DB-IP
+        echo "  │  ├─ 查询 DB-IP..."
+        local dbip_html=$(curl -s -6 --max-time 10 "https://db-ip.com/$ip" 2>/dev/null)
+        local dbip_threat=""
+        if [ -n "$dbip_html" ]; then
+            dbip_threat=$(echo "$dbip_html" | sed -n 's/.*Estimated threat level for this IP address is[[:space:]]*<span[^>]*>\([^<]*\)<.*/\1/p')
+        fi
+        
+        echo "  │  └─ 威胁等级: ${dbip_threat:-N/A}"
+        
+        # 保存 IPv6 结果
+        V6_RISK_SCORE="$ipapi_risk"
+        V6_THREAT_LEVEL="$dbip_threat"
+        V6_IS_PROXY="$ipapi_proxy"
+        V6_IS_VPN="$ipapi_vpn"
+        V6_IS_TOR="$ipapi_tor"
+        V6_IS_HOSTING="$ipapi_datacenter"
+        V6_IS_ABUSER="$ipapi_abuser"
+    fi
+    
+    # === 生成报告 ===
+    {
+        echo "## IP 质量分析"
+        echo ""
+        echo "> 数据来源: IPinfo.io, ipapi.is, DB-IP, IPWHOIS"
+        echo ""
+        
+        if [ "$HAS_V4" = "true" ]; then
+            echo "### IPv4 质量分析"
+            echo "| 检测项目 | 检测结果 |"
+            echo "| :--- | :--- |"
+            echo "| 网络类型 | $(format_ip_type "$V4_USE_TYPE") |"
+            echo "| 持有者类型 | $(format_ip_type "$V4_COM_TYPE") |"
+            [ -n "$V4_RISK_SCORE" ] && echo "| 风险评分 | $V4_RISK_SCORE |"
+            [ -n "$V4_THREAT_LEVEL" ] && echo "| 威胁等级 (DB-IP) | $V4_THREAT_LEVEL |"
+            echo "| 代理检测 | $(format_bool "$V4_IS_PROXY") |"
+            echo "| VPN 检测 | $(format_bool "$V4_IS_VPN") |"
+            echo "| Tor 检测 | $(format_bool "$V4_IS_TOR") |"
+            echo "| 数据中心 | $(format_bool "$V4_IS_HOSTING") |"
+            echo "| 滥用标记 | $(format_bool "$V4_IS_ABUSER") |"
+            echo "| 爬虫检测 | $(format_bool "$V4_IS_CRAWLER") |"
+            echo ""
+        fi
+        
+        if [ "$HAS_V6" = "true" ]; then
+            echo "### IPv6 质量分析"
+            echo "| 检测项目 | 检测结果 |"
+            echo "| :--- | :--- |"
+            [ -n "$V6_RISK_SCORE" ] && echo "| 风险评分 | $V6_RISK_SCORE |"
+            [ -n "$V6_THREAT_LEVEL" ] && echo "| 威胁等级 (DB-IP) | $V6_THREAT_LEVEL |"
+            echo "| 代理检测 | $(format_bool "$V6_IS_PROXY") |"
+            echo "| VPN 检测 | $(format_bool "$V6_IS_VPN") |"
+            echo "| Tor 检测 | $(format_bool "$V6_IS_TOR") |"
+            echo "| 数据中心 | $(format_bool "$V6_IS_HOSTING") |"
+            echo "| 滥用标记 | $(format_bool "$V6_IS_ABUSER") |"
+            echo ""
+        fi
+    } >> "$REPORT_FILE"
+    
+    info "  └─ IP 质量检测完成"
 }
 
 # =========================
@@ -1378,11 +1597,12 @@ main() {
     clear
     
     # 提示用户可选参数
-    echo -e "💡 提示: 使用 -h 仅硬件，-n 仅网络，-nt 仅路由追踪"
+    echo -e "💡 提示: 使用 -h 仅硬件，-n 仅网络，-nt 仅路由追踪，-ip 仅IP质量检测"
     
     # 致谢
     echo -e "✨ 感谢 JamChoi 提供的源代码，由 aoaim 和 Gemini 3.0 Pro 进行改写"
     echo -e "💖 本项目依赖 NextTrace (www.nxtrace.org)"
+    echo -e "💖 IP 质量检测部分参考项目 xykt/IPQuality"
     
     # Initialize Report
     init_report
@@ -1399,6 +1619,11 @@ main() {
     # 网络相关
     if [ "$RUN_NET_INFO" = "true" ]; then
         collect_network_info
+    fi
+    
+    # IP 质量检测
+    if [ "$RUN_IP_QUALITY" = "true" ] && [ "$RUN_NET_INFO" = "true" ]; then
+        collect_ip_quality
     fi
     
     # 硬件性能测试
