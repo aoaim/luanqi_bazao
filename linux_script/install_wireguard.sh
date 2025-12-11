@@ -22,6 +22,8 @@ DEFAULT_PEERS=1
 DEFAULT_DNS="8.8.8.8"
 DEFAULT_SUBNET="10.13.13.0"
 DEFAULT_SUBNET_V6="fd13:13:13::/64"
+DEFAULT_MTU=1280
+DEFAULT_KEEPALIVE=25
 
 ##############################################
 # 工具函数
@@ -861,6 +863,17 @@ install_server() {
         subnet_v6=${subnet_v6:-$DEFAULT_SUBNET_V6}
     fi
     
+    # MTU 配置
+    while true; do
+        read -p "MTU value [default: $DEFAULT_MTU]: " mtu
+        mtu=${mtu:-$DEFAULT_MTU}
+        if [[ "$mtu" =~ ^[0-9]+$ ]] && [ "$mtu" -ge 1280 ] && [ "$mtu" -le 1500 ]; then
+            break
+        else
+            print_error "Invalid MTU value (must be 1280-1500)"
+        fi
+    done
+    
     # 配置 AllowedIPs
     local allowed_ips="0.0.0.0/0"
     if [ "$has_ipv6" = true ]; then
@@ -1065,6 +1078,42 @@ SYSCTL_EOF
         fi
     fi
     
+    # 添加 MTU 配置到服务端和客户端
+    print_info "Configuring MTU settings (MTU=$mtu)..."
+    
+    # 在服务端配置中添加 MTU
+    if [ -f "$server_conf" ]; then
+        if ! grep -q "^MTU = " "$server_conf"; then
+            # 在 [Interface] 后的第一个非空行之后添加 MTU
+            sed -i "/^\[Interface\]/a MTU = $mtu" "$server_conf"
+            print_success "Server MTU configured: $mtu"
+        fi
+    fi
+    
+    # 在所有客户端配置中添加 MTU 和 PersistentKeepalive
+    for peer_num in $(seq 1 $peers); do
+        local peer_conf="$INSTALL_DIR/config/peer${peer_num}/peer${peer_num}.conf"
+        if [ -f "$peer_conf" ]; then
+            # 添加 MTU 到 [Interface] 段
+            if ! grep -q "^MTU = " "$peer_conf"; then
+                sed -i "/^\[Interface\]/a MTU = $mtu" "$peer_conf"
+            fi
+            
+            # 添加 PersistentKeepalive 到 [Peer] 段
+            if ! grep -q "^PersistentKeepalive = " "$peer_conf"; then
+                sed -i "/^\[Peer\]/a PersistentKeepalive = $DEFAULT_KEEPALIVE" "$peer_conf"
+            fi
+            
+            print_success "Client peer${peer_num} MTU and PersistentKeepalive configured"
+        fi
+    done
+    
+    # 重启容器以应用 MTU 配置
+    print_info "Restarting WireGuard container to apply MTU configuration..."
+    docker compose restart
+    sleep 2
+    
+    
     # 显示服务端配置信息
     print_separator
     print_success "WireGuard server installation complete!"
@@ -1081,6 +1130,7 @@ SYSCTL_EOF
     if [ "$has_ipv6" = true ]; then
         echo "  Internal IPv6 subnet: $subnet_v6"
     fi
+    echo "  MTU: $mtu"
     echo ""
     
     print_info "Configuration file locations:"
@@ -1338,12 +1388,14 @@ install_client() {
     echo "PrivateKey = xxxx"
     echo "ListenPort = 51820"
     echo "DNS = 8.8.8.8"
+    echo "# MTU = 1280 (will be auto-added if missing)"
     echo ""
     echo "[Peer]"
     echo "PublicKey = xxxx"
     echo "PresharedKey = xxxx"
     echo "Endpoint = 89.251.xx.xx:51820"
     echo "AllowedIPs = 0.0.0.0/0"
+    echo "# PersistentKeepalive = 25 (will be auto-added if missing)"
     echo ""
     print_separator
     
@@ -1391,6 +1443,25 @@ install_client() {
         disable_client_ipv6
     fi
     
+    # 确保配置文件包含 MTU 和 PersistentKeepalive
+    print_info "Checking MTU and PersistentKeepalive settings..."
+    
+    # 如果配置中没有 MTU，添加默认值
+    if ! grep -q "^MTU = " "$config_file"; then
+        sed -i "/^\[Interface\]/a MTU = $DEFAULT_MTU" "$config_file"
+        print_success "Added MTU = $DEFAULT_MTU"
+    else
+        print_info "MTU already configured"
+    fi
+    
+    # 如果配置中没有 PersistentKeepalive，添加到 [Peer] 段
+    if ! grep -q "^PersistentKeepalive = " "$config_file"; then
+        sed -i "/^\[Peer\]/a PersistentKeepalive = $DEFAULT_KEEPALIVE" "$config_file"
+        print_success "Added PersistentKeepalive = $DEFAULT_KEEPALIVE"
+    else
+        print_info "PersistentKeepalive already configured"
+    fi
+    
     # 显示配置内容
     echo ""
     print_info "Current configuration:"
@@ -1404,6 +1475,12 @@ install_client() {
     
     if [[ ! "$start_now" =~ ^[Nn]$ ]]; then
         start_wireguard_client
+        
+        # 自动检测最佳 MTU
+        echo ""
+        print_info "Detecting optimal MTU for your connection..."
+        echo ""
+        detect_optimal_mtu
     else
         print_info "Configuration complete. Use these commands to manage WireGuard:"
         echo "  Start: wg-quick up wg0"
@@ -1488,6 +1565,9 @@ show_client_status() {
         else
             print_info "Start on boot: Disabled"
         fi
+        
+        # 显示 MTU 配置
+        print_info "MTU: $(get_client_current_mtu)"
     else
         print_warning "WireGuard is not running"
     fi
@@ -1603,6 +1683,12 @@ reconfigure_client() {
     
     if [[ ! "$start_now" =~ ^[Nn]$ ]]; then
         start_wireguard_client
+        
+        # 自动检测最佳 MTU
+        echo ""
+        print_info "Detecting optimal MTU for your connection..."
+        echo ""
+        detect_optimal_mtu
     fi
 }
 
@@ -1643,6 +1729,343 @@ uninstall_client() {
     rm -rf /etc/wireguard
     
     print_success "WireGuard client uninstalled"
+}
+
+##############################################
+# MTU 检测与修改功能
+##############################################
+
+# 从客户端配置中获取服务端内网IP
+get_server_internal_ip() {
+    local config_file="/etc/wireguard/wg0.conf"
+    local server_ip=""
+    
+    if [ -f "$config_file" ]; then
+        # 从 AllowedIPs 中提取服务端 IP（取网段的 .1 地址）
+        local allowed_ips
+        allowed_ips=$(grep -E "^AllowedIPs" "$config_file" | head -n1 | sed 's/AllowedIPs = //')
+        
+        # 如果是全流量代理模式，尝试从 Address 推断服务端 IP
+        if [[ "$allowed_ips" == *"0.0.0.0/0"* ]]; then
+            local client_addr
+            client_addr=$(grep -E "^Address" "$config_file" | head -n1 | sed 's/Address = //' | cut -d',' -f1 | cut -d'/' -f1)
+            if [[ "$client_addr" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                # 取 IP 的前三段 + .1 作为服务端 IP
+                server_ip=$(echo "$client_addr" | sed 's/\.[0-9]*$/.1/')
+            fi
+        fi
+    fi
+    
+    # 如果无法获取，使用默认值
+    if [ -z "$server_ip" ]; then
+        server_ip=$(echo "$DEFAULT_SUBNET" | sed 's/\.0$/.1/')
+    fi
+    
+    echo "$server_ip"
+}
+
+# 获取客户端当前 MTU 值
+get_client_current_mtu() {
+    local config_file="/etc/wireguard/wg0.conf"
+    local current_mtu=""
+    
+    if [ -f "$config_file" ]; then
+        current_mtu=$(grep -E "^MTU = " "$config_file" | head -n1 | sed 's/MTU = //')
+    fi
+    
+    if [ -n "$current_mtu" ]; then
+        echo "$current_mtu"
+    else
+        echo -e "${YELLOW}Not set${NC}"
+    fi
+}
+
+# 检测最佳 MTU（客户端功能）
+detect_optimal_mtu() {
+    print_separator
+    print_info "Optimal MTU Detection"
+    print_separator
+    echo ""
+    
+    # 检查客户端是否已安装并运行
+    if ! command -v wg &> /dev/null; then
+        print_error "WireGuard client is not installed"
+        return 1
+    fi
+    
+    if ! wg show wg0 &> /dev/null 2>&1; then
+        print_error "WireGuard client is not running"
+        print_info "Please start the client first: wg-quick up wg0"
+        return 1
+    fi
+    
+    # 获取服务端内网 IP
+    local target
+    target=$(get_server_internal_ip)
+    
+    print_info "Target server IP: $target"
+    print_info "Current client MTU: $(get_client_current_mtu)"
+    echo ""
+    
+    # 先测试能否连接到服务端
+    print_info "Testing connectivity to server..."
+    if ! ping -c 1 -W 2 "$target" > /dev/null 2>&1; then
+        print_error "Cannot reach server at $target"
+        print_info "Please check if the WireGuard tunnel is working properly"
+        return 1
+    fi
+    print_success "Server is reachable"
+    echo ""
+    
+    local MIN=1200   # 探测下限
+    local MAX=1472   # 探测上限 (1500 MTU - 28 bytes header)
+    local BEST_PAYLOAD=0
+    
+    print_separator
+    print_info "Detecting optimal MTU for target $target..."
+    print_info "Payload range: $MIN - $MAX"
+    print_separator
+    echo ""
+    
+    # 二分查找算法
+    while [ $MIN -le $MAX ]; do
+        local CURRENT=$(( ($MIN + $MAX) / 2 ))
+        
+        # -c 1: 发送一次
+        # -M do: 禁止分片 (Linux 专用参数)
+        # -s: 包大小 (Payload)
+        # -W 1: 超时时间 1秒
+        if ping -c 1 -M do -s $CURRENT -W 1 "$target" > /dev/null 2>&1; then
+            echo -e "Payload $CURRENT \t[ ${GREEN}OK${NC} ] -> Too small or just right, trying larger..."
+            BEST_PAYLOAD=$CURRENT
+            MIN=$((CURRENT + 1))
+        else
+            echo -e "Payload $CURRENT \t[ ${RED}FAIL${NC} ] -> Too large (fragmented/dropped), trying smaller..."
+            MAX=$((CURRENT - 1))
+        fi
+    done
+    
+    echo ""
+    print_separator
+    
+    if [ $BEST_PAYLOAD -eq 0 ]; then
+        print_error "Failed: All packets were dropped or fragmented"
+        print_info "Try adjusting the MIN value or check firewall settings"
+        return 1
+    fi
+    
+    # 计算最佳 MTU = Payload + 28 (IP Header 20 + ICMP Header 8)
+    local OPTIMAL_MTU=$((BEST_PAYLOAD + 28))
+    
+    print_success "Detection complete!"
+    echo ""
+    echo -e "  Max non-fragmented Payload: ${YELLOW}$BEST_PAYLOAD${NC} bytes"
+    echo -e "  Recommended MTU value:      ${GREEN}$OPTIMAL_MTU${NC}"
+    echo ""
+    
+    # 获取当前客户端 MTU
+    local config_file="/etc/wireguard/wg0.conf"
+    local current_mtu
+    current_mtu=$(grep -E "^MTU = " "$config_file" 2>/dev/null | head -n1 | sed 's/MTU = //')
+    
+    if [ -n "$current_mtu" ]; then
+        if [ "$current_mtu" -eq "$OPTIMAL_MTU" ]; then
+            print_success "Current MTU ($current_mtu) matches the optimal value"
+        else
+            print_warning "Current MTU ($current_mtu) differs from optimal ($OPTIMAL_MTU)"
+            echo ""
+            read -p "Update client MTU to $OPTIMAL_MTU? (y/N): " update_mtu
+            if [[ "$update_mtu" =~ ^[Yy]$ ]]; then
+                # 更新客户端 MTU
+                sed -i "s/^MTU = .*/MTU = $OPTIMAL_MTU/" "$config_file"
+                print_success "Client MTU updated to $OPTIMAL_MTU"
+                echo ""
+                print_info "Restarting WireGuard client to apply new MTU..."
+                wg-quick down wg0 2>/dev/null
+                wg-quick up wg0
+                print_success "WireGuard client restarted"
+            else
+                print_info "MTU not changed"
+            fi
+        fi
+    else
+        print_warning "No MTU configured in client config"
+        read -p "Add MTU = $OPTIMAL_MTU to client config? (y/N): " add_mtu
+        if [[ "$add_mtu" =~ ^[Yy]$ ]]; then
+            sed -i "/^\[Interface\]/a MTU = $OPTIMAL_MTU" "$config_file"
+            print_success "MTU $OPTIMAL_MTU added to client config"
+            echo ""
+            print_info "Restarting WireGuard client to apply new MTU..."
+            wg-quick down wg0 2>/dev/null
+            wg-quick up wg0
+            print_success "WireGuard client restarted"
+        fi
+    fi
+    
+    print_separator
+}
+
+# 修改服务端 MTU
+modify_server_mtu() {
+    print_separator
+    print_info "Modify Server MTU"
+    print_separator
+    echo ""
+    
+    if [ ! -d "$INSTALL_DIR" ]; then
+        print_error "WireGuard server is not installed"
+        return 1
+    fi
+    
+    local server_conf="$INSTALL_DIR/config/wg_confs/wg0.conf"
+    
+    if [ ! -f "$server_conf" ]; then
+        print_error "Server configuration file not found"
+        return 1
+    fi
+    
+    # 获取当前 MTU
+    local current_mtu
+    current_mtu=$(grep -E "^MTU = " "$server_conf" 2>/dev/null | head -n1 | sed 's/MTU = //')
+    
+    if [ -n "$current_mtu" ]; then
+        print_info "Current server MTU: $current_mtu"
+    else
+        print_info "Current server MTU: Not configured"
+    fi
+    echo ""
+    
+    # 询问新的 MTU 值
+    while true; do
+        read -p "Enter new MTU value (1280-1500) [current: ${current_mtu:-not set}]: " new_mtu
+        
+        if [ -z "$new_mtu" ]; then
+            print_info "No change made"
+            return 0
+        fi
+        
+        if [[ "$new_mtu" =~ ^[0-9]+$ ]] && [ "$new_mtu" -ge 1280 ] && [ "$new_mtu" -le 1500 ]; then
+            break
+        else
+            print_error "Invalid MTU value (must be 1280-1500)"
+        fi
+    done
+    
+    # 更新服务端配置
+    if [ -n "$current_mtu" ]; then
+        sed -i "s/^MTU = .*/MTU = $new_mtu/" "$server_conf"
+    else
+        sed -i "/^\[Interface\]/a MTU = $new_mtu" "$server_conf"
+    fi
+    
+    print_success "Server MTU updated to $new_mtu"
+    
+    # 同时更新所有客户端配置（peer*.conf）
+    echo ""
+    read -p "Also update all client peer configs to MTU=$new_mtu? (Y/n): " update_peers
+    if [[ ! "$update_peers" =~ ^[Nn]$ ]]; then
+        for peer_conf in "$INSTALL_DIR"/config/peer*/peer*.conf; do
+            if [ -f "$peer_conf" ]; then
+                local peer_name=$(basename "$(dirname "$peer_conf")")
+                if grep -q "^MTU = " "$peer_conf"; then
+                    sed -i "s/^MTU = .*/MTU = $new_mtu/" "$peer_conf"
+                else
+                    sed -i "/^\[Interface\]/a MTU = $new_mtu" "$peer_conf"
+                fi
+                print_success "Updated $peer_name MTU to $new_mtu"
+            fi
+        done
+    fi
+    
+    # 重启容器
+    echo ""
+    print_info "Restarting WireGuard container to apply new MTU..."
+    cd "$INSTALL_DIR"
+    docker compose restart
+    sleep 2
+    
+    if docker ps | grep -q wireguard; then
+        print_success "WireGuard server restarted successfully"
+    else
+        print_error "Container restart failed, please check logs"
+    fi
+    
+    print_separator
+}
+
+# 修改客户端 MTU
+modify_client_mtu() {
+    print_separator
+    print_info "Modify Client MTU"
+    print_separator
+    echo ""
+    
+    local config_file="/etc/wireguard/wg0.conf"
+    
+    if ! command -v wg &> /dev/null; then
+        print_error "WireGuard client is not installed"
+        return 1
+    fi
+    
+    if [ ! -f "$config_file" ]; then
+        print_error "Client configuration file not found"
+        return 1
+    fi
+    
+    # 获取当前 MTU
+    local current_mtu
+    current_mtu=$(grep -E "^MTU = " "$config_file" 2>/dev/null | head -n1 | sed 's/MTU = //')
+    
+    if [ -n "$current_mtu" ]; then
+        print_info "Current client MTU: $current_mtu"
+    else
+        print_info "Current client MTU: Not configured"
+    fi
+    echo ""
+    
+    print_info "Tip: Use option 13 to detect the optimal MTU value"
+    echo ""
+    
+    # 询问新的 MTU 值
+    while true; do
+        read -p "Enter new MTU value (1280-1500) [current: ${current_mtu:-not set}]: " new_mtu
+        
+        if [ -z "$new_mtu" ]; then
+            print_info "No change made"
+            return 0
+        fi
+        
+        if [[ "$new_mtu" =~ ^[0-9]+$ ]] && [ "$new_mtu" -ge 1280 ] && [ "$new_mtu" -le 1500 ]; then
+            break
+        else
+            print_error "Invalid MTU value (must be 1280-1500)"
+        fi
+    done
+    
+    # 更新客户端配置
+    if [ -n "$current_mtu" ]; then
+        sed -i "s/^MTU = .*/MTU = $new_mtu/" "$config_file"
+    else
+        sed -i "/^\[Interface\]/a MTU = $new_mtu" "$config_file"
+    fi
+    
+    print_success "Client MTU updated to $new_mtu"
+    
+    # 检查是否正在运行
+    if wg show wg0 &> /dev/null 2>&1; then
+        echo ""
+        read -p "WireGuard is running. Restart to apply new MTU? (Y/n): " restart_wg
+        if [[ ! "$restart_wg" =~ ^[Nn]$ ]]; then
+            print_info "Restarting WireGuard client..."
+            wg-quick down wg0 2>/dev/null
+            wg-quick up wg0
+            print_success "WireGuard client restarted"
+        else
+            print_info "Please restart WireGuard manually to apply changes: wg-quick down wg0 && wg-quick up wg0"
+        fi
+    fi
+    
+    print_separator
 }
 
 ##############################################
@@ -1758,7 +2181,7 @@ show_menu() {
     echo "  Server Management:"
     echo "    1) Install Server (Docker)"
     echo "    2) View Server Config"
-    echo "    3) View Peer Configs"
+    echo "    3) View Client/Peer Configs"
     echo "    4) View Service Status"
     echo "    5) Uninstall Server"
     echo ""
@@ -1770,8 +2193,13 @@ show_menu() {
     echo "   10) Start Client"
     echo "   11) Uninstall Client"
     echo ""
+    echo "  MTU Management:"
+    echo "   12) Detect Optimal MTU (Client)"
+    echo "   13) Modify Server MTU"
+    echo "   14) Modify Client MTU"
+    echo ""
     echo "  Other:"
-    echo "   12) Clean Up Non-standard Server Installations"
+    echo "   15) Clean Up Non-standard Server Installations"
     echo ""
     echo "    0) Exit"
     echo ""
@@ -1782,7 +2210,7 @@ main() {
     # 仅交互式菜单模式
     while true; do
         show_menu
-        read -p "Select option [0-12]: " choice
+        read -p "Select option [0-15]: " choice
         echo ""
 
         # 选择后先清屏，保持界面简洁
@@ -1834,6 +2262,33 @@ main() {
                 read -p "Press Enter to continue..."
                 ;;
             12)
+                if ! command -v wg &> /dev/null; then
+                    print_error "WireGuard client is not installed"
+                    print_info "Please install the client first using option 6"
+                else
+                    detect_optimal_mtu
+                fi
+                read -p "Press Enter to continue..."
+                ;;
+            13)
+                if [ ! -d "$INSTALL_DIR" ]; then
+                    print_error "WireGuard server is not installed"
+                    print_info "Please install the server first using option 1"
+                else
+                    modify_server_mtu
+                fi
+                read -p "Press Enter to continue..."
+                ;;
+            14)
+                if ! command -v wg &> /dev/null; then
+                    print_error "WireGuard client is not installed"
+                    print_info "Please install the client first using option 6"
+                else
+                    modify_client_mtu
+                fi
+                read -p "Press Enter to continue..."
+                ;;
+            15)
                 cleanup_nonstandard_wireguard
                 read -p "Press Enter to continue..."
                 ;;
