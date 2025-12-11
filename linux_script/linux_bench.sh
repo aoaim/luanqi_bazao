@@ -292,13 +292,8 @@ collect_system_info() {
     SYS_DISK="${disk_used} / ${disk_total} ($disk_dev)"
     echo "  ├─ 磁盘: $SYS_DISK"
     
-    # 5. OS / Kernel
-    if [ -f /etc/os-release ]; then
-        . /etc/os-release
-        SYS_OS="$PRETTY_NAME"
-    else
-        SYS_OS=$(uname -srm)
-    fi
+    # 5. OS / Kernel（使用脚本开头已加载的 /etc/os-release 变量）
+    SYS_OS="${PRETTY_NAME:-$(uname -srm)}"
     SYS_KERNEL=$(uname -r)
     echo "  └─ 系统: $SYS_OS ($SYS_KERNEL)"
     
@@ -651,7 +646,6 @@ run_iperf_test() {
 # =========================
 # Traceroute
 # =========================
-# PLACEHOLDER: create_ix_map function will be appended here.
 create_ix_map() {
     cat << 'EOF' > "$TMP_DIR/ix_ip_map.txt"
 187.16.223.20 IX.br (PTT.br) São Paulo
@@ -1254,35 +1248,102 @@ run_trace_test() {
                     table+="|---:|:---|:---|:---|:---|---:|\n"
                     
                     local rows=$(echo "$json" | jq -r '
-                        # NextTrace JSON: { Hops: [ [probe0, probe1, probe2], [probe0, probe1, probe2], ... ] }
-                        # Each Hop is an ARRAY of probes (typically 3). We pick the first successful one.
+                        # NextTrace JSON: { Hops: [ [probe0, probe1, probe2], ... ] }
                         .Hops | to_entries[] |
                         (.key + 1) as $hopnum |
                         .value as $probes |
-                        # Select first successful probe, or first probe if none
+                        # 选择第一个成功的探测，如果没有则取第一个
                         ([$probes[] | select(.Success == true)][0] // $probes[0] // {}) as $p |
-                        [
-                            $hopnum,
-                            ($p.Address.IP // "*"),
-                            (if ($p.Geo.asnumber // 0) != 0 then "AS"+($p.Geo.asnumber|tostring) else "AS-" end),
-                            ([$p.Geo.country, $p.Geo.city] | map(select(. and . != "")) | join(" ") | if . == "" then "-" else . end),
-                            ($p.Geo.isp // $p.Geo.owner // "-"),
-                            (if $p.RTT then (($p.RTT / 1000000 * 100 | floor) / 100 | tostring) else "-" end)
-                        ] | @tsv
+                        
+                        # IP地址：如果为null或空，显示 "*"
+                        (if $p.Address then ($p.Address.IP // "*") else "*" end) as $ip |
+                        
+                        # ASN：只有非空字符串才显示
+                        (if $p.Geo and ($p.Geo.asnumber // "") != "" then "AS" + $p.Geo.asnumber else "-" end) as $asn |
+                        
+                        # 地理位置：国家 省份 城市（过滤空值、去重、去掉"市""省""州"后缀）
+                        (if $p.Geo then
+                            ([$p.Geo.country, $p.Geo.prov, $p.Geo.city] | map(select(. and . != "") | gsub("市$|省$|州$"; "")) | reduce .[] as $x ([]; if . | index($x) then . else . + [$x] end) | join(" "))
+                        else "" end) as $loc_raw |
+                        (if $loc_raw == "" then "-" else $loc_raw end) as $loc |
+                        
+                        # 运营商：优先 isp，其次 owner
+                        (if $p.Geo then
+                            (if ($p.Geo.isp // "") != "" then $p.Geo.isp
+                             elif ($p.Geo.owner // "") != "" then $p.Geo.owner
+                             else "-" end)
+                        else "-" end) as $isp |
+                        
+                        # 延迟：RTT 单位是纳秒，转换为毫秒
+                        (if $p.RTT and $p.RTT > 0 then
+                            (($p.RTT / 1000000 * 100 | floor) / 100 | tostring)
+                        else "-" end) as $rtt |
+                        
+                        [$hopnum, $ip, $asn, $loc, $isp, $rtt] | @tsv
                     ' 2>/dev/null)
                     
                     if [ -n "$rows" ]; then
                         while IFS=$'\t' read -r ttl ip asn loc isp rtt; do
                             [ -z "$ip" ] && continue
                             
-                            # IX Check
-                            local ix_name=$(grep -F "$ip " "$TMP_DIR/ix_ip_map.txt" 2>/dev/null | head -n1 | cut -d' ' -f2-)
-                            [ -n "$ix_name" ] && isp="$isp [$ix_name]"
+                            # 当IP为"*"时显示"-"
+                            [ "$ip" = "*" ] && ip="-"
                             
-                            if [ "$rtt" != "-" ] && [ -n "$rtt" ]; then
-                                rtt="$rtt"
+                            # IX Check (只有IP不为"-"时才检查)
+                            if [ "$ip" != "-" ]; then
+                                local ix_name=$(grep -F "$ip " "$TMP_DIR/ix_ip_map.txt" 2>/dev/null | head -n1 | cut -d' ' -f2-)
+                                [ -n "$ix_name" ] && isp="$isp [$ix_name]"
                             fi
-                            table+="| $ttl | $ip | $asn | $loc | $isp | $rtt ms |\n"
+                            
+                            # 运营商名称简化（使用通配符匹配，按优先级顺序）
+                            
+                            # === 1. 特殊标识优先处理（需保留特殊后缀）===
+                            [[ "$isp" == *"CUII"* ]] && isp="联通CUII"
+                            [[ "$isp" == *"cmi.chinamobile"* ]] && isp="移动CMI"
+                            [[ "$isp" == *"CTGNet"* ]] && isp="电信CTG"
+                            
+                            # === 2. 港澳台及海外中资（必须在三大运营商之前）===
+                            [[ "$isp" == *"China Unicom"*"Hong Kong"* || "$isp" == *"联通"*"香港"* ]] && isp="联通香港"
+                            [[ "$isp" == *"China Unicom Global"* || "$isp" == *"chinaunicomglobal"* ]] && isp="联通国际"
+                            [[ "$isp" == *"China Telecom Global"* ]] && isp="电信CTG"
+                            [[ "$isp" == *"电讯盈科"* || "$isp" == *"pccwglobal"* ]] && isp="PCCW"
+                            [[ "$isp" == *"和记"* || "$isp" == *"hgc"* ]] && isp="HGC"
+                            
+                            # === 3. 中国三大运营商（通配符匹配）===
+                            [[ "$isp" == *"联通"* || "$isp" == *"chinaunicom"* || "$isp" == *"bbn.com.cn"* ]] && [[ "$isp" != "联通"* ]] && isp="中国联通"
+                            [[ "$isp" == *"电信"* || "$isp" == *"chinatelecom"* || "$isp" == *"189.cn"* ]] && [[ "$isp" != "电信"* ]] && isp="中国电信"
+                            [[ "$isp" == *"移动"* || "$isp" == *"chinamobile"* || "$isp" == *"10086.cn"* ]] && [[ "$isp" != "移动"* ]] && isp="中国移动"
+                            
+                            # === 4. 国际运营商 ===
+                            [[ "$isp" == *"Level 3"* || "$isp" == *"lumen"* || "$isp" == *"Lumen"* ]] && isp="Lumen"
+                            [[ "$isp" == *"Cogent"* ]] && isp="Cogent"
+                            [[ "$isp" == *"Zayo"* ]] && isp="Zayo"
+                            [[ "$isp" == *"Tinet"* || "$isp" == *"gtt.net"* ]] && isp="GTT"
+                            [[ "$isp" == *"Arelion"* ]] && isp="Arelion"
+                            [[ "$isp" == *"Telia"* || "$isp" == *"特利亚"* ]] && isp="Telia"
+                            [[ "$isp" == *"Sparkle"* || "$isp" == *"SEA-BONE"* || "$isp" == *"tisparkle"* ]] && isp="Sparkle"
+                            [[ "$isp" == *"Orange"* || "$isp" == *"France Telecom"* ]] && isp="Orange"
+                            [[ "$isp" == *"Leaseweb"* ]] && isp="Leaseweb"
+                            [[ "$isp" == *"NTT"* || "$isp" == *"日本电报电话"* ]] && isp="NTT"
+                            [[ "$isp" == *"Tata"* || "$isp" == *"塔塔"* || "$isp" == *"Teleglobe"* ]] && isp="Tata"
+                            [[ "$isp" == *"Hurricane"* ]] && isp="HE"
+                            
+                            # === 5. 云厂商与服务商 ===
+                            [[ "$isp" == *"Amazon"* || "$isp" == *"亚马逊"* ]] && isp="AWS"
+                            [[ "$isp" == *"Google"* || "$isp" == *"谷歌"* ]] && isp="Google"
+                            [[ "$isp" == *"Cloudflare"* ]] && isp="Cloudflare"
+                            [[ "$isp" == *"Telegram"* ]] && isp="Telegram"
+                            [[ "$isp" == *"Netflix"* ]] && isp="Netflix"
+                            [[ "$isp" == *"Servers.com"* ]] && isp="Servers.com"
+                            [[ "$isp" == *"SG.GS"* ]] && isp="SG.GS"
+                            
+                            # RTT格式：有值时追加ms，无值时显示"-"
+                            if [ "$rtt" != "-" ] && [ -n "$rtt" ]; then
+                                rtt_display="$rtt ms"
+                            else
+                                rtt_display="-"
+                            fi
+                            table+="| $ttl | $ip | $asn | $loc | $isp | $rtt_display |\n"
                         done <<< "$rows"
                         
                         echo "  │  └─ 追踪完成"
@@ -1321,6 +1382,7 @@ main() {
     
     # 致谢
     echo -e "✨ 感谢 JamChoi 提供的源代码，由 aoaim 和 Gemini 3.0 Pro 进行改写"
+    echo -e "💖 本项目依赖 NextTrace (www.nxtrace.org)"
     
     # Initialize Report
     init_report
