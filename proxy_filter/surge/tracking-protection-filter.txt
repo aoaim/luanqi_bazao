@@ -4,6 +4,9 @@
 .ib.snssdk.com
 .xlog.snssdk.com
 .log.snssdk.com
+.dsp.groupminteraction.ru
+.decentriq.com
+.oneid.live
 .aim.loc.kr
 .sp.pcid.ca
 .tracker.zmaticoo.com
@@ -25,7 +28,6 @@
 .lc.recopick.com
 .cv.aedi.ai
 .toup.net
-.tags.tiqcdn.com
 .prebid.loopmertb.com
 .nlog.instajob.ai
 .data.pendo.io
@@ -49449,6 +49451,8 @@
 .tagman.britishairways.com
 .ct.pinterest.com
 .incoming.telemetry.mozilla.org
+.metrics.media-amazon.com
+.metis.truecaller.com
 .fls-na.amazon.com
 .tag.poomang.com
 .counter.tldw.me
@@ -52624,6 +52628,15 @@
 .int.vlancaa.site
 .int.vlancaa.fun
 .tok.vaicore.xyz
+.live.ravelin.click
+.perseus-productanalytics.deliveryhero.net
+.iguazu.doordash.com
+.otel-mobile.doordash.com
+.stat.apfgexfusion.com
+.event.bigkeyboardeasyphone.com
+.events-api.lyrebirdstudio.net
+.log.pdfbookeditor.live
+.mob2.cactus-bp.com
 .log.cleansweepplu.com
 .tc.vbnmhjlp.com
 .logrcv.adseyeservice.com
@@ -53618,6 +53631,7 @@
 .bewilderedblade.com
 .bhcumsc.com
 .bidpapers.com
+.bigfishapparel.com
 .bigworldfashion.com
 .bikepaws.com
 .bikesboard.com
@@ -53641,6 +53655,7 @@
 .blitzcampaigns.com
 .blockdial.com
 .blueeyedblow.com
+.bluenest.net
 .bluevinebooks.com
 .blushingbeast.com
 .blushingbread.com
@@ -53809,6 +53824,7 @@
 .comfortablecheese.com
 .commonalmanac.com
 .comparereaction.com
+.compilework.com
 .complexpixel.com
 .concretetom.com
 .condemnedcomb.com
@@ -53937,6 +53953,7 @@
 .detourgame.com
 .devilishdinner.com
 .dewdroplagoon.com
+.dicecandies.com
 .dicemoments.com
 .difficultfog.com
 .digestiondrawer.com
