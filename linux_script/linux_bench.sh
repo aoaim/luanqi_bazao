@@ -1615,12 +1615,14 @@ run_trace_test() {
                             [[ "$isp" == "中国移动国际" ]] && isp="中国移动（国际）"
                             
                             # === 4. 国际运营商 ===
-                            [[ "$isp_lower" == *"lumen"* || "$isp_lower" == *"level 3"* || "$isp" == *"世纪互联"* || "$isp" == *"流明"* ]] && isp="Lumen"
+                            [[ "$isp_lower" == *"lumen"* || "$isp_lower" == *"level 3"* || "$isp_lower" == *"level3"* || "$isp" == *"世纪互联"* || "$isp" == *"流明"* ]] && isp="Lumen"
                             [[ "$isp_lower" == *"cogent"* || "$isp_lower" == *"psinet"* ]] && isp="Cogent"
                             [[ "$isp_lower" == *"zayo"* ]] && isp="Zayo"
                             [[ "$isp_lower" == *"tinet"* || "$isp_lower" == *"gtt"* ]] && isp="GTT"
                             [[ "$isp_lower" == *"arelion"* ]] && isp="Arelion"
                             [[ "$isp_lower" == *"telia"* || "$isp" == *"特利亚"* ]] && isp="Telia"
+                            # "Provider" 是 Telia 的通用标识
+                            [[ "$isp_lower" == "provider" ]] && isp="Telia"
                             [[ "$isp_lower" == *"sparkle"* || "$isp_lower" == *"sea-bone"* || "$isp_lower" == *"tisparkle"* ]] && isp="Sparkle"
                             [[ "$isp_lower" == *"orange"* || "$isp_lower" == *"france telecom"* || "$isp_lower" == *"oinis"* ]] && isp="Orange"
                             [[ "$isp_lower" == *"leaseweb"* ]] && isp="Leaseweb"
@@ -1641,6 +1643,10 @@ run_trace_test() {
                             [[ "$isp_lower" == *"edgoo"* ]] && isp="Edgoo"
                             [[ "$isp_lower" == *"sprint"* ]] && isp="Sprint"
                             [[ "$isp_lower" == *"xtom"* ]] && isp="xTom"
+                            # Airband Communications (AS18990)
+                            [[ "$isp_lower" == *"airband"* ]] && isp="Airband"
+                            # PCCW Global (AS3491) - 独立匹配
+                            [[ "$isp_lower" == *"pccw"* && "$isp" != "PCCW" ]] && isp="PCCW"
                             
                             # === 5. 日本运营商 ===
                             [[ "$isp_lower" == *"gmo"* || "$isp_lower" == *"internet.gmo"* ]] && isp="GMO Internet"
