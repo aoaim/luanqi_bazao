@@ -31,8 +31,10 @@ fi
 # =========================
 # 配置 & 全局变量
 # =========================
-TMP_DIR="./bench_tmp_$(date +%s)"
-REPORT_FILE="bench_$(date +%Y%m%d_%H%M%S).md"
+TMP_DIR="./tmp_bench_$(date +%s)"
+
+# 清理列表 (记录新安装的依赖，以便脚本结束时清理)
+CLEANUP_PKGS=()
 
 # 运行模式标志
 RUN_CPU=true
@@ -41,6 +43,9 @@ RUN_NET_INFO=true
 RUN_IPERF=true
 RUN_TRACE=true
 RUN_IP_QUALITY=true
+
+# 报告名称前缀 (根据参数动态设置)
+REPORT_PREFIX="report"
 
 # 参数解析
 for arg in "$@"; do
@@ -52,6 +57,7 @@ for arg in "$@"; do
             RUN_IPERF=true
             RUN_TRACE=true
             RUN_IP_QUALITY=true
+            REPORT_PREFIX="network"
             shift
             ;;
         --hardware|-h)
@@ -61,6 +67,7 @@ for arg in "$@"; do
             RUN_IPERF=false
             RUN_TRACE=false
             RUN_IP_QUALITY=false
+            REPORT_PREFIX="hardware"
             shift
             ;;
         --nexttrace|-nt)
@@ -70,6 +77,7 @@ for arg in "$@"; do
             RUN_IPERF=false
             RUN_TRACE=true
             RUN_IP_QUALITY=false
+            REPORT_PREFIX="nexttrace"
             shift
             ;;
         --ip-quality|-ip)
@@ -79,10 +87,14 @@ for arg in "$@"; do
             RUN_IPERF=false
             RUN_TRACE=false
             RUN_IP_QUALITY=true
+            REPORT_PREFIX="ipquality"
             shift
             ;;
     esac
 done
+
+# 生成报告文件名 (参数解析后)
+REPORT_FILE="bench_${REPORT_PREFIX}_$(date +%Y%m%d_%H%M%S).md"
 
 # 颜色
 RED='\033[0;31m'
@@ -90,20 +102,48 @@ GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 NC='\033[0m'
 
-# 信号捕捉
+# 测试完成标志
+TEST_COMPLETE=false
+
+# 信号捕捉 - 清理临时文件和依赖
 cleanup() {
     # 1. 删除临时文件
-    rm -rf "$TMP_DIR"
+    rm -rf "$TMP_DIR" 2>/dev/null || true
     
-    # 2. 移除脚本安装的依赖
-    if [ ${#CLEANUP_PKGS[@]} -gt 0 ]; then
-        echo -e "\n[$(get_time)] 正在清理安装的依赖 (${CLEANUP_PKGS[*]}) ..."
-        apt-get remove -y "${CLEANUP_PKGS[@]}" >/dev/null 2>&1
-        apt-get autoremove -y >/dev/null 2>&1
-        echo -e "[$(get_time)] 清理完成"
+    # 2. 移除脚本安装的依赖 (只清理新安装的)
+    if [ "${#CLEANUP_PKGS[@]}" -gt 0 ] 2>/dev/null; then
+        echo -e "\n[$(date +%H:%M:%S)] 正在清理新安装的依赖 (${CLEANUP_PKGS[*]}) ..."
+        apt-get remove -y "${CLEANUP_PKGS[@]}" >/dev/null 2>&1 || true
+        apt-get autoremove -y >/dev/null 2>&1 || true
+        echo -e "[清理] 完成"
     fi
 }
-trap "cleanup; echo -e '\n[退出] 脚本已终止'; exit 1" INT TERM
+
+# 中断处理 - 询问是否保留结果
+interrupt_handler() {
+    echo ""
+    echo -e "${YELLOW}[中断] 检测到 Ctrl+C，测试未完成${NC}"
+    
+    # 检查报告文件是否存在
+    if [ -f "$REPORT_FILE" ]; then
+        echo -e "${YELLOW}是否保留已生成的测试结果？${NC}"
+        echo -n "输入 y 保留，直接回车删除 (默认: 删除): "
+        read -r keep_result </dev/tty 2>/dev/null || keep_result=""
+        
+        if [ "$keep_result" = "y" ] || [ "$keep_result" = "Y" ] || [ "$keep_result" = "yes" ]; then
+            echo -e "${GREEN}[保留] 测试结果已保存到: $REPORT_FILE${NC}"
+        else
+            rm -f "$REPORT_FILE" 2>/dev/null || true
+            echo -e "${YELLOW}[删除] 测试结果已删除${NC}"
+        fi
+    fi
+    
+    cleanup
+    echo -e "\n[退出] 脚本已终止"
+    exit 1
+}
+
+trap interrupt_handler INT TERM
 trap cleanup EXIT
 
 # =========================
@@ -143,7 +183,6 @@ check_cmd() {
 ensure_dependencies() {
     log "正在检查/安装依赖..."
     
-    CLEANUP_PKGS=()
     local target_pkgs="curl jq"
     
     # 根据 Flag 添加依赖
@@ -352,7 +391,12 @@ collect_network_info() {
         NET_V4_ASN=""
         NET_V4_LOC=""
     fi
-    echo "  ├─ IPv4: $NET_V4_IP"
+    if [ "$HAS_V4" = "true" ]; then
+        echo "  ├─ IPv4: $NET_V4_IP"
+        echo "  │  └─ 位置: $NET_V4_LOC"
+    else
+        echo "  ├─ IPv4: N/A"
+    fi
     
     echo "  ├─ 查询 IPv6 信息..."
     # ipapi.co 支持 IPv6 访问，强制使用 -6 会通过 IPv6 获取信息
@@ -370,7 +414,12 @@ collect_network_info() {
         NET_V6_ASN=""
         NET_V6_LOC=""
     fi
-    echo "  └─ IPv6: $NET_V6_IP"
+    if [ "$HAS_V6" = "true" ]; then
+        echo "  ├─ IPv6: $NET_V6_IP"
+        echo "  │  └─ 位置: $NET_V6_LOC"
+    else
+        echo "  └─ IPv6: N/A"
+    fi
 
     # === Streaming Report ===
     {
@@ -394,206 +443,225 @@ collect_network_info() {
 }
 
 # =========================
-# IP 质量检测
+# IP 质量检测 (仅 IPv4)
 # =========================
 collect_ip_quality() {
     log "开始 IP 质量检测..."
     
-    # 定义风险评分格式化函数
-    format_risk_level() {
-        local score="$1"
-        local max="$2"
-        if [ -z "$score" ] || [ "$score" = "null" ]; then
-            echo "N/A"
-            return
-        fi
-        
-        # 根据分数计算风险等级
-        local pct=$((score * 100 / max))
-        if [ "$pct" -lt 25 ]; then
-            echo "🟢 低风险 ($score)"
-        elif [ "$pct" -lt 50 ]; then
-            echo "🟡 中等 ($score)"
-        elif [ "$pct" -lt 75 ]; then
-            echo "🟠 较高 ($score)"
-        else
-            echo "🔴 高风险 ($score)"
-        fi
-    }
-    
-    # 格式化布尔值
-    format_bool() {
+    # 格式化布尔值为 YES/NO
+    format_bool_yesno() {
         local val="$1"
         case "$val" in
-            "true"|"True"|"TRUE"|"yes"|"1") echo "✅ 是" ;;
-            "false"|"False"|"FALSE"|"no"|"0") echo "❌ 否" ;;
+            "true"|"True"|"TRUE"|"yes"|"1") echo "✅ **YES**" ;;
+            "false"|"False"|"FALSE"|"no"|"0") echo "❌ **NO**" ;;
             *) echo "—" ;;
         esac
     }
     
-    # 格式化 IP 类型
-    format_ip_type() {
-        local type="$1"
-        case "$type" in
-            "isp"|"ISP") echo "🏠 家宽 (ISP)" ;;
-            "hosting"|"Hosting") echo "🖥️ 机房 (Hosting)" ;;
-            "business"|"Business") echo "🏢 商业 (Business)" ;;
-            "education"|"Education") echo "🎓 教育 (Education)" ;;
-            "government"|"Government") echo "🏛️ 政府 (Government)" ;;
-            "mobile"|"Mobile") echo "📱 移动网络 (Mobile)" ;;
-            *) echo "$type" ;;
+    # 格式化欺诈评分 (0-100, 越低越好)
+    format_fraud_score() {
+        local score="$1"
+        if [ -z "$score" ] || [ "$score" = "null" ]; then
+            echo "N/A|—"
+            return
+        fi
+        if [ "$score" -lt 40 ]; then
+            echo "$score|🟢 低"
+        elif [ "$score" -lt 70 ]; then
+            echo "$score|🟡 中"
+        else
+            echo "$score|🔴 高"
+        fi
+    }
+    
+    # 格式化滥用评分 (解析 "0.0078 (Low)" 格式)
+    format_abuser_score() {
+        local raw="$1"
+        if [ -z "$raw" ] || [ "$raw" = "null" ]; then
+            echo "N/A|—"
+            return
+        fi
+        # 提取数值和评级
+        local num=$(echo "$raw" | awk '{print $1}')
+        local level=$(echo "$raw" | grep -oP '\(\K[^)]+')
+        
+        # 根据评级设置红绿灯 (中文)
+        case "$level" in
+            "Very Low") echo "$num|🟢 极低" ;;
+            "Low") echo "$num|🟢 低" ;;
+            "Elevated") echo "$num|🟡 中" ;;
+            "High") echo "$num|🟠 高" ;;
+            "Very High"|"Critical") echo "$num|🔴 极高" ;;
+            *) echo "$num|$level" ;;
         esac
     }
     
-    # === IPv4 检测 ===
-    if [ "$HAS_V4" = "true" ]; then
-        local ip="$NET_V4_IP"
-        echo "  ├─ [IPv4] 查询质量信息: $ip"
-        
-        # 1. IPinfo.io - 类型和隐私信息
-        echo "  │  ├─ 查询 IPinfo.io..."
-        local ipinfo_json=$(curl -s --max-time 10 "https://ipinfo.io/widget/demo/$ip" 2>/dev/null)
-        local ipinfo_use_type="" ipinfo_com_type="" ipinfo_proxy="" ipinfo_vpn="" ipinfo_tor="" ipinfo_hosting=""
-        if [ -n "$ipinfo_json" ] && echo "$ipinfo_json" | jq -e '.data' >/dev/null 2>&1; then
-            ipinfo_use_type=$(echo "$ipinfo_json" | jq -r '.data.asn.type // empty')
-            ipinfo_com_type=$(echo "$ipinfo_json" | jq -r '.data.company.type // empty')
-            ipinfo_proxy=$(echo "$ipinfo_json" | jq -r '.data.privacy.proxy // empty')
-            ipinfo_vpn=$(echo "$ipinfo_json" | jq -r '.data.privacy.vpn // empty')
-            ipinfo_tor=$(echo "$ipinfo_json" | jq -r '.data.privacy.tor // empty')
-            ipinfo_hosting=$(echo "$ipinfo_json" | jq -r '.data.privacy.hosting // empty')
-        fi
-        
-        # 2. ipapi.is - 风险评分
-        echo "  │  ├─ 查询 ipapi.is..."
-        local ipapi_json=$(curl -s --max-time 10 "https://api.ipapi.is/?q=$ip" 2>/dev/null)
-        local ipapi_risk="" ipapi_datacenter="" ipapi_abuser="" ipapi_proxy="" ipapi_tor="" ipapi_vpn="" ipapi_crawler=""
-        if [ -n "$ipapi_json" ] && echo "$ipapi_json" | jq -e '.ip' >/dev/null 2>&1; then
-            ipapi_risk=$(echo "$ipapi_json" | jq -r '.company.abuser_score // empty')
-            ipapi_datacenter=$(echo "$ipapi_json" | jq -r '.is_datacenter // empty')
-            ipapi_abuser=$(echo "$ipapi_json" | jq -r '.is_abuser // empty')
-            ipapi_proxy=$(echo "$ipapi_json" | jq -r '.is_proxy // empty')
-            ipapi_tor=$(echo "$ipapi_json" | jq -r '.is_tor // empty')
-            ipapi_vpn=$(echo "$ipapi_json" | jq -r '.is_vpn // empty')
-            ipapi_crawler=$(echo "$ipapi_json" | jq -r '.is_crawler // empty')
-        fi
-        
-        # 3. DB-IP - 威胁等级 (HTML scraping)
-        echo "  │  ├─ 查询 DB-IP..."
-        local dbip_html=$(curl -s --max-time 10 "https://db-ip.com/$ip" 2>/dev/null)
-        local dbip_threat=""
-        if [ -n "$dbip_html" ]; then
-            dbip_threat=$(echo "$dbip_html" | sed -n 's/.*Estimated threat level for this IP address is[[:space:]]*<span[^>]*>\([^<]*\)<.*/\1/p')
-        fi
-        
-        # 4. IPWHOIS - 安全标记
-        echo "  │  ├─ 查询 IPWHOIS..."
-        local ipwhois_json=$(curl -s --max-time 10 --compressed \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0" \
-            -H "Accept: */*" \
-            -H "Referer: https://ipwhois.io/" \
-            "https://ipwhois.io/widget?ip=$ip&lang=en" 2>/dev/null)
-        local ipwhois_proxy="" ipwhois_tor="" ipwhois_vpn="" ipwhois_hosting=""
-        if [ -n "$ipwhois_json" ] && echo "$ipwhois_json" | jq -e '.ip' >/dev/null 2>&1; then
-            ipwhois_proxy=$(echo "$ipwhois_json" | jq -r '.security.proxy // empty')
-            ipwhois_tor=$(echo "$ipwhois_json" | jq -r '.security.tor // empty')
-            ipwhois_vpn=$(echo "$ipwhois_json" | jq -r '.security.vpn // empty')
-            ipwhois_hosting=$(echo "$ipwhois_json" | jq -r '.security.hosting // empty')
-        fi
-        
-        # 输出汇总
-        echo "  │  └─ 类型: $(format_ip_type "$ipinfo_use_type") / 威胁: ${dbip_threat:-N/A}"
-        
-        # 保存 IPv4 结果
-        V4_USE_TYPE="$ipinfo_use_type"
-        V4_COM_TYPE="$ipinfo_com_type"
-        V4_RISK_SCORE="$ipapi_risk"
-        V4_THREAT_LEVEL="$dbip_threat"
-        
-        # 合并多数据源的风险因子 (任一为 true 则标记)
-        V4_IS_PROXY="$([[ "$ipinfo_proxy" = "true" || "$ipapi_proxy" = "true" || "$ipwhois_proxy" = "true" ]] && echo "true" || echo "false")"
-        V4_IS_VPN="$([[ "$ipinfo_vpn" = "true" || "$ipapi_vpn" = "true" || "$ipwhois_vpn" = "true" ]] && echo "true" || echo "false")"
-        V4_IS_TOR="$([[ "$ipinfo_tor" = "true" || "$ipapi_tor" = "true" || "$ipwhois_tor" = "true" ]] && echo "true" || echo "false")"
-        V4_IS_HOSTING="$([[ "$ipinfo_hosting" = "true" || "$ipapi_datacenter" = "true" || "$ipwhois_hosting" = "true" ]] && echo "true" || echo "false")"
-        V4_IS_ABUSER="$ipapi_abuser"
-        V4_IS_CRAWLER="$ipapi_crawler"
+    # === 仅 IPv4 检测 ===
+    if [ "$HAS_V4" != "true" ]; then
+        warn "  └─ 未检测到 IPv4 地址，跳过 IP 质量检测"
+        return
     fi
     
-    # === IPv6 检测 ===
-    if [ "$HAS_V6" = "true" ]; then
-        local ip="$NET_V6_IP"
-        echo "  ├─ [IPv6] 查询质量信息: ${ip:0:20}..."
-        
-        # IPv6 仅查询支持的 API
-        # 1. ipapi.is
-        echo "  │  ├─ 查询 ipapi.is..."
-        local ipapi_json=$(curl -s -6 --max-time 10 "https://api.ipapi.is/?q=$ip" 2>/dev/null)
-        local ipapi_risk="" ipapi_datacenter="" ipapi_abuser="" ipapi_proxy="" ipapi_tor="" ipapi_vpn=""
-        if [ -n "$ipapi_json" ] && echo "$ipapi_json" | jq -e '.ip' >/dev/null 2>&1; then
-            ipapi_risk=$(echo "$ipapi_json" | jq -r '.company.abuser_score // empty')
-            ipapi_datacenter=$(echo "$ipapi_json" | jq -r '.is_datacenter // empty')
-            ipapi_abuser=$(echo "$ipapi_json" | jq -r '.is_abuser // empty')
-            ipapi_proxy=$(echo "$ipapi_json" | jq -r '.is_proxy // empty')
-            ipapi_tor=$(echo "$ipapi_json" | jq -r '.is_tor // empty')
-            ipapi_vpn=$(echo "$ipapi_json" | jq -r '.is_vpn // empty')
-        fi
-        
-        # 2. DB-IP
-        echo "  │  ├─ 查询 DB-IP..."
-        local dbip_html=$(curl -s -6 --max-time 10 "https://db-ip.com/$ip" 2>/dev/null)
-        local dbip_threat=""
-        if [ -n "$dbip_html" ]; then
-            dbip_threat=$(echo "$dbip_html" | sed -n 's/.*Estimated threat level for this IP address is[[:space:]]*<span[^>]*>\([^<]*\)<.*/\1/p')
-        fi
-        
-        echo "  │  └─ 威胁等级: ${dbip_threat:-N/A}"
-        
-        # 保存 IPv6 结果
-        V6_RISK_SCORE="$ipapi_risk"
-        V6_THREAT_LEVEL="$dbip_threat"
-        V6_IS_PROXY="$ipapi_proxy"
-        V6_IS_VPN="$ipapi_vpn"
-        V6_IS_TOR="$ipapi_tor"
-        V6_IS_HOSTING="$ipapi_datacenter"
-        V6_IS_ABUSER="$ipapi_abuser"
+    local ip="$NET_V4_IP"
+    echo "  ├─ [IPv4] 查询质量信息: $ip"
+    
+    # 1. ipapi.is - 滥用评分、机房识别、VPN/代理/Tor/爬虫/滥用检测
+    echo "  │  ├─ 查询 ipapi.is..."
+    local ipapi_json=$(curl -s -4 --max-time 10 "https://api.ipapi.is/?q=$ip" 2>/dev/null)
+    
+    local ipapi_abuser_score="" ipapi_asn_abuser_score=""
+    local ipapi_is_datacenter="" ipapi_datacenter_name=""
+    local ipapi_is_vpn="" ipapi_is_proxy="" ipapi_is_tor="" ipapi_is_crawler="" ipapi_is_abuser=""
+    local ipapi_company_type="" ipapi_is_mobile="" ipapi_is_bogon="" ipapi_is_satellite=""
+    
+    if [ -n "$ipapi_json" ] && echo "$ipapi_json" | jq -e '.ip' >/dev/null 2>&1; then
+        ipapi_abuser_score=$(echo "$ipapi_json" | jq -r '.company.abuser_score // empty')
+        ipapi_asn_abuser_score=$(echo "$ipapi_json" | jq -r '.asn.abuser_score // empty')
+        ipapi_is_datacenter=$(echo "$ipapi_json" | jq -r 'if .is_datacenter == null then "" else (.is_datacenter | tostring) end')
+        ipapi_datacenter_name=$(echo "$ipapi_json" | jq -r '.datacenter.datacenter // empty')
+        ipapi_is_vpn=$(echo "$ipapi_json" | jq -r 'if .is_vpn == null then "" else (.is_vpn | tostring) end')
+        ipapi_is_proxy=$(echo "$ipapi_json" | jq -r 'if .is_proxy == null then "" else (.is_proxy | tostring) end')
+        ipapi_is_tor=$(echo "$ipapi_json" | jq -r 'if .is_tor == null then "" else (.is_tor | tostring) end')
+        ipapi_is_crawler=$(echo "$ipapi_json" | jq -r 'if .is_crawler == null then "" else (.is_crawler | tostring) end')
+        ipapi_is_abuser=$(echo "$ipapi_json" | jq -r 'if .is_abuser == null then "" else (.is_abuser | tostring) end')
+        ipapi_company_type=$(echo "$ipapi_json" | jq -r '.company.type // empty')
+        ipapi_is_mobile=$(echo "$ipapi_json" | jq -r 'if .is_mobile == null then "" else (.is_mobile | tostring) end')
+        ipapi_is_bogon=$(echo "$ipapi_json" | jq -r 'if .is_bogon == null then "" else (.is_bogon | tostring) end')
+        ipapi_is_satellite=$(echo "$ipapi_json" | jq -r 'if .is_satellite == null then "" else (.is_satellite | tostring) end')
     fi
+    
+    # 2. ippure - 欺诈评分、原生 IP 识别
+    echo "  │  └─ 查询 ippure.com..."
+    local ippure_json=$(curl -s -4 --max-time 10 "https://my.ippure.com/v1/info" 2>/dev/null)
+    
+    local ippure_fraud_score="" ippure_is_residential=""
+    
+    if [ -n "$ippure_json" ] && echo "$ippure_json" | jq -e '.ip' >/dev/null 2>&1; then
+        ippure_fraud_score=$(echo "$ippure_json" | jq -r '.fraudScore // empty')
+        ippure_is_residential=$(echo "$ippure_json" | jq -r 'if .isResidential == null then "" else (.isResidential | tostring) end')
+    fi
+    
+    # === 格式化各项评分 ===
+    local fraud_formatted=$(format_fraud_score "$ippure_fraud_score")
+    local fraud_val=$(echo "$fraud_formatted" | cut -d'|' -f1)
+    local fraud_remark=$(echo "$fraud_formatted" | cut -d'|' -f2)
+    
+    local abuser_formatted=$(format_abuser_score "$ipapi_abuser_score")
+    local abuser_val=$(echo "$abuser_formatted" | cut -d'|' -f1)
+    local abuser_remark=$(echo "$abuser_formatted" | cut -d'|' -f2)
+    
+    local asn_formatted=$(format_abuser_score "$ipapi_asn_abuser_score")
+    local asn_val=$(echo "$asn_formatted" | cut -d'|' -f1)
+    local asn_remark=$(echo "$asn_formatted" | cut -d'|' -f2)
+    
+    # === 格式化机房识别结果 ===
+    local datacenter_result="" datacenter_remark=""
+    if [ "$ipapi_is_datacenter" = "true" ]; then
+        datacenter_result="✅ **YES**"
+        if [ -n "$ipapi_datacenter_name" ] && [ "$ipapi_datacenter_name" != "null" ]; then
+            datacenter_remark="$ipapi_datacenter_name"
+        fi
+    else
+        datacenter_result="❌ **NO**"
+        datacenter_remark=""
+    fi
+    
+    # VPN/代理合并检测
+    local vpn_proxy_result="false"
+    [[ "$ipapi_is_vpn" = "true" || "$ipapi_is_proxy" = "true" ]] && vpn_proxy_result="true"
+    
+    # === 终端输出关键结果 ===
+    echo "  ├─ 欺诈评分: ${ippure_fraud_score:-N/A} | 滥用评分: ${ipapi_abuser_score:-N/A}"
+    echo "  ├─ 组织类型: ${ipapi_company_type:-N/A} | 机房: ${ipapi_is_datacenter:-N/A} | 移动: ${ipapi_is_mobile:-N/A}"
+    echo "  ├─ VPN/代理: ${vpn_proxy_result} | Tor: ${ipapi_is_tor:-N/A} | 原生: ${ippure_is_residential:-N/A}"
+    echo "  └─ 检测完成"
     
     # === 生成报告 ===
     {
         echo "## IP 质量分析"
         echo ""
-        echo "> 数据来源: IPinfo.io, ipapi.is, DB-IP, IPWHOIS"
+        echo "> IPv4 only，结果仅供参考 "
+        echo "> "
+        echo "| 检测项目 | 检测结果 | 备注 | 数据来源 |"
+        echo "| :--- | :--- | :--- | :--- |"
+        # 风险评分
+        echo "| 欺诈评分 | $fraud_val | $fraud_remark (越低越好) | ippure |"
+        echo "| 滥用评分 | $abuser_val | $abuser_remark (越低越好) | ipapi.is |"
+        echo "| ASN 信誉 | $asn_val | $asn_remark (越低越好) | ipapi.is |"
+        # IP 类型
+        # 组织类型中文说明
+        local company_type_remark=""
+        case "$ipapi_company_type" in
+            "hosting") company_type_remark="机房/托管" ;;
+            "isp") company_type_remark="家庭宽带" ;;
+            "business") company_type_remark="商业机构" ;;
+            "education") company_type_remark="教育机构" ;;
+            "government") company_type_remark="政府机构" ;;
+            "banking") company_type_remark="金融机构" ;;
+            *) company_type_remark="" ;;
+        esac
+        echo "| 组织类型 | ${ipapi_company_type:-N/A} | $company_type_remark | ipapi.is |"
+        echo "| 原生识别 | $(format_bool_yesno "$ippure_is_residential") | | ippure |"
+        echo "| 机房识别 | $datacenter_result | $datacenter_remark | ipapi.is |"
+        echo "| 移动网络 | $(format_bool_yesno "$ipapi_is_mobile") | | ipapi.is |"
+        echo "| 卫星网络 | $(format_bool_yesno "$ipapi_is_satellite") | Starlink/Viasat等 | ipapi.is |"
+        # 安全标识
+        echo "| VPN/代理 | $(format_bool_yesno "$vpn_proxy_result") | | ipapi.is |"
+        echo "| Tor 节点 | $(format_bool_yesno "$ipapi_is_tor") | | ipapi.is |"
+        echo "| 爬虫检测 | $(format_bool_yesno "$ipapi_is_crawler") | | ipapi.is |"
+        echo "| 滥用黑名单 | $(format_bool_yesno "$ipapi_is_abuser") | | ipapi.is |"
+        # 其他
+        echo "| 保留 IP | $(format_bool_yesno "$ipapi_is_bogon") | | ipapi.is |"
+        
+        # === 综合评价 ===
+        local summary="" summary_icon=""
+        local fraud_score_num=${ippure_fraud_score:-100}
+        
+        # 评价逻辑 (ippure 原生识别优先级高于 ipapi.is 机房识别)
+        if [ "$ipapi_is_tor" = "true" ]; then
+            summary_icon="🔴"
+            summary="Tor 节点，高风险"
+        elif [ "$ipapi_is_abuser" = "true" ]; then
+            summary_icon="🔴"
+            summary="在滥用黑名单中"
+        elif [ "$fraud_score_num" -ge 70 ]; then
+            summary_icon="🔴"
+            summary="欺诈评分过高"
+        elif [ "$ippure_is_residential" = "true" ] && [ "$vpn_proxy_result" = "false" ]; then
+            # ippure 判定原生优先，即使 ipapi.is 显示机房也信任 ippure
+            if [ "$fraud_score_num" -lt 40 ]; then
+                summary_icon="🟢"
+                summary="优质原生 IP"
+            else
+                summary_icon="🟡"
+                summary="原生家宽 IP，欺诈评分中等"
+            fi
+        elif [ "$ippure_is_residential" = "true" ] && [ "$vpn_proxy_result" = "true" ]; then
+            # 原生但有代理标记
+            summary_icon="🟠"
+            summary="原生 IP，但检测到代理"
+        elif [ "$ipapi_is_datacenter" = "true" ] && [ "$vpn_proxy_result" = "true" ]; then
+            summary_icon="🟠"
+            summary="机房 IP，有 VPN/代理标记"
+        elif [ "$ipapi_is_datacenter" = "true" ]; then
+            summary_icon="🟡"
+            summary="机房 IP"
+        elif [ "$vpn_proxy_result" = "true" ]; then
+            summary_icon="🟠"
+            summary="检测到 VPN/代理"
+        elif [ "$ipapi_is_mobile" = "true" ]; then
+            summary_icon="🟡"
+            summary="移动网络 IP"
+        elif [ "$ipapi_is_satellite" = "true" ]; then
+            summary_icon="🟡"
+            summary="卫星网络 IP"
+        else
+            summary_icon="🟢"
+            summary="正常 IP"
+        fi
+        
+        echo "| **综合评价** | $summary_icon **$summary** | 仅供参考 | 自动生成 |"
         echo ""
-        
-        if [ "$HAS_V4" = "true" ]; then
-            echo "### IPv4 质量分析"
-            echo "| 检测项目 | 检测结果 |"
-            echo "| :--- | :--- |"
-            echo "| 网络类型 | $(format_ip_type "$V4_USE_TYPE") |"
-            echo "| 持有者类型 | $(format_ip_type "$V4_COM_TYPE") |"
-            [ -n "$V4_RISK_SCORE" ] && echo "| 风险评分 | $V4_RISK_SCORE |"
-            [ -n "$V4_THREAT_LEVEL" ] && echo "| 威胁等级 (DB-IP) | $V4_THREAT_LEVEL |"
-            echo "| 代理检测 | $(format_bool "$V4_IS_PROXY") |"
-            echo "| VPN 检测 | $(format_bool "$V4_IS_VPN") |"
-            echo "| Tor 检测 | $(format_bool "$V4_IS_TOR") |"
-            echo "| 数据中心 | $(format_bool "$V4_IS_HOSTING") |"
-            echo "| 滥用标记 | $(format_bool "$V4_IS_ABUSER") |"
-            echo "| 爬虫检测 | $(format_bool "$V4_IS_CRAWLER") |"
-            echo ""
-        fi
-        
-        if [ "$HAS_V6" = "true" ]; then
-            echo "### IPv6 质量分析"
-            echo "| 检测项目 | 检测结果 |"
-            echo "| :--- | :--- |"
-            [ -n "$V6_RISK_SCORE" ] && echo "| 风险评分 | $V6_RISK_SCORE |"
-            [ -n "$V6_THREAT_LEVEL" ] && echo "| 威胁等级 (DB-IP) | $V6_THREAT_LEVEL |"
-            echo "| 代理检测 | $(format_bool "$V6_IS_PROXY") |"
-            echo "| VPN 检测 | $(format_bool "$V6_IS_VPN") |"
-            echo "| Tor 检测 | $(format_bool "$V6_IS_TOR") |"
-            echo "| 数据中心 | $(format_bool "$V6_IS_HOSTING") |"
-            echo "| 滥用标记 | $(format_bool "$V6_IS_ABUSER") |"
-            echo ""
-        fi
     } >> "$REPORT_FILE"
     
     info "  └─ IP 质量检测完成"
@@ -814,7 +882,7 @@ run_iperf_test() {
             echo "  │  │  └─ 发送: ${send} / 接收: ${recv} / 延迟: ${lat:---} ms"
             
             # Streaming Row
-            echo "| $mode | $provider | $loc | $send | $recv | ${lat:---} |" >> "$REPORT_FILE"
+            echo "| $mode | $provider | $loc | $send | $recv | ${lat:---} ms |" >> "$REPORT_FILE"
         done
     done
     
@@ -829,7 +897,7 @@ run_iperf_test() {
             echo "> 🌐 青毅云计算 (YOUTHIDC)  "
             echo "> ⚡️ 国内大带宽独享服务器，IEPL 跨境专线  "
             echo "> 💬 Telegram 群组：https://t.me/YouthIDC  "
-            echo ""
+            echo "> "
             echo "| 节点 | 线程 | 发送带宽 | 接收带宽 |"
             echo "| :--- | :--- | :--- | :--- |"
         } >> "$REPORT_FILE"
@@ -1520,22 +1588,31 @@ run_trace_test() {
                             
                             # === 1. 中国运营商海外分支（必须优先匹配）===
                             # 联通海外
-                            [[ "$isp" == *"联通"*"香港"* || "$isp" == *"联通（香港）"* || "$isp_lower" == *"unicom"*"hong kong"* ]] && isp="中国联通香港"
-                            [[ "$isp_lower" == *"chinaunicomglobal"* || "$isp_lower" == *"china unicom global"* ]] && isp="中国联通国际"
+                            [[ "$isp" == *"联通"*"香港"* || "$isp" == *"联通（香港）"* || "$isp_lower" == *"unicom"*"hong kong"* ]] && isp="中国联通（香港）"
+                            [[ "$isp_lower" == *"chinaunicomglobal"* || "$isp_lower" == *"china unicom global"* ]] && isp="中国联通（国际）"
                             # 电信海外
-                            [[ "$isp_lower" == *"ctgnet"* || "$isp_lower" == *"china telecom global"* ]] && isp="中国电信国际"
+                            [[ "$isp_lower" == *"ctgnet"* || "$isp_lower" == *"china telecom global"* ]] && isp="中国电信（国际）"
                             # 移动海外 (CMI = China Mobile International)
-                            [[ "$isp" == *"移动"*"CMI"* || "$isp" == *"移动 CMI"* || "$isp_lower" == *"cmi.chinamobile"* || "$isp_lower" == *"cmi-int"* || ( "$isp_lower" == *"cmi"* && "$isp_lower" == *"mobile"* ) ]] && isp="中国移动国际"
+                            [[ "$isp" == *"移动"*"CMI"* || "$isp" == *"移动 CMI"* || "$isp_lower" == *"cmi.chinamobile"* || "$isp_lower" == *"cmi-int"* || ( "$isp_lower" == *"cmi"* && "$isp_lower" == *"mobile"* ) ]] && isp="中国移动（国际）"
                             
                             # === 2. 港澳运营商 ===
                             [[ "$isp" == *"电讯盈科"* || "$isp_lower" == *"pccw"* ]] && isp="PCCW"
-                            [[ "$isp" == *"和记"* || "$isp_lower" == *"hgc"* ]] && isp="HGC"
+                            [[ "$isp" == *"和记"* || "$isp_lower" == *"hgc"* || "$isp_lower" == *"hutchison"* ]] && isp="HGC"
+                            # 中国移动香港变体
+                            [[ "$isp" == *"中国移动"*"香港"* || "$isp" == *"中国移动（香港）"* ]] && isp="中国移动（香港）"
+                            [[ "$isp_lower" == *"cmi"* && "$isp_lower" == *"hong kong"* ]] && isp="中国移动（香港）"
                             
                             # === 3. 中国三大运营商（国内，通配符匹配）===
                             [[ "$isp" == *"联通"* || "$isp_lower" == *"unicom"* || "$isp_lower" == *"bbn.com.cn"* || "$isp_lower" == *"cuii"* ]] && [[ "$isp" != *"中国联通"* ]] && isp="中国联通"
                             [[ "$isp" == *"电信"* || "$isp_lower" == *"chinatelecom"* || "$isp_lower" == *"189.cn"* || "$isp_lower" == *"cn2"* || ( "$isp_lower" == *"telecom"* && "$isp_lower" == *"china"* ) ]] && [[ "$isp" != *"中国电信"* ]] && isp="中国电信"
                             [[ "$isp" == *"移动"* || "$isp_lower" == *"chinamobile"* || "$isp_lower" == *"10086"* || ( "$isp_lower" == *"mobile"* && "$isp_lower" == *"china"* ) ]] && [[ "$isp" != *"中国移动"* ]] && isp="中国移动"
                             [[ "$isp" == *"地面通"* ]] && isp="中国电信"
+                            # 清理中国运营商特殊后缀
+                            [[ "$isp" == "中国电信/骨干网" ]] && isp="中国电信"
+                            [[ "$isp" == "中国电信/CN2" ]] && isp="中国电信/CN2"
+                            [[ "$isp" == "中国联通/骨干网" ]] && isp="中国联通"
+                            # 中国移动国际统一格式
+                            [[ "$isp" == "中国移动国际" ]] && isp="中国移动（国际）"
                             
                             # === 4. 国际运营商 ===
                             [[ "$isp_lower" == *"lumen"* || "$isp_lower" == *"level 3"* || "$isp" == *"世纪互联"* || "$isp" == *"流明"* ]] && isp="Lumen"
@@ -1582,7 +1659,14 @@ run_trace_test() {
                             [[ "$isp_lower" == *"cloudflare"* ]] && isp="Cloudflare"
                             [[ "$isp_lower" == *"telegram"* ]] && isp="Telegram"
                             [[ "$isp_lower" == *"netflix"* ]] && isp="Netflix"
+                            # Vultr / Constant.com
+                            [[ "$isp_lower" == *"vultr"* || "$isp_lower" == *"constant.com"* || "$isp_lower" == *"as-vultr"* ]] && isp="Vultr"
+                            # Servers.com
                             [[ "$isp_lower" == *"servers.com"* ]] && isp="Servers.com"
+                            # Workonline (南非)
+                            [[ "$isp_lower" == *"workonline"* ]] && isp="Workonline"
+                            # VERIO (被 NTT 收购)
+                            [[ "$isp_lower" == *"verio"* ]] && isp="NTT"
                             [[ "$isp_lower" == *"sg.gs"* ]] && isp="SG.GS"
                             [[ "$isp" == *"阿里云"* || "$isp_lower" == *"alibaba"* || "$isp_lower" == *"aliyun"* ]] && isp="阿里云"
                             [[ "$isp" == *"腾讯"* || "$isp_lower" == *"tencent"* ]] && isp="腾讯云"
@@ -1607,7 +1691,7 @@ run_trace_test() {
                             [[ "$isp_lower" == *"oracle"* ]] && isp="Oracle"
                             [[ "$isp_lower" == *"microsoft"* || "$isp_lower" == *"azure"* ]] && isp="Azure"
                             [[ "$isp_lower" == *"ibm"* || "$isp_lower" == *"softlayer"* ]] && isp="IBM Cloud"
-                            [[ "$isp_lower" == *"verizon"* ]] && isp="Verizon"
+                            [[ "$isp_lower" == *"verizon"* || "$isp_lower" == *"ans communications"* || "$isp_lower" == *"mci"* || "$isp" == *"威瑞森"* || "$isp" == *"MCI通信"* ]] && isp="Verizon"
                             [[ "$isp_lower" == *"att"* || "$isp_lower" == *"at&t"* ]] && isp="AT&T"
                             [[ "$isp_lower" == *"comcast"* ]] && isp="Comcast"
                             [[ "$isp_lower" == *"centurylink"* ]] && isp="CenturyLink"
@@ -1618,8 +1702,9 @@ run_trace_test() {
                             [[ "$isp_lower" == *"telstra"* ]] && isp="Telstra"
                             [[ "$isp_lower" == *"optus"* ]] && isp="Optus"
                             [[ "$isp_lower" == *"vodafone"* ]] && isp="Vodafone"
-                            [[ "$isp_lower" == *"deutsche telekom"* || "$isp_lower" == *"dtag"* ]] && isp="DTAG"
+                            [[ "$isp_lower" == *"deutsche telekom"* || "$isp_lower" == *"dtag"* || "$isp_lower" == *"wholesale.telekom"* ]] && isp="DTAG"
                             [[ "$isp_lower" == *"british telecom"* || "$isp_lower" == *"bt.net"* ]] && isp="BT"
+                            [[ "$isp_lower" == *"internet utilities"* ]] && isp="Internet Utilities"
                             [[ "$isp_lower" == *"telefonica"* || "$isp_lower" == *"movistar"* ]] && isp="Telefonica"
                             [[ "$isp_lower" == *"cht"* || "$isp" == *"中华电信"* || "$isp_lower" == *"hinet"* ]] && isp="中华电信"
                             [[ "$isp_lower" == *"taiwan mobile"* || "$isp" == *"台湾大哥大"* ]] && isp="台湾大哥大"
@@ -1697,6 +1782,19 @@ run_trace_test() {
                             [[ "$isp_lower" == *"greencloud"* ]] && isp="GreenCloud"
                             [[ "$isp_lower" == *"dmit"* ]] && isp="DMIT"
                             [[ "$isp_lower" == *"hostdare"* ]] && isp="HostDare"
+                            # 其他常见托管商
+                            [[ "$isp_lower" == *"b2 net solutions"* || "$isp_lower" == *"servermania"* ]] && isp="ServerMania"
+                            [[ "$isp_lower" == *"multacom"* ]] && isp="Multacom"
+                            [[ "$isp_lower" == *"cnservers"* ]] && isp="CNServers"
+                            [[ "$isp_lower" == *"terrahost"* ]] && isp="Terrahost"
+                            [[ "$isp_lower" == *"hosteons"* ]] && isp="Hosteons"
+                            [[ "$isp_lower" == *"cloudcone"* ]] && isp="CloudCone"
+                            [[ "$isp_lower" == *"virtono"* ]] && isp="Virtono"
+                            [[ "$isp_lower" == *"crowncloud"* ]] && isp="CrownCloud"
+                            [[ "$isp_lower" == *"ssdnodes"* ]] && isp="SSD Nodes"
+                            [[ "$isp_lower" == *"webtropia"* || "$isp_lower" == *"netcup"* ]] && isp="Netcup"
+                            [[ "$isp_lower" == *"melbicom"* ]] && isp="Melbicom"
+                            [[ "$isp_lower" == *"frantech"* || "$isp_lower" == *"buyvm"* ]] && isp="BuyVM"
                             
                             # RTT格式：有值时追加ms，无值时显示"-"
                             if [ "$rtt" != "-" ] && [ -n "$rtt" ]; then
@@ -1739,12 +1837,14 @@ main() {
     clear
     
     # 提示用户可选参数
-    echo -e "💡 提示: 使用 -h 仅硬件，-n 仅网络，-nt 仅路由追踪，-ip 仅IP质量检测"
+    echo -e "💡 提示: 使用 -h 仅硬件，-n 仅网络，-nt 仅路由追踪，-ip 仅 IPv4 质量检测"
     
     # 致谢
-    echo -e "✨ 感谢 JamChoi 提供的源代码，由 aoaim 和 Gemini 3.0 Pro 进行改写"
+    echo -e "✨ 感谢 JamChoi 提供的 Python 源码"
+    echo -e "🛠️ 由 aoaim 驾驶着 Claude Opus 4.5 进行改写和扩展"
     echo -e "💖 本项目依赖 NextTrace (www.nxtrace.org)"
-    echo -e "💖 IP 质量检测部分参考项目 xykt/IPQuality"
+    echo -e "📊 IP 信息来源于 ipapi.co，ipapi.is 和 ippure.com"
+    echo -e "🧹 测试结束时自动清理，干干净净"
     
     # Initialize Report
     init_report
