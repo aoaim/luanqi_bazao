@@ -591,7 +591,7 @@ collect_ip_quality() {
         local company_type_remark=""
         case "$ipapi_company_type" in
             "hosting") company_type_remark="机房/托管" ;;
-            "isp") company_type_remark="家庭宽带" ;;
+            "isp") company_type_remark="运营商/宽带" ;;
             "business") company_type_remark="商业机构" ;;
             "education") company_type_remark="教育机构" ;;
             "government") company_type_remark="政府机构" ;;
