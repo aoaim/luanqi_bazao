@@ -578,10 +578,8 @@ collect_ip_quality() {
     
     # === 生成报告 ===
     {
-        echo "## IP 质量分析"
+        echo "## IPv4 质量分析"
         echo ""
-        echo "> IPv4 only，结果仅供参考 "
-        echo "> "
         echo "| 检测项目 | 检测结果 | 备注 | 数据来源 |"
         echo "| :--- | :--- | :--- | :--- |"
         # 风险评分
@@ -660,8 +658,10 @@ collect_ip_quality() {
             summary="正常 IP"
         fi
         
-        echo "| **综合评价** | $summary_icon **$summary** | 仅供参考 | 自动生成 |"
         echo ""
+        echo "**质量评价**（由机器生成，仅供参考）：$summary_icon $summary"
+        echo ""
+
     } >> "$REPORT_FILE"
     
     info "  └─ IP 质量检测完成"
