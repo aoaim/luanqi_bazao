@@ -43,6 +43,7 @@ RUN_NET_INFO=true
 RUN_IPERF=true
 RUN_TRACE=true
 RUN_IP_QUALITY=true
+RUN_STREAM=true
 
 # 报告名称前缀 (根据参数动态设置)
 REPORT_PREFIX="report"
@@ -57,6 +58,7 @@ for arg in "$@"; do
             RUN_IPERF=true
             RUN_TRACE=true
             RUN_IP_QUALITY=true
+            RUN_STREAM=true
             REPORT_PREFIX="network"
             shift
             ;;
@@ -67,6 +69,7 @@ for arg in "$@"; do
             RUN_IPERF=false
             RUN_TRACE=false
             RUN_IP_QUALITY=false
+            RUN_STREAM=false
             REPORT_PREFIX="hardware"
             shift
             ;;
@@ -77,6 +80,7 @@ for arg in "$@"; do
             RUN_IPERF=false
             RUN_TRACE=true
             RUN_IP_QUALITY=false
+            RUN_STREAM=false
             REPORT_PREFIX="nexttrace"
             shift
             ;;
@@ -87,7 +91,19 @@ for arg in "$@"; do
             RUN_IPERF=false
             RUN_TRACE=false
             RUN_IP_QUALITY=true
+            RUN_STREAM=false
             REPORT_PREFIX="ipquality"
+            shift
+            ;;
+        --stream|-s)
+            RUN_CPU=false
+            RUN_DISK=false
+            RUN_NET_INFO=true
+            RUN_IPERF=false
+            RUN_TRACE=false
+            RUN_IP_QUALITY=false
+            RUN_STREAM=true
+            REPORT_PREFIX="stream"
             shift
             ;;
     esac
@@ -928,6 +944,195 @@ run_iperf_test() {
     echo "" >> "$REPORT_FILE"
     info "  └─ 带宽测试完成"
 
+}
+
+# =========================
+# 流媒体解锁测试
+# =========================
+run_stream_test() {
+    log "开始流媒体解锁测试..."
+    
+    # 检查网络可用性
+    if [ "$HAS_V4" != "true" ] && [ "$HAS_V6" != "true" ]; then
+        warn "  └─ 无可用网络，跳过流媒体测试"
+        return
+    fi
+    
+    # 从之前收集的网络信息中提取国家代码
+    local country_code=""
+    if [ "$HAS_V4" = "true" ] && [ -n "$NET_V4_LOC" ]; then
+        country_code=$(echo "$NET_V4_LOC" | awk -F', ' '{print $NF}' | xargs)
+    elif [ "$HAS_V6" = "true" ] && [ -n "$NET_V6_LOC" ]; then
+        country_code=$(echo "$NET_V6_LOC" | awk -F', ' '{print $NF}' | xargs)
+    fi
+    
+    # RegionRestrictionCheck 的区域 ID 定义:
+    # 0=只进行跨国平台检测
+    # 1=跨国平台+台湾平台，2=跨国平台+香港平台，3=跨国平台+日本平台
+    # 4=跨国平台+北美平台，5=跨国平台+南美平台，6=跨国平台+欧洲平台
+    # 7=跨国平台+大洋洲平台，8=跨国平台+韩国平台，9=跨国平台+东南亚平台
+    # 10=跨国平台+印度平台，11=跨国平台+非洲平台
+    
+    local region_id="0"  # 默认仅跨国平台
+    local region_name="仅跨国平台"
+    local detected_region_id=""
+    local detected_region_name=""
+    
+    # 根据国家代码映射到测试区域
+    case "$country_code" in
+        # 台湾
+        TW) detected_region_id="1"; detected_region_name="跨国平台+台湾平台" ;;
+        # 香港
+        HK) detected_region_id="2"; detected_region_name="跨国平台+香港平台" ;;
+        # 日本
+        JP) detected_region_id="3"; detected_region_name="跨国平台+日本平台" ;;
+        # 北美 (美国、加拿大、墨西哥)
+        US|CA|MX) detected_region_id="4"; detected_region_name="跨国平台+北美平台" ;;
+        # 南美
+        BR|AR|CL|CO|PE|VE|EC|BO|UY|PY|GY|SR) detected_region_id="5"; detected_region_name="跨国平台+南美平台" ;;
+        # 欧洲
+        GB|DE|FR|IT|ES|NL|BE|AT|CH|PL|CZ|PT|SE|NO|DK|FI|IE|RO|HU|GR|RU|UA|BY) detected_region_id="6"; detected_region_name="跨国平台+欧洲平台" ;;
+        # 大洋洲 (澳大利亚、新西兰等)
+        AU|NZ|FJ|PG|NC|PF) detected_region_id="7"; detected_region_name="跨国平台+大洋洲平台" ;;
+        # 韩国
+        KR) detected_region_id="8"; detected_region_name="跨国平台+韩国平台" ;;
+        # 东南亚
+        SG|MY|TH|VN|ID|PH|MM|KH|LA|BN) detected_region_id="9"; detected_region_name="跨国平台+东南亚平台" ;;
+        # 印度
+        IN) detected_region_id="10"; detected_region_name="跨国平台+印度平台" ;;
+        # 非洲
+        ZA|EG|NG|KE|MA|TN|GH|TZ|UG|ZW|ET) detected_region_id="11"; detected_region_name="跨国平台+非洲平台" ;;
+        # 中东 -> 归类到跨国平台
+        AE|SA|IL|TR|IR|IQ|KW|QA|BH|OM|JO|LB) detected_region_id=""; detected_region_name="" ;;
+        # 中国大陆 -> 归类到跨国平台
+        CN) detected_region_id=""; detected_region_name="" ;;
+        # 其他/未知
+        *) detected_region_id=""; detected_region_name="" ;;
+    esac
+    
+    echo ""
+    echo "  ├─ 检测到服务器位置: ${country_code:-未知}"
+    
+    # 如果检测到了对应的地区，询问用户选择
+    if [ -n "$detected_region_id" ]; then
+        echo "  ├─ 匹配测试区域: $detected_region_name (ID: $detected_region_id)"
+        echo ""
+        echo -e "  ${YELLOW}请选择测试模式:${NC}"
+        echo "  [1] $detected_region_name"
+        echo "  [0] 仅跨国平台检测"
+        echo ""
+        echo -n "  请输入选项 (默认: 1，当前地区): "
+        read -r user_choice </dev/tty 2>/dev/null || user_choice="1"
+        
+        case "$user_choice" in
+            0)
+                region_id="0"
+                region_name="仅跨国平台"
+                ;;
+            *)
+                region_id="$detected_region_id"
+                region_name="$detected_region_name"
+                ;;
+        esac
+    else
+        echo "  ├─ 未匹配到特定区域，将执行仅跨国平台检测"
+        region_id="0"
+        region_name="仅跨国平台"
+    fi
+    
+    echo ""
+    echo "  ├─ 选择测试区域: $region_name (ID: $region_id)"
+    
+    # 调用外部流媒体测试脚本
+    # -R: 指定测试区域
+    # -M 4: 仅使用 IPv4 (如果有)
+    # -M 6: 仅使用 IPv6 (如果有)
+    # -M 0: 同时测试 IPv4 和 IPv6
+    local net_mode="0"  # 默认同时测试
+    [ "$HAS_V4" != "true" ] && net_mode="6"
+    [ "$HAS_V6" != "true" ] && net_mode="4"
+    
+    # 下载并执行流媒体测试脚本，捕获输出
+    # 使用 script 命令来捕获完整输出（避免 clear 命令的影响）
+    local stream_output=""
+    local stream_script_url="https://raw.githubusercontent.com/lmc999/RegionRestrictionCheck/refs/heads/main/check.sh"
+    local stream_tmp_file="$TMP_DIR/stream_output.txt"
+    
+    # 下载脚本到临时文件
+    echo -n "  ├─ 正在下载测试脚本..."
+    local stream_script_file="$TMP_DIR/check_stream.sh"
+    if ! curl -sL "$stream_script_url" -o "$stream_script_file" 2>/dev/null; then
+        echo -e " ${RED}失败${NC}"
+        warn "  └─ 流媒体测试失败：无法下载测试脚本"
+        return
+    fi
+    echo -e " ${GREEN}完成${NC}"
+    chmod +x "$stream_script_file"
+    
+    # 启动后台进度指示器
+    echo -n "  ├─ 正在执行流媒体测试 "
+    local spinner_chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local spinner_pid=""
+    (
+        local i=0
+        local start_time=$(date +%s)
+        while true; do
+            local elapsed=$(($(date +%s) - start_time))
+            local mins=$((elapsed / 60))
+            local secs=$((elapsed % 60))
+            printf "\r  ├─ 正在执行流媒体测试 ${spinner_chars:i++%10:1} [%02d:%02d]" "$mins" "$secs"
+            sleep 0.2
+        done
+    ) &
+    spinner_pid=$!
+    
+    # 使用 script 命令捕获完整输出（包括被 clear 清除的内容）
+    # -q: 静默模式，-c: 执行命令
+    TERM=dumb script -q -c "bash '$stream_script_file' -R '$region_id' -M '$net_mode'" "$stream_tmp_file" >/dev/null 2>&1
+    
+    # 停止进度指示器
+    kill $spinner_pid 2>/dev/null
+    wait $spinner_pid 2>/dev/null
+    
+    if [ -f "$stream_tmp_file" ]; then
+        stream_output=$(cat "$stream_tmp_file")
+        rm -f "$stream_tmp_file" "$stream_script_file"
+    fi
+    
+    if [ -z "$stream_output" ]; then
+        echo -e "\r  ├─ 正在执行流媒体测试 ${RED}失败${NC}              "
+        warn "  └─ 流媒体测试失败：无法获取测试结果"
+        return
+    fi
+    
+    echo -e "\r  ├─ 流媒体测试执行完成 ${GREEN}✓${NC}              "
+    
+    # === Streaming Report ===
+    {
+        echo "## 流媒体解锁测试"
+        echo ""
+        echo "测试区域: **$region_name**"
+        echo ""
+        echo '```'
+        # 清理输出：
+        # 1. 移除 ANSI 颜色代码和控制字符
+        # 2. 只保留：区域标题行(===)、分隔线(---)、测试结果行(含Tab的行)
+        echo "$stream_output" | \
+            sed 's/\x1b\[[0-9;]*m//g' | \
+            sed 's/\x1b\[H\x1b\[2J//g' | \
+            sed 's/\x1b\[?25[hl]//g' | \
+            tr -d '\r' | \
+            awk '
+                /^=+\[.*\]=+$/ { if (NR > 1) print ""; print; next }
+                /^-+[A-Za-z]+-+$/ { print; next }
+                /\t/ && /:/ && !/脚本适配/ && !/您的网络/ && !/测试时间/ && !/版本/ && !/运行次数/ && !/t\.me/ && !/github/ && !/网站/ && !/详情/ { print; next }
+            ' | \
+            sed 's/^[ \t]*//'
+        echo '```'
+        echo ""
+    } >> "$REPORT_FILE"
+    
+    info "  └─ 流媒体测试结果已写入报告"
 }
 
 # =========================
@@ -1843,12 +2048,13 @@ main() {
     clear
     
     # 提示用户可选参数
-    echo -e "💡 提示: 使用 -h 仅硬件，-n 仅网络，-nt 仅路由追踪，-ip 仅 IPv4 质量检测"
+    echo -e "💡 提示: 使用 -h 仅硬件，-n 仅网络，-nt 仅路由追踪，-ip 仅 IPv4 质量检测，-s 仅流媒体测试"
     
     # 致谢
     echo -e "✨ 感谢 JamChoi 提供的 Python 源码"
     echo -e "🛠️ 由我驾驶着 Claude Opus 4.5 进行改写和扩展"
     echo -e "💖 本项目依赖 NextTrace (www.nxtrace.org)"
+    echo -e "🎬 使用 lmc999/RegionRestrictionCheck 项目进行流媒体测试"
     echo -e "📊 IP 信息来源于 ipapi.co，ipapi.is 和 ippure.com"
     echo -e "🧹 测试结束时自动清理，干干净净"
     
@@ -1886,6 +2092,11 @@ main() {
     # 网络性能测试
     if [ "$RUN_IPERF" = "true" ]; then
         run_iperf_test
+    fi
+    
+    # 流媒体解锁测试 (在“国内节点”之后)
+    if [ "$RUN_STREAM" = "true" ] && [ "$RUN_NET_INFO" = "true" ]; then
+        run_stream_test
     fi
     
     if [ "$RUN_TRACE" = "true" ]; then
