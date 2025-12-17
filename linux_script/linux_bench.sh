@@ -44,6 +44,7 @@ RUN_IPERF=true
 RUN_TRACE=true
 RUN_IP_QUALITY=true
 RUN_STREAM=true
+RUN_CDN=false
 
 # 报告名称前缀 (根据参数动态设置)
 REPORT_PREFIX="report"
@@ -73,7 +74,7 @@ for arg in "$@"; do
             REPORT_PREFIX="hardware"
             shift
             ;;
-        --nexttrace|-nt)
+        --nexttrace|-t)
             RUN_CPU=false
             RUN_DISK=false
             RUN_NET_INFO=true
@@ -84,7 +85,7 @@ for arg in "$@"; do
             REPORT_PREFIX="nexttrace"
             shift
             ;;
-        --ip-quality|-ip)
+        --ip-quality|-i)
             RUN_CPU=false
             RUN_DISK=false
             RUN_NET_INFO=true
@@ -104,6 +105,18 @@ for arg in "$@"; do
             RUN_IP_QUALITY=false
             RUN_STREAM=true
             REPORT_PREFIX="stream"
+            shift
+            ;;
+        --cdn|-c)
+            RUN_CPU=false
+            RUN_DISK=false
+            RUN_NET_INFO=true
+            RUN_IPERF=false
+            RUN_TRACE=false
+            RUN_IP_QUALITY=false
+            RUN_STREAM=false
+            RUN_CDN=true
+            REPORT_PREFIX="cdn"
             shift
             ;;
     esac
@@ -2072,6 +2085,11 @@ run_trace_test() {
                         # === Streaming Report (Trace Item) ===
                         {
                             echo "### $name ($mode)"
+                            # 如果是动态 CDN 目标，显示解析到的域名
+                            if [[ "$name" == *"Dynamic"* ]]; then
+                                echo "> CDN 节点: \`$target\`"
+                                echo ""
+                            fi
                             echo -e "$table"
                             echo ""
                         } >> "$REPORT_FILE"
@@ -2088,6 +2106,83 @@ run_trace_test() {
     info "  └─ 路由追踪完成"
 }
 
+run_cdn_test() {
+    log "开始 CDN 节点测试..."
+    
+    # YouTube CDN
+    echo "  ├─ 获取 YouTube CDN 节点..."
+    local yt_v4="" yt_v6=""
+    if [ "$YTDLP_BIN" != "false" ] && [ -x "$YTDLP_BIN" ]; then
+        if [ "$HAS_V4" = "true" ]; then
+            yt_v4=$("$YTDLP_BIN" --no-warnings -g -4 "https://www.youtube.com/watch?v=G5RpJwCJDqc" 2>/dev/null | head -n1 | awk -F/ '{print $3}')
+            if [ -n "$yt_v4" ]; then
+                local yt_v4_ip=$(dig +short "$yt_v4" A 2>/dev/null | head -n1)
+                echo "  │  ├─ IPv4: $yt_v4"
+                echo "  │  │     IP: ${yt_v4_ip:-无法解析}"
+            else
+                echo "  │  ├─ IPv4: 获取失败"
+            fi
+        fi
+        if [ "$HAS_V6" = "true" ]; then
+            yt_v6=$("$YTDLP_BIN" --no-warnings -g -6 "https://www.youtube.com/watch?v=G5RpJwCJDqc" 2>/dev/null | head -n1 | awk -F/ '{print $3}')
+            if [ -n "$yt_v6" ]; then
+                local yt_v6_ip=$(dig +short "$yt_v6" AAAA 2>/dev/null | head -n1)
+                echo "  │  └─ IPv6: $yt_v6"
+                echo "  │        IP: ${yt_v6_ip:-无法解析}"
+            else
+                echo "  │  └─ IPv6: 获取失败"
+            fi
+        fi
+    else
+        echo "  │  └─ yt-dlp 不可用，跳过 YouTube CDN"
+    fi
+    
+    # Netflix CDN
+    echo "  ├─ 获取 Netflix CDN 节点..."
+    local nf_api="https://api.fast.com/netflix/speedtest/v2?https=true&token=YXNkZmFzZGxmbnNkYWZoYXNkZmhrYWxm&urlCount=5"
+    local nf_v4="" nf_v6=""
+    if [ "$HAS_V4" = "true" ]; then
+        nf_v4=$(curl -s -4 "$nf_api" 2>/dev/null | jq -r '.targets[]|select(.url|contains("ipv4"))|.url' 2>/dev/null | head -n1 | awk -F/ '{print $3}')
+        if [ -n "$nf_v4" ]; then
+            local nf_v4_ip=$(dig +short "$nf_v4" A 2>/dev/null | head -n1)
+            echo "  │  ├─ IPv4: $nf_v4"
+            echo "  │  │     IP: ${nf_v4_ip:-无法解析}"
+        else
+            echo "  │  ├─ IPv4: 获取失败"
+        fi
+    fi
+    if [ "$HAS_V6" = "true" ]; then
+        nf_v6=$(curl -s -6 "$nf_api" 2>/dev/null | jq -r '.targets[]|select(.url|contains("ipv6"))|.url' 2>/dev/null | head -n1 | awk -F/ '{print $3}')
+        if [ -n "$nf_v6" ]; then
+            local nf_v6_ip=$(dig +short "$nf_v6" AAAA 2>/dev/null | head -n1)
+            echo "  │  └─ IPv6: $nf_v6"
+            echo "  │        IP: ${nf_v6_ip:-无法解析}"
+        else
+            echo "  │  └─ IPv6: 获取失败"
+        fi
+    fi
+    
+    # 写入报告
+    {
+        echo "## CDN 节点测试"
+        echo ""
+        echo "### YouTube CDN"
+        echo "| 协议 | CDN 节点 | IP 地址 |"
+        echo "|:---|:---|:---|"
+        [ -n "$yt_v4" ] && echo "| IPv4 | $yt_v4 | $(dig +short "$yt_v4" A 2>/dev/null | head -n1) |" || echo "| IPv4 | - | - |"
+        [ -n "$yt_v6" ] && echo "| IPv6 | $yt_v6 | $(dig +short "$yt_v6" AAAA 2>/dev/null | head -n1) |" || echo "| IPv6 | - | - |"
+        echo ""
+        echo "### Netflix CDN"
+        echo "| 协议 | CDN 节点 | IP 地址 |"
+        echo "|:---|:---|:---|"
+        [ -n "$nf_v4" ] && echo "| IPv4 | $nf_v4 | $(dig +short "$nf_v4" A 2>/dev/null | head -n1) |" || echo "| IPv4 | - | - |"
+        [ -n "$nf_v6" ] && echo "| IPv6 | $nf_v6 | $(dig +short "$nf_v6" AAAA 2>/dev/null | head -n1) |" || echo "| IPv6 | - | - |"
+        echo ""
+    } >> "$REPORT_FILE"
+    
+    info "  └─ CDN 节点测试完成"
+}
+
 init_report() {
     > "$REPORT_FILE"
     echo "# Bench Report" >> "$REPORT_FILE"
@@ -2099,7 +2194,7 @@ main() {
     clear
     
     # 提示用户可选参数
-    echo -e "💡 提示: 使用 -h 仅硬件，-n 仅网络，-nt 仅路由追踪，-ip 仅 IPv4 质量检测，-s 仅流媒体测试"
+    echo -e "💡 提示: 使用 -h 仅硬件，-n 仅网络，-t 仅路由追踪，-i 仅 IPv4 质量检测，-s 仅流媒体测试，-c 仅 Netflix 和 YouTube 的 CDN 节点"
     
     # 致谢
     echo -e "✨ 感谢 JamChoi 提供的 Python 源码"
@@ -2153,6 +2248,11 @@ main() {
     # 路由追踪测试
     if [ "$RUN_TRACE" = "true" ]; then
         run_trace_test
+    fi
+    
+    # CDN 节点测试
+    if [ "$RUN_CDN" = "true" ]; then
+        run_cdn_test
     fi
     
     info "测试完成! 报告已保存至 $REPORT_FILE"
