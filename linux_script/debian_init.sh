@@ -275,6 +275,15 @@ fetch_ipinfo() {
 
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 
+# Remove apt-installed package if exists (to install newer version from GitHub)
+remove_apt_pkg() {
+    local pkg="$1"
+    if dpkg -l "$pkg" 2>/dev/null | grep -q "^ii"; then
+        print_info "Removing apt-installed $pkg (will install newer version from GitHub)..."
+        apt-get remove -y -qq "$pkg" 2>/dev/null || true
+    fi
+}
+
 get_eza_version() {
     local out ver
     out=$(eza --version 2>/dev/null | head -n2)
@@ -453,7 +462,7 @@ detect_updates_hint() {
     fi
 
     if command_exists tldr; then
-        latest=$(curl -s --max-time 10 https://api.github.com/repos/dbrgn/tealdeer/releases/latest 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"tag_name": "v?([^"]+)".*/\1/' || true)
+        latest=$(curl -sL --max-time 10 https://api.github.com/repos/tldr-pages/tlrc/releases/latest 2>/dev/null | grep '\"tag_name\":' | sed -E 's/.*\"tag_name\": \"v?([^\"]+)\".*/\1/' || true)
         current=$(get_tldr_version)
         [ -n "$latest" ] && [ -n "$current" ] && [ "$latest" != "$current" ] && TLDR_UPDATE="$current → $latest"
     fi
@@ -599,14 +608,14 @@ confirm_proceed() {
     print_banner "${ICON_DOC} Planned actions"
     if [ "$MODE_LITE" -eq 1 ]; then
         echo -e " ${BLUE}1)${RESET} Update/upgrade/autoremove"
-        echo -e " ${BLUE}2)${RESET} Modern CLI tools (eza, helix, bat, btop, duf, fd, procs, tldr, zoxide, gping, speedtest)"
+        echo -e " ${BLUE}2)${RESET} Modern CLI tools"
         echo -e " ${BLUE}3)${RESET} unattended-upgrades: configure"
         echo -e " ${BLUE}4)${RESET} Docker + Nexttrace: install prompts"
         echo -e " ${BLUE}5)${RESET} zram swap: configure or adjust"
         echo -e " ${BLUE}6)${RESET} IP forwarding / IPv6: configure"
     else
         echo -e " ${BLUE}1)${RESET} Update/upgrade/autoremove"
-        echo -e " ${BLUE}2)${RESET} Modern CLI tools (eza, helix, bat, btop, duf, fd, procs, tldr, zoxide, gping, speedtest)"
+        echo -e " ${BLUE}2)${RESET} Modern CLI tools"
         echo -e " ${BLUE}3)${RESET} Docker + Nexttrace: install prompts"
         echo -e " ${BLUE}4)${RESET} Base packages (chrony, fail2ban, vnstat, etc.)"
         echo -e " ${BLUE}5)${RESET} Time sync/timezone; zram swap"
@@ -767,6 +776,8 @@ install_bat() {
         print_warning "IPv6-only detected: skipping Bat (GitHub download required)."
         return
     fi
+    # Remove apt version if exists
+    remove_apt_pkg bat
     if command_exists bat; then
         print_info "Bat already installed, skipping."
         return
@@ -795,6 +806,8 @@ install_btop() {
         print_warning "IPv6-only detected: skipping Btop (GitHub download required)."
         return
     fi
+    # Remove apt version if exists
+    remove_apt_pkg btop
     if command_exists btop; then
         print_info "Btop already installed, skipping."
         return
@@ -838,6 +851,8 @@ install_fd() {
         print_warning "IPv6-only detected: skipping Fd (GitHub download required)."
         return
     fi
+    # Remove apt version if exists
+    remove_apt_pkg fd-find
     if command_exists fd; then
         print_info "Fd already installed, skipping."
         return
@@ -909,18 +924,24 @@ install_tldr() {
         print_info "Tldr already installed, skipping."
         return
     fi
-    print_info "Installing Tldr (tealdeer)..."
-    # Get latest tealdeer binary
-    url=$(curl -s --max-time 10 https://api.github.com/repos/dbrgn/tealdeer/releases/latest 2>/dev/null | grep -m1 '"browser_download_url".*tealdeer-linux-x86_64-musl"' | cut -d'"' -f4 || true)
+    print_info "Installing Tldr (tlrc)..."
+    # Get latest release tarball from tldr-pages/tlrc
+    url=$(curl -sL --max-time 10 https://api.github.com/repos/tldr-pages/tlrc/releases/latest 2>/dev/null | grep -m1 '"browser_download_url".*x86_64-unknown-linux-musl\.tar\.gz"' | cut -d'"' -f4 || true)
     if [ -z "$url" ]; then print_error "Failed to fetch Tldr release"; return; fi
-    wget -q "$url" -O /tmp/tldr
-    if [ -s /tmp/tldr ]; then
-        install -m 755 /tmp/tldr /usr/local/bin/tldr
-        print_success "Tldr installed (use: tldr <command>)"
+    wget -q "$url" -O /tmp/tlrc.tar.gz
+    tmpdir=$(mktemp -d)
+    if tar -xzf /tmp/tlrc.tar.gz -C "$tmpdir" 2>/dev/null; then
+        binpath=$(find "$tmpdir" -type f -name tldr -executable -print -quit 2>/dev/null || true)
+        if [ -n "$binpath" ]; then
+            install -m 755 "$binpath" /usr/local/bin/tldr
+            print_success "Tldr installed (use: tldr <command>)"
+        else
+            print_error "Tldr binary not found in archive"
+        fi
     else
-        print_error "Failed to download Tldr"
+        print_error "Failed to extract Tldr archive"
     fi
-    rm -f /tmp/tldr
+    rm -rf "$tmpdir" /tmp/tlrc.tar.gz
 }
 
 install_zoxide() {
@@ -971,8 +992,8 @@ install_gping() {
         return
     fi
     print_info "Installing Gping..."
-    # Get latest release tarball
-    url=$(curl -s --max-time 10 https://api.github.com/repos/orf/gping/releases/latest 2>/dev/null | grep -m1 '"browser_download_url".*gping-x86_64-unknown-linux-musl\.tar\.gz"' | cut -d'"' -f4 || true)
+    # Get latest release tarball - correct filename pattern: gping-Linux-musl-x86_64.tar.gz
+    url=$(curl -s --max-time 10 https://api.github.com/repos/orf/gping/releases/latest 2>/dev/null | grep -m1 '"browser_download_url".*gping-Linux-musl-x86_64\.tar\.gz"' | cut -d'"' -f4 || true)
     if [ -z "$url" ]; then print_error "Failed to fetch Gping release"; return; fi
     wget -q "$url" -O /tmp/gping.tar.gz
     tmpdir=$(mktemp -d)
