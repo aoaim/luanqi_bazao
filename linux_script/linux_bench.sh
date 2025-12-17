@@ -44,7 +44,7 @@ RUN_IPERF=true
 RUN_TRACE=true
 RUN_IP_QUALITY=true
 RUN_STREAM=true
-RUN_CDN=false
+RUN_PUBLIC=false
 
 # 报告名称前缀 (根据参数动态设置)
 REPORT_PREFIX="report"
@@ -107,7 +107,7 @@ for arg in "$@"; do
             REPORT_PREFIX="stream"
             shift
             ;;
-        --cdn|-c)
+        --public|-p)
             RUN_CPU=false
             RUN_DISK=false
             RUN_NET_INFO=true
@@ -115,8 +115,8 @@ for arg in "$@"; do
             RUN_TRACE=false
             RUN_IP_QUALITY=false
             RUN_STREAM=false
-            RUN_CDN=true
-            REPORT_PREFIX="cdn"
+            RUN_PUBLIC=true
+            REPORT_PREFIX="public_service"
             shift
             ;;
     esac
@@ -269,7 +269,7 @@ ensure_dependencies() {
     # Ensure TMP_DIR exists for all modes (used by fio, logs, etc)
     mkdir -p "$TMP_DIR"
     
-    if [ "$RUN_TRACE" = "true" ] || [ "$RUN_CDN" = "true" ]; then
+    if [ "$RUN_TRACE" = "true" ] || [ "$RUN_PUBLIC" = "true" ]; then
         local ephemeral_tools=""
         
         if ! check_cmd nexttrace; then
@@ -1619,8 +1619,226 @@ create_ix_map() {
 EOF
 }
 
+# 运营商名称规范化函数
+# 参数: $1 = 原始运营商名称
+# 返回: 规范化后的运营商名称（通过echo）
+normalize_isp_name() {
+    local isp="$1"
+    local isp_lower=$(echo "$isp" | tr '[:upper:]' '[:lower:]')
+    
+    # === 1. 中国运营商海外分支（必须优先匹配）===
+    # 联通海外
+    [[ "$isp" == *"联通"*"香港"* || "$isp" == *"联通（香港）"* || "$isp_lower" == *"unicom"*"hong kong"* ]] && { echo "中国联通（香港）"; return; }
+    [[ "$isp_lower" == *"chinaunicomglobal"* || "$isp_lower" == *"china unicom global"* ]] && { echo "中国联通（国际）"; return; }
+    # 电信海外
+    [[ "$isp_lower" == *"ctgnet"* || "$isp_lower" == *"china telecom global"* ]] && { echo "中国电信（国际）"; return; }
+    # 移动海外 (CMI = China Mobile International)
+    [[ "$isp" == *"移动"*"CMI"* || "$isp" == *"移动 CMI"* || "$isp_lower" == *"cmi.chinamobile"* || "$isp_lower" == *"cmi-int"* || ( "$isp_lower" == *"cmi"* && "$isp_lower" == *"mobile"* ) ]] && { echo "中国移动（国际）"; return; }
+    
+    # === 2. 港澳运营商 ===
+    [[ "$isp" == *"电讯盈科"* || "$isp_lower" == *"pccw"* ]] && { echo "PCCW"; return; }
+    [[ "$isp" == *"和记"* || "$isp_lower" == *"hgc"* || "$isp_lower" == *"hutchison"* ]] && { echo "HGC"; return; }
+    # 中国移动香港变体
+    [[ "$isp" == *"中国移动"*"香港"* || "$isp" == *"中国移动（香港）"* ]] && { echo "中国移动（香港）"; return; }
+    [[ "$isp_lower" == *"cmi"* && "$isp_lower" == *"hong kong"* ]] && { echo "中国移动（香港）"; return; }
+    
+    # === 3. 中国三大运营商（国内，通配符匹配）===
+    [[ "$isp" == *"联通"* || "$isp_lower" == *"unicom"* || "$isp_lower" == *"bbn.com.cn"* || "$isp_lower" == *"cuii"* ]] && [[ "$isp" != *"中国联通"* ]] && { echo "中国联通"; return; }
+    [[ "$isp" == *"电信"* || "$isp_lower" == *"chinatelecom"* || "$isp_lower" == *"189.cn"* || "$isp_lower" == *"cn2"* || ( "$isp_lower" == *"telecom"* && "$isp_lower" == *"china"* ) ]] && [[ "$isp" != *"中国电信"* ]] && { echo "中国电信"; return; }
+    [[ "$isp" == *"移动"* || "$isp_lower" == *"chinamobile"* || "$isp_lower" == *"10086"* || ( "$isp_lower" == *"mobile"* && "$isp_lower" == *"china"* ) ]] && [[ "$isp" != *"中国移动"* ]] && { echo "中国移动"; return; }
+    [[ "$isp" == *"地面通"* ]] && { echo "中国电信"; return; }
+    # 清理中国运营商特殊后缀
+    [[ "$isp" == "中国电信/骨干网" ]] && { echo "中国电信"; return; }
+    [[ "$isp" == "中国电信/CN2" ]] && { echo "中国电信/CN2"; return; }
+    [[ "$isp" == "中国联通/骨干网" ]] && { echo "中国联通"; return; }
+    # 中国移动国际统一格式
+    [[ "$isp" == "中国移动国际" ]] && { echo "中国移动（国际）"; return; }
+    
+    # === 4. 国际运营商 ===
+    [[ "$isp_lower" == *"google"* || "$isp" == *"谷歌"* ]] && { echo "Google"; return; }
+    [[ "$isp_lower" == *"lumen"* || "$isp_lower" == *"level 3"* || "$isp_lower" == *"level3"* || "$isp" == *"世纪互联"* || "$isp" == *"流明"* ]] && { echo "Lumen"; return; }
+    [[ "$isp_lower" == *"cogent"* || "$isp_lower" == *"psinet"* ]] && { echo "Cogent"; return; }
+    [[ "$isp_lower" == *"zayo"* ]] && { echo "Zayo"; return; }
+    [[ "$isp_lower" == *"tinet"* || "$isp_lower" == *"gtt"* ]] && { echo "GTT"; return; }
+    [[ "$isp_lower" == *"arelion"* ]] && { echo "Arelion"; return; }
+    [[ "$isp_lower" == *"telia"* || "$isp" == *"特利亚"* ]] && { echo "Telia"; return; }
+    [[ "$isp_lower" == "provider" ]] && { echo "Telia"; return; }
+    [[ "$isp_lower" == *"sparkle"* || "$isp_lower" == *"sea-bone"* || "$isp_lower" == *"tisparkle"* ]] && { echo "Sparkle"; return; }
+    [[ "$isp_lower" == *"orange"* || "$isp_lower" == *"france telecom"* || "$isp_lower" == *"oinis"* ]] && { echo "Orange"; return; }
+    [[ "$isp_lower" == *"leaseweb"* ]] && { echo "Leaseweb"; return; }
+    [[ "$isp_lower" == *"ntt"* || "$isp" == *"日本电报电话"* || "$isp" == *"恩梯梯"* ]] && { echo "NTT"; return; }
+    [[ "$isp_lower" == *"tata"* || "$isp" == *"塔塔"* || "$isp_lower" == *"teleglobe"* || "$isp_lower" == *"customers access"* || "$isp_lower" == *"bb internal"* ]] && { echo "Tata"; return; }
+    [[ "$isp_lower" == *"hurricane"* || "$isp_lower" == *"he.net"* ]] && { echo "HE"; return; }
+    [[ "$isp_lower" == *"cdn77"* ]] && { echo "CDN77"; return; }
+    [[ "$isp_lower" == *"readydedis"* ]] && { echo "ReadyDedis"; return; }
+    [[ "$isp_lower" == *"host universal"* || "$isp_lower" == *"hostuniversal"* ]] && { echo "HostUniversal"; return; }
+    [[ "$isp_lower" == *"retn"* ]] && { echo "RETN"; return; }
+    [[ "$isp_lower" == *"equinix"* ]] && { echo "Equinix"; return; }
+    [[ "$isp_lower" == *"ipxo"* ]] && { echo "IPXO"; return; }
+    [[ "$isp_lower" == *"agis"* || "$isp_lower" == *"gsl networks"* || "$isp_lower" == *"globalsecurelayer"* || "$isp_lower" == *"streamline servers"* ]] && { echo "GSL"; return; }
+    [[ "$isp_lower" == *"fastly"* ]] && { echo "Fastly"; return; }
+    [[ "$isp_lower" == *"obenet"* || "$isp_lower" == *"obe.net"* || "$isp_lower" == *"obenetwork"* || "$isp_lower" == *"obe infrastructure"* ]] && { echo "Obenet"; return; }
+    [[ "$isp_lower" == *"clouvider"* ]] && { echo "Clouvider"; return; }
+    [[ "$isp_lower" == *"eranium"* ]] && { echo "Eranium"; return; }
+    [[ "$isp_lower" == *"edgoo"* ]] && { echo "Edgoo"; return; }
+    [[ "$isp_lower" == *"sprint"* ]] && { echo "Sprint"; return; }
+    [[ "$isp_lower" == *"xtom"* ]] && { echo "xTom"; return; }
+    [[ "$isp_lower" == *"airband"* ]] && { echo "Airband"; return; }
+    [[ "$isp_lower" == *"pccw"* && "$isp" != "PCCW" ]] && { echo "PCCW"; return; }
+    
+    # === 5. 日本运营商 ===
+    [[ "$isp_lower" == *"gmo"* || "$isp_lower" == *"internet.gmo"* ]] && { echo "GMO Internet"; return; }
+    [[ "$isp_lower" == *"biglobe"* ]] && { echo "Biglobe"; return; }
+    [[ "$isp_lower" == *"kddi"* || "$isp" == *"凯迪迪爱"* || "$isp" == *"日本凯迪迪爱"* || "$isp_lower" == *"dion"* ]] && { echo "KDDI"; return; }
+    [[ "$isp_lower" == *"arteria"* || "$isp_lower" == *"arteria-net"* ]] && { echo "ARTERIA"; return; }
+    [[ "$isp_lower" == *"softbank"* || "$isp" == *"软银"* ]] && { echo "SoftBank"; return; }
+    [[ "$isp_lower" == *"ntt communications"* || "$isp_lower" == *"ntt com"* || "$isp_lower" == *"ocn"* ]] && { echo "NTT"; return; }
+    [[ "$isp_lower" == *"iij"* || "$isp_lower" == *"internet initiative japan"* ]] && { echo "IIJ"; return; }
+    [[ "$isp_lower" == *"sakura"* ]] && { echo "Sakura"; return; }
+    [[ "$isp" == *"日本网络信息中心"* || "$isp_lower" == *"jpnic"* || "$isp_lower" == *"japan network information"* ]] && { echo "JPNIC"; return; }
+    
+    # === 6. 云厂商与服务商 ===
+    [[ "$isp_lower" == *"amazon"* || "$isp" == *"亚马逊"* ]] && { echo "AWS"; return; }
+    [[ "$isp_lower" == *"cloudflare"* ]] && { echo "Cloudflare"; return; }
+    [[ "$isp_lower" == *"telegram"* ]] && { echo "Telegram"; return; }
+    [[ "$isp_lower" == *"netflix"* ]] && { echo "Netflix"; return; }
+    [[ "$isp_lower" == *"vultr"* || "$isp_lower" == *"constant.com"* || "$isp_lower" == *"as-vultr"* || "$isp_lower" == *"choopa"* ]] && { echo "Vultr"; return; }
+    [[ "$isp_lower" == *"servers.com"* ]] && { echo "Servers.com"; return; }
+    [[ "$isp_lower" == *"workonline"* ]] && { echo "Workonline"; return; }
+    [[ "$isp_lower" == *"verio"* ]] && { echo "NTT"; return; }
+    [[ "$isp_lower" == *"sg.gs"* ]] && { echo "SG.GS"; return; }
+    [[ "$isp" == *"阿里云"* || "$isp_lower" == *"alibaba"* || "$isp_lower" == *"aliyun"* ]] && { echo "阿里云"; return; }
+    [[ "$isp" == *"腾讯"* || "$isp_lower" == *"tencent"* ]] && { echo "腾讯云"; return; }
+    [[ "$isp" == *"华为"* || "$isp_lower" == *"huawei"* || "$isp_lower" == *"hwclouds"* ]] && { echo "华为云"; return; }
+    [[ "$isp" == *"优刻得"* || "$isp_lower" == *"ucloud"* ]] && { echo "优刻得"; return; }
+    [[ "$isp" == *"百度"* || "$isp_lower" == *"baidu"* || "$isp_lower" == *"bce"* ]] && { echo "百度云"; return; }
+    [[ "$isp" == *"京东"* || "$isp_lower" == *"jdcloud"* || "$isp_lower" == *"jd cloud"* ]] && { echo "京东云"; return; }
+    [[ "$isp" == *"金山"* || "$isp_lower" == *"kingsoft"* || "$isp_lower" == *"ksyun"* ]] && { echo "金山云"; return; }
+    [[ "$isp" == *"七牛"* || "$isp_lower" == *"qiniu"* ]] && { echo "七牛"; return; }
+    [[ "$isp" == *"又拍"* || "$isp_lower" == *"upyun"* ]] && { echo "又拍云"; return; }
+    [[ "$isp" == *"网宿"* || "$isp_lower" == *"wangsu"* || "$isp_lower" == *"chinanetcenter"* ]] && { echo "网宿"; return; }
+    [[ "$isp_lower" == *"corenet"* ]] && { echo "CoreNet"; return; }
+    [[ "$isp_lower" == *"mejiro"* ]] && { echo "Mejiro"; return; }
+    [[ "$isp_lower" == *"nexthop"* ]] && { echo "NextHop"; return; }
+    [[ "$isp_lower" == *"digitalocean"* || "$isp_lower" == *"digital ocean"* ]] && { echo "DigitalOcean"; return; }
+    [[ "$isp_lower" == *"linode"* || "$isp_lower" == *"akamai"* ]] && { echo "Akamai"; return; }
+    [[ "$isp_lower" == *"ovh"* ]] && { echo "OVH"; return; }
+    [[ "$isp_lower" == *"hetzner"* ]] && { echo "Hetzner"; return; }
+    [[ "$isp_lower" == *"scaleway"* || "$isp_lower" == *"iliad"* ]] && { echo "Scaleway"; return; }
+    [[ "$isp_lower" == *"rackspace"* ]] && { echo "Rackspace"; return; }
+    [[ "$isp_lower" == *"oracle"* ]] && { echo "Oracle"; return; }
+    [[ "$isp_lower" == *"microsoft"* || "$isp_lower" == *"azure"* ]] && { echo "Azure"; return; }
+    [[ "$isp_lower" == *"ibm"* || "$isp_lower" == *"softlayer"* ]] && { echo "IBM Cloud"; return; }
+    [[ "$isp_lower" == *"verizon"* || "$isp_lower" == *"ans communications"* || "$isp_lower" == *"mci"* || "$isp" == *"威瑞森"* || "$isp" == *"MCI通信"* ]] && { echo "Verizon"; return; }
+    [[ "$isp_lower" == *"att"* || "$isp_lower" == *"at&t"* ]] && { echo "AT&T"; return; }
+    [[ "$isp_lower" == *"comcast"* ]] && { echo "Comcast"; return; }
+    [[ "$isp_lower" == *"centurylink"* ]] && { echo "CenturyLink"; return; }
+    [[ "$isp_lower" == *"charter"* || "$isp_lower" == *"spectrum"* ]] && { echo "Charter"; return; }
+    [[ "$isp_lower" == *"singtel"* ]] && { echo "Singtel"; return; }
+    [[ "$isp_lower" == *"starhub"* ]] && { echo "StarHub"; return; }
+    [[ "$isp_lower" == *"m1 limited"* || "$isp_lower" == *"m1.com.sg"* ]] && { echo "M1"; return; }
+    [[ "$isp_lower" == *"telstra"* ]] && { echo "Telstra"; return; }
+    [[ "$isp_lower" == *"optus"* ]] && { echo "Optus"; return; }
+    [[ "$isp_lower" == *"vodafone"* ]] && { echo "Vodafone"; return; }
+    [[ "$isp_lower" == *"deutsche telekom"* || "$isp_lower" == *"dtag"* || "$isp_lower" == *"wholesale.telekom"* ]] && { echo "DTAG"; return; }
+    [[ "$isp_lower" == *"british telecom"* || "$isp_lower" == *"bt.net"* ]] && { echo "BT"; return; }
+    [[ "$isp_lower" == *"internet utilities"* ]] && { echo "Internet Utilities"; return; }
+    [[ "$isp_lower" == *"telefonica"* || "$isp_lower" == *"movistar"* ]] && { echo "Telefonica"; return; }
+    [[ "$isp_lower" == *"cht"* || "$isp" == *"中华电信"* || "$isp_lower" == *"hinet"* ]] && { echo "中华电信"; return; }
+    [[ "$isp_lower" == *"taiwan mobile"* || "$isp" == *"台湾大哥大"* ]] && { echo "台湾大哥大"; return; }
+    [[ "$isp_lower" == *"fetnet"* || "$isp" == *"远传"* ]] && { echo "远传电信"; return; }
+    [[ "$isp_lower" == *"chunghwa"* ]] && { echo "中华电信"; return; }
+    [[ "$isp_lower" == *"kt corp"* || "$isp_lower" == *"korea telecom"* ]] && { echo "KT"; return; }
+    [[ "$isp_lower" == *"sk broadband"* || "$isp_lower" == *"sk telecom"* ]] && { echo "SK"; return; }
+    [[ "$isp_lower" == *"lg uplus"* || "$isp_lower" == *"lg u+"* ]] && { echo "LG U+"; return; }
+    
+    # === 7. 越南运营商 ===
+    [[ "$isp_lower" == *"fpt"* || "$isp_lower" == *"fpt telecom"* ]] && { echo "FPT"; return; }
+    [[ "$isp" == *"越南互联网络信息中心"* || "$isp_lower" == *"vnnic"* ]] && { echo "VNNIC"; return; }
+    [[ "$isp_lower" == *"viettel"* ]] && { echo "Viettel"; return; }
+    [[ "$isp_lower" == *"vnpt"* ]] && { echo "VNPT"; return; }
+    [[ "$isp_lower" == *"mobifone"* ]] && { echo "MobiFone"; return; }
+    
+    # === 8. 欧洲托管与运营商 ===
+    [[ "$isp_lower" == *"ghostnet"* ]] && { echo "GHOSTnet"; return; }
+    [[ "$isp_lower" == *"tube-hosting"* || "$isp_lower" == *"ferdinand zink"* ]] && { echo "Tube-Hosting"; return; }
+    [[ "$isp_lower" == *"skylink data center"* ]] && { echo "SkyLink DC"; return; }
+    [[ "$isp_lower" == *"global network management"* ]] && { echo "GNM"; return; }
+    [[ "$isp_lower" == *"ghita telekom"* ]] && { echo "Ghita Telekom"; return; }
+    [[ "$isp_lower" == *"mss-povolzhe"* ]] && { echo "MSS-Povolzhe"; return; }
+    [[ "$isp_lower" == *"contabo"* ]] && { echo "Contabo"; return; }
+    [[ "$isp_lower" == *"netcup"* ]] && { echo "Netcup"; return; }
+    [[ "$isp_lower" == *"ionos"* || "$isp_lower" == *"1&1"* ]] && { echo "IONOS"; return; }
+    [[ "$isp_lower" == *"online.net"* || "$isp_lower" == *"online s.a.s"* ]] && { echo "Online.net"; return; }
+    [[ "$isp_lower" == *"swisscom"* ]] && { echo "Swisscom"; return; }
+    [[ "$isp_lower" == *"proximus"* || "$isp_lower" == *"belgacom"* ]] && { echo "Proximus"; return; }
+    [[ "$isp_lower" == *"kpn"* ]] && { echo "KPN"; return; }
+    [[ "$isp_lower" == *"telenor"* ]] && { echo "Telenor"; return; }
+    [[ "$isp_lower" == *"tele2"* ]] && { echo "Tele2"; return; }
+    [[ "$isp_lower" == *"free.fr"* || "$isp_lower" == *"freebox"* ]] && { echo "Free"; return; }
+    [[ "$isp_lower" == *"sfr"* ]] && { echo "SFR"; return; }
+    [[ "$isp_lower" == *"bouygues"* ]] && { echo "Bouygues"; return; }
+    
+    # === 9. 俄罗斯运营商 ===
+    [[ "$isp_lower" == *"rostelecom"* ]] && { echo "Rostelecom"; return; }
+    [[ "$isp_lower" == *"mts"* ]] && { echo "MTS"; return; }
+    [[ "$isp_lower" == *"beeline"* || "$isp_lower" == *"vimpelcom"* ]] && { echo "Beeline"; return; }
+    [[ "$isp_lower" == *"megafon"* ]] && { echo "MegaFon"; return; }
+    [[ "$isp_lower" == *"yandex"* ]] && { echo "Yandex"; return; }
+    [[ "$isp_lower" == *"mail.ru"* || "$isp_lower" == *"vk.com"* ]] && { echo "VK"; return; }
+    
+    # === 10. 其他亚洲运营商 ===
+    [[ "$isp_lower" == *"pldt"* ]] && { echo "PLDT"; return; }
+    [[ "$isp_lower" == *"globe"* && "$isp_lower" == *"philippines"* ]] && { echo "Globe"; return; }
+    [[ "$isp_lower" == *"true"* && "$isp_lower" == *"thailand"* ]] && { echo "True"; return; }
+    [[ "$isp_lower" == *"ais"* || "$isp_lower" == *"advanced info service"* ]] && { echo "AIS"; return; }
+    [[ "$isp_lower" == *"telekom malaysia"* || "$isp_lower" == *"tm net"* ]] && { echo "TM"; return; }
+    [[ "$isp_lower" == *"maxis"* ]] && { echo "Maxis"; return; }
+    [[ "$isp_lower" == *"indosat"* ]] && { echo "Indosat"; return; }
+    [[ "$isp_lower" == *"telkomsel"* ]] && { echo "Telkomsel"; return; }
+    [[ "$isp_lower" == *"xl axiata"* ]] && { echo "XL Axiata"; return; }
+    [[ "$isp_lower" == *"bsnl"* || "$isp_lower" == *"bharat sanchar"* ]] && { echo "BSNL"; return; }
+    [[ "$isp_lower" == *"jio"* || "$isp_lower" == *"reliance"* ]] && { echo "Jio"; return; }
+    [[ "$isp_lower" == *"airtel"* ]] && { echo "Airtel"; return; }
+    
+    # === 11. CDN 与托管服务 ===
+    [[ "$isp_lower" == *"bunny"* || "$isp_lower" == *"bunnycdn"* ]] && { echo "BunnyCDN"; return; }
+    [[ "$isp_lower" == *"stackpath"* || "$isp_lower" == *"highwinds"* ]] && { echo "StackPath"; return; }
+    [[ "$isp_lower" == *"keycdn"* ]] && { echo "KeyCDN"; return; }
+    [[ "$isp_lower" == *"sucuri"* ]] && { echo "Sucuri"; return; }
+    [[ "$isp_lower" == *"incapsula"* || "$isp_lower" == *"imperva"* ]] && { echo "Imperva"; return; }
+    [[ "$isp_lower" == *"ddos-guard"* ]] && { echo "DDoS-Guard"; return; }
+    [[ "$isp_lower" == *"path.net"* ]] && { echo "Path.net"; return; }
+    [[ "$isp_lower" == *"quadranet"* ]] && { echo "QuadraNet"; return; }
+    [[ "$isp_lower" == *"psychz"* ]] && { echo "Psychz"; return; }
+    [[ "$isp_lower" == *"colocrossing"* ]] && { echo "ColoCrossing"; return; }
+    [[ "$isp_lower" == *"hostwinds"* ]] && { echo "Hostwinds"; return; }
+    [[ "$isp_lower" == *"kamatera"* ]] && { echo "Kamatera"; return; }
+    [[ "$isp_lower" == *"upcloud"* ]] && { echo "UpCloud"; return; }
+    [[ "$isp_lower" == *"bandwagonhost"* || "$isp_lower" == *"buyvm"* || "$isp_lower" == *"frantech"* ]] && { echo "BuyVM"; return; }
+    [[ "$isp_lower" == *"racknerd"* ]] && { echo "RackNerd"; return; }
+    [[ "$isp_lower" == *"greencloud"* ]] && { echo "GreenCloud"; return; }
+    [[ "$isp_lower" == *"dmit"* ]] && { echo "DMIT"; return; }
+    [[ "$isp_lower" == *"hostdare"* ]] && { echo "HostDare"; return; }
+    [[ "$isp_lower" == *"b2 net solutions"* || "$isp_lower" == *"servermania"* ]] && { echo "ServerMania"; return; }
+    [[ "$isp_lower" == *"multacom"* ]] && { echo "Multacom"; return; }
+    [[ "$isp_lower" == *"cnservers"* ]] && { echo "CNServers"; return; }
+    [[ "$isp_lower" == *"terrahost"* ]] && { echo "Terrahost"; return; }
+    [[ "$isp_lower" == *"hosteons"* ]] && { echo "Hosteons"; return; }
+    [[ "$isp_lower" == *"cloudcone"* ]] && { echo "CloudCone"; return; }
+    [[ "$isp_lower" == *"virtono"* ]] && { echo "Virtono"; return; }
+    [[ "$isp_lower" == *"crowncloud"* ]] && { echo "CrownCloud"; return; }
+    [[ "$isp_lower" == *"ssdnodes"* ]] && { echo "SSD Nodes"; return; }
+    [[ "$isp_lower" == *"webtropia"* ]] && { echo "Netcup"; return; }
+    [[ "$isp_lower" == *"melbicom"* ]] && { echo "Melbicom"; return; }
+    
+    # 如果没有匹配，返回原始值
+    echo "$isp"
+}
+
 get_trace_targets() {
 cat << 'EOF'
+#GROUP:中国境内目标
 北京电信 163 AS4134|ipv4.pek-4134.endpoint.nxtrace.org|ipv6.pek-4134.endpoint.nxtrace.org
 北京电信 CN2 AS4809|ipv4.pek-4809.endpoint.nxtrace.org|
 北京联通 169 AS4837|ipv4.pek-4837.endpoint.nxtrace.org|ipv6.pek-4837.endpoint.nxtrace.org
@@ -1639,6 +1857,7 @@ cat << 'EOF'
 广州联通 A网(CNC) AS9929|ipv4.can-9929.endpoint.nxtrace.org|
 广州移动 CMNET AS9808|ipv4.can-9808.endpoint.nxtrace.org|ipv6.can-9808.endpoint.nxtrace.org
 广州移动 CMIN2 AS58807|ipv4.can-58807.endpoint.nxtrace.org|
+#GROUP:主要国际网络运营商
 Telegram DC5 - Singapore, SG|telegram-dc5.jam114514.me|
 Telegram DC4 - Amsterdam, NL|telegram-dc4.jam114514.me|
 Telegram DC3 - Miami FL, USA|telegram-dc3.jam114514.me|
@@ -1692,8 +1911,7 @@ Telecom Italia Sparkle AS6762 - 德国法兰克福|t1.6762.de.fra.jam114514.me|t
 Telecom Italia Sparkle AS6762 - 新加坡|t1.6762.sg.sin.jam114514.me|t1.6762.sg.sin.ipv6.jam114514.me
 Telecom Italia Sparkle AS6762 - 美国洛杉矶|t1.6762.us.lax.jam114514.me|t1.6762.us.lax.ipv6.jam114514.me
 Telecom Italia Sparkle AS6762 - 美国纽约|t1.6762.us.nyc.jam114514.me|t1.6762.us.nyc.ipv6.jam114514.me
-Cloudflare DNS - Anycast|1.1.1.1|2606:4700:4700::1111
-Google DNS - Anycast|8.8.8.8|2001:4860:4860::8888
+
 EOF
 }
 
@@ -1736,15 +1954,25 @@ run_trace_test() {
     # 使用 process substitution 可能会在某些环境下有问题，改用字符串读取
     local raw_static=$(get_trace_targets)
     local all_targets=()
+    local current_group=""
     
     # === Streaming Report ===
     {
         echo "## 路由追踪"
     } >> "$REPORT_FILE"
 
-    # 读取静态目标
+    # 读取静态目标，处理分组标记
     while IFS= read -r line; do
-        [ -n "$line" ] && all_targets+=("$line")
+        if [ -z "$line" ]; then
+            continue
+        elif [[ "$line" == "#GROUP:"* ]]; then
+            # 从分组标记中提取组名
+            current_group="${line#\#GROUP:}"
+            # 将分组标记添加到目标数组中
+            all_targets+=("#GROUP:$current_group")
+        else
+            all_targets+=("$line")
+        fi
     done <<< "$raw_static"
     
     # 读取动态目标
@@ -1753,7 +1981,11 @@ run_trace_test() {
     done <<< "$dynamic_targets"
     
     local idx=0
-    local total=${#all_targets[@]}
+    local total=0
+    # 计算非分组行的总数
+    for entry in "${all_targets[@]}"; do
+        [[ "$entry" != "#GROUP:"* ]] && total=$((total+1))
+    done
     
     if [ "$total" -eq 0 ]; then
         warn "  └─ 未找到任何路由追踪目标"
@@ -1762,6 +1994,21 @@ run_trace_test() {
     
     for entry in "${all_targets[@]}"; do
         [ -z "$entry" ] && continue
+        
+        # 处理分组标记
+        if [[ "$entry" == "#GROUP:"* ]]; then
+            local group_name="${entry#\#GROUP:}"
+            echo ""
+            echo "  ┌── $group_name"
+            # 在报告中添加分节标题
+            {
+                echo ""
+                echo "### $group_name"
+                echo ""
+            } >> "$REPORT_FILE"
+            continue
+        fi
+        
         idx=$((idx+1))
         IFS='|' read -r name ipv4 ipv6 <<< "$entry"
         
@@ -1857,226 +2104,9 @@ run_trace_test() {
                                 [ -n "$ix_name" ] && isp="$isp [$ix_name]"
                             fi
                             
-                            # 运营商名称简化（使用通配符匹配，按优先级顺序）
-                            # 先转小写便于统一匹配
-                            local isp_lower=$(echo "$isp" | tr '[:upper:]' '[:lower:]')
                             
-                            # === 1. 中国运营商海外分支（必须优先匹配）===
-                            # 联通海外
-                            [[ "$isp" == *"联通"*"香港"* || "$isp" == *"联通（香港）"* || "$isp_lower" == *"unicom"*"hong kong"* ]] && isp="中国联通（香港）"
-                            [[ "$isp_lower" == *"chinaunicomglobal"* || "$isp_lower" == *"china unicom global"* ]] && isp="中国联通（国际）"
-                            # 电信海外
-                            [[ "$isp_lower" == *"ctgnet"* || "$isp_lower" == *"china telecom global"* ]] && isp="中国电信（国际）"
-                            # 移动海外 (CMI = China Mobile International)
-                            [[ "$isp" == *"移动"*"CMI"* || "$isp" == *"移动 CMI"* || "$isp_lower" == *"cmi.chinamobile"* || "$isp_lower" == *"cmi-int"* || ( "$isp_lower" == *"cmi"* && "$isp_lower" == *"mobile"* ) ]] && isp="中国移动（国际）"
-                            
-                            # === 2. 港澳运营商 ===
-                            [[ "$isp" == *"电讯盈科"* || "$isp_lower" == *"pccw"* ]] && isp="PCCW"
-                            [[ "$isp" == *"和记"* || "$isp_lower" == *"hgc"* || "$isp_lower" == *"hutchison"* ]] && isp="HGC"
-                            # 中国移动香港变体
-                            [[ "$isp" == *"中国移动"*"香港"* || "$isp" == *"中国移动（香港）"* ]] && isp="中国移动（香港）"
-                            [[ "$isp_lower" == *"cmi"* && "$isp_lower" == *"hong kong"* ]] && isp="中国移动（香港）"
-                            
-                            # === 3. 中国三大运营商（国内，通配符匹配）===
-                            [[ "$isp" == *"联通"* || "$isp_lower" == *"unicom"* || "$isp_lower" == *"bbn.com.cn"* || "$isp_lower" == *"cuii"* ]] && [[ "$isp" != *"中国联通"* ]] && isp="中国联通"
-                            [[ "$isp" == *"电信"* || "$isp_lower" == *"chinatelecom"* || "$isp_lower" == *"189.cn"* || "$isp_lower" == *"cn2"* || ( "$isp_lower" == *"telecom"* && "$isp_lower" == *"china"* ) ]] && [[ "$isp" != *"中国电信"* ]] && isp="中国电信"
-                            [[ "$isp" == *"移动"* || "$isp_lower" == *"chinamobile"* || "$isp_lower" == *"10086"* || ( "$isp_lower" == *"mobile"* && "$isp_lower" == *"china"* ) ]] && [[ "$isp" != *"中国移动"* ]] && isp="中国移动"
-                            [[ "$isp" == *"地面通"* ]] && isp="中国电信"
-                            # 清理中国运营商特殊后缀
-                            [[ "$isp" == "中国电信/骨干网" ]] && isp="中国电信"
-                            [[ "$isp" == "中国电信/CN2" ]] && isp="中国电信/CN2"
-                            [[ "$isp" == "中国联通/骨干网" ]] && isp="中国联通"
-                            # 中国移动国际统一格式
-                            [[ "$isp" == "中国移动国际" ]] && isp="中国移动（国际）"
-                            
-                            # === 4. 国际运营商 ===
-                            [[ "$isp_lower" == *"lumen"* || "$isp_lower" == *"level 3"* || "$isp_lower" == *"level3"* || "$isp" == *"世纪互联"* || "$isp" == *"流明"* ]] && isp="Lumen"
-                            [[ "$isp_lower" == *"cogent"* || "$isp_lower" == *"psinet"* ]] && isp="Cogent"
-                            [[ "$isp_lower" == *"zayo"* ]] && isp="Zayo"
-                            [[ "$isp_lower" == *"tinet"* || "$isp_lower" == *"gtt"* ]] && isp="GTT"
-                            [[ "$isp_lower" == *"arelion"* ]] && isp="Arelion"
-                            [[ "$isp_lower" == *"telia"* || "$isp" == *"特利亚"* ]] && isp="Telia"
-                            # "Provider" 是 Telia 的通用标识
-                            [[ "$isp_lower" == "provider" ]] && isp="Telia"
-                            [[ "$isp_lower" == *"sparkle"* || "$isp_lower" == *"sea-bone"* || "$isp_lower" == *"tisparkle"* ]] && isp="Sparkle"
-                            [[ "$isp_lower" == *"orange"* || "$isp_lower" == *"france telecom"* || "$isp_lower" == *"oinis"* ]] && isp="Orange"
-                            [[ "$isp_lower" == *"leaseweb"* ]] && isp="Leaseweb"
-                            [[ "$isp_lower" == *"ntt"* || "$isp" == *"日本电报电话"* || "$isp" == *"恩梯梯"* ]] && isp="NTT"
-                            [[ "$isp_lower" == *"tata"* || "$isp" == *"塔塔"* || "$isp_lower" == *"teleglobe"* || "$isp_lower" == *"customers access"* || "$isp_lower" == *"bb internal"* ]] && isp="Tata"
-                            [[ "$isp_lower" == *"hurricane"* || "$isp_lower" == *"he.net"* ]] && isp="HE"
-                            [[ "$isp_lower" == *"cdn77"* ]] && isp="CDN77"
-                            [[ "$isp_lower" == *"readydedis"* ]] && isp="ReadyDedis"
-                            [[ "$isp_lower" == *"host universal"* || "$isp_lower" == *"hostuniversal"* ]] && isp="HostUniversal"
-                            [[ "$isp_lower" == *"retn"* ]] && isp="RETN"
-                            [[ "$isp_lower" == *"equinix"* ]] && isp="Equinix"
-                            [[ "$isp_lower" == *"ipxo"* ]] && isp="IPXO"
-                            [[ "$isp_lower" == *"agis"* || "$isp_lower" == *"gsl networks"* || "$isp_lower" == *"globalsecurelayer"* ]] && isp="GSL"
-                            [[ "$isp_lower" == *"fastly"* ]] && isp="Fastly"
-                            [[ "$isp_lower" == *"obenet"* || "$isp_lower" == *"obe.net"* || "$isp_lower" == *"obenetwork"* || "$isp_lower" == *"obe infrastructure"* ]] && isp="Obenet"
-                            [[ "$isp_lower" == *"clouvider"* ]] && isp="Clouvider"
-                            [[ "$isp_lower" == *"eranium"* ]] && isp="Eranium"
-                            [[ "$isp_lower" == *"edgoo"* ]] && isp="Edgoo"
-                            [[ "$isp_lower" == *"sprint"* ]] && isp="Sprint"
-                            [[ "$isp_lower" == *"xtom"* ]] && isp="xTom"
-                            # Airband Communications (AS18990)
-                            [[ "$isp_lower" == *"airband"* ]] && isp="Airband"
-                            # PCCW Global (AS3491) - 独立匹配
-                            [[ "$isp_lower" == *"pccw"* && "$isp" != "PCCW" ]] && isp="PCCW"
-                            
-                            # === 5. 日本运营商 ===
-                            [[ "$isp_lower" == *"gmo"* || "$isp_lower" == *"internet.gmo"* ]] && isp="GMO Internet"
-                            [[ "$isp_lower" == *"biglobe"* ]] && isp="Biglobe"
-                            [[ "$isp_lower" == *"kddi"* || "$isp" == *"凯迪迪爱"* || "$isp" == *"日本凯迪迪爱"* || "$isp_lower" == *"dion"* ]] && isp="KDDI"
-                            [[ "$isp_lower" == *"arteria"* || "$isp_lower" == *"arteria-net"* ]] && isp="ARTERIA"
-                            [[ "$isp_lower" == *"softbank"* || "$isp" == *"软银"* ]] && isp="SoftBank"
-                            [[ "$isp_lower" == *"ntt communications"* || "$isp_lower" == *"ntt com"* || "$isp_lower" == *"ocn"* ]] && isp="NTT"
-                            [[ "$isp_lower" == *"iij"* || "$isp_lower" == *"internet initiative japan"* ]] && isp="IIJ"
-                            [[ "$isp_lower" == *"sakura"* ]] && isp="Sakura"
-                            [[ "$isp" == *"日本网络信息中心"* || "$isp_lower" == *"jpnic"* || "$isp_lower" == *"japan network information"* ]] && isp="JPNIC"
-                            
-                            # === 6. 云厂商与服务商 ===
-                            [[ "$isp_lower" == *"amazon"* || "$isp" == *"亚马逊"* ]] && isp="AWS"
-                            [[ "$isp_lower" == *"google"* || "$isp" == *"谷歌"* ]] && isp="Google"
-                            [[ "$isp_lower" == *"cloudflare"* ]] && isp="Cloudflare"
-                            [[ "$isp_lower" == *"telegram"* ]] && isp="Telegram"
-                            [[ "$isp_lower" == *"netflix"* ]] && isp="Netflix"
-                            # Vultr / Constant.com
-                            [[ "$isp_lower" == *"vultr"* || "$isp_lower" == *"constant.com"* || "$isp_lower" == *"as-vultr"* ]] && isp="Vultr"
-                            # Servers.com
-                            [[ "$isp_lower" == *"servers.com"* ]] && isp="Servers.com"
-                            # Workonline (南非)
-                            [[ "$isp_lower" == *"workonline"* ]] && isp="Workonline"
-                            # VERIO (被 NTT 收购)
-                            [[ "$isp_lower" == *"verio"* ]] && isp="NTT"
-                            [[ "$isp_lower" == *"sg.gs"* ]] && isp="SG.GS"
-                            [[ "$isp" == *"阿里云"* || "$isp_lower" == *"alibaba"* || "$isp_lower" == *"aliyun"* ]] && isp="阿里云"
-                            [[ "$isp" == *"腾讯"* || "$isp_lower" == *"tencent"* ]] && isp="腾讯云"
-                            [[ "$isp" == *"华为"* || "$isp_lower" == *"huawei"* || "$isp_lower" == *"hwclouds"* ]] && isp="华为云"
-                            [[ "$isp" == *"优刻得"* || "$isp_lower" == *"ucloud"* ]] && isp="优刻得"
-                            [[ "$isp" == *"百度"* || "$isp_lower" == *"baidu"* || "$isp_lower" == *"bce"* ]] && isp="百度云"
-                            [[ "$isp" == *"京东"* || "$isp_lower" == *"jdcloud"* || "$isp_lower" == *"jd cloud"* ]] && isp="京东云"
-                            [[ "$isp" == *"金山"* || "$isp_lower" == *"kingsoft"* || "$isp_lower" == *"ksyun"* ]] && isp="金山云"
-                            [[ "$isp" == *"七牛"* || "$isp_lower" == *"qiniu"* ]] && isp="七牛"
-                            [[ "$isp" == *"又拍"* || "$isp_lower" == *"upyun"* ]] && isp="又拍云"
-                            [[ "$isp" == *"网宿"* || "$isp_lower" == *"wangsu"* || "$isp_lower" == *"chinanetcenter"* ]] && isp="网宿"
-                            [[ "$isp_lower" == *"corenet"* ]] && isp="CoreNet"
-                            [[ "$isp_lower" == *"mejiro"* ]] && isp="Mejiro"
-                            [[ "$isp_lower" == *"nexthop"* ]] && isp="NextHop"
-                            [[ "$isp_lower" == *"vultr"* || "$isp_lower" == *"choopa"* ]] && isp="Vultr"
-                            [[ "$isp_lower" == *"digitalocean"* || "$isp_lower" == *"digital ocean"* ]] && isp="DigitalOcean"
-                            [[ "$isp_lower" == *"linode"* || "$isp_lower" == *"akamai"* ]] && isp="Akamai"
-                            [[ "$isp_lower" == *"ovh"* ]] && isp="OVH"
-                            [[ "$isp_lower" == *"hetzner"* ]] && isp="Hetzner"
-                            [[ "$isp_lower" == *"scaleway"* || "$isp_lower" == *"iliad"* ]] && isp="Scaleway"
-                            [[ "$isp_lower" == *"rackspace"* ]] && isp="Rackspace"
-                            [[ "$isp_lower" == *"oracle"* ]] && isp="Oracle"
-                            [[ "$isp_lower" == *"microsoft"* || "$isp_lower" == *"azure"* ]] && isp="Azure"
-                            [[ "$isp_lower" == *"ibm"* || "$isp_lower" == *"softlayer"* ]] && isp="IBM Cloud"
-                            [[ "$isp_lower" == *"verizon"* || "$isp_lower" == *"ans communications"* || "$isp_lower" == *"mci"* || "$isp" == *"威瑞森"* || "$isp" == *"MCI通信"* ]] && isp="Verizon"
-                            [[ "$isp_lower" == *"att"* || "$isp_lower" == *"at&t"* ]] && isp="AT&T"
-                            [[ "$isp_lower" == *"comcast"* ]] && isp="Comcast"
-                            [[ "$isp_lower" == *"centurylink"* ]] && isp="CenturyLink"
-                            [[ "$isp_lower" == *"charter"* || "$isp_lower" == *"spectrum"* ]] && isp="Charter"
-                            [[ "$isp_lower" == *"singtel"* ]] && isp="Singtel"
-                            [[ "$isp_lower" == *"starhub"* ]] && isp="StarHub"
-                            [[ "$isp_lower" == *"m1 limited"* || "$isp_lower" == *"m1.com.sg"* ]] && isp="M1"
-                            [[ "$isp_lower" == *"telstra"* ]] && isp="Telstra"
-                            [[ "$isp_lower" == *"optus"* ]] && isp="Optus"
-                            [[ "$isp_lower" == *"vodafone"* ]] && isp="Vodafone"
-                            [[ "$isp_lower" == *"deutsche telekom"* || "$isp_lower" == *"dtag"* || "$isp_lower" == *"wholesale.telekom"* ]] && isp="DTAG"
-                            [[ "$isp_lower" == *"british telecom"* || "$isp_lower" == *"bt.net"* ]] && isp="BT"
-                            [[ "$isp_lower" == *"internet utilities"* ]] && isp="Internet Utilities"
-                            [[ "$isp_lower" == *"telefonica"* || "$isp_lower" == *"movistar"* ]] && isp="Telefonica"
-                            [[ "$isp_lower" == *"cht"* || "$isp" == *"中华电信"* || "$isp_lower" == *"hinet"* ]] && isp="中华电信"
-                            [[ "$isp_lower" == *"taiwan mobile"* || "$isp" == *"台湾大哥大"* ]] && isp="台湾大哥大"
-                            [[ "$isp_lower" == *"fetnet"* || "$isp" == *"远传"* ]] && isp="远传电信"
-                            [[ "$isp_lower" == *"chunghwa"* ]] && isp="中华电信"
-                            [[ "$isp_lower" == *"kt corp"* || "$isp_lower" == *"korea telecom"* ]] && isp="KT"
-                            [[ "$isp_lower" == *"sk broadband"* || "$isp_lower" == *"sk telecom"* ]] && isp="SK"
-                            [[ "$isp_lower" == *"lg uplus"* || "$isp_lower" == *"lg u+"* ]] && isp="LG U+"
-                            
-                            # === 7. 越南运营商 ===
-                            [[ "$isp_lower" == *"fpt"* || "$isp_lower" == *"fpt telecom"* ]] && isp="FPT"
-                            [[ "$isp" == *"越南互联网络信息中心"* || "$isp_lower" == *"vnnic"* ]] && isp="VNNIC"
-                            [[ "$isp_lower" == *"viettel"* ]] && isp="Viettel"
-                            [[ "$isp_lower" == *"vnpt"* ]] && isp="VNPT"
-                            [[ "$isp_lower" == *"mobifone"* ]] && isp="MobiFone"
-                            
-                            # === 8. 欧洲托管与运营商 ===
-                            [[ "$isp_lower" == *"ghostnet"* ]] && isp="GHOSTnet"
-                            [[ "$isp_lower" == *"tube-hosting"* || "$isp_lower" == *"ferdinand zink"* ]] && isp="Tube-Hosting"
-                            [[ "$isp_lower" == *"skylink data center"* ]] && isp="SkyLink DC"
-                            [[ "$isp_lower" == *"global network management"* ]] && isp="GNM"
-                            [[ "$isp_lower" == *"ghita telekom"* ]] && isp="Ghita Telekom"
-                            [[ "$isp_lower" == *"mss-povolzhe"* ]] && isp="MSS-Povolzhe"
-                            [[ "$isp_lower" == *"contabo"* ]] && isp="Contabo"
-                            [[ "$isp_lower" == *"netcup"* ]] && isp="Netcup"
-                            [[ "$isp_lower" == *"ionos"* || "$isp_lower" == *"1&1"* ]] && isp="IONOS"
-                            [[ "$isp_lower" == *"online.net"* || "$isp_lower" == *"online s.a.s"* ]] && isp="Online.net"
-                            [[ "$isp_lower" == *"swisscom"* ]] && isp="Swisscom"
-                            [[ "$isp_lower" == *"proximus"* || "$isp_lower" == *"belgacom"* ]] && isp="Proximus"
-                            [[ "$isp_lower" == *"kpn"* ]] && isp="KPN"
-                            [[ "$isp_lower" == *"telenor"* ]] && isp="Telenor"
-                            [[ "$isp_lower" == *"tele2"* ]] && isp="Tele2"
-                            [[ "$isp_lower" == *"free.fr"* || "$isp_lower" == *"freebox"* ]] && isp="Free"
-                            [[ "$isp_lower" == *"sfr"* ]] && isp="SFR"
-                            [[ "$isp_lower" == *"bouygues"* ]] && isp="Bouygues"
-                            
-                            # === 9. 俄罗斯运营商 ===
-                            [[ "$isp_lower" == *"rostelecom"* ]] && isp="Rostelecom"
-                            [[ "$isp_lower" == *"mts"* ]] && isp="MTS"
-                            [[ "$isp_lower" == *"beeline"* || "$isp_lower" == *"vimpelcom"* ]] && isp="Beeline"
-                            [[ "$isp_lower" == *"megafon"* ]] && isp="MegaFon"
-                            [[ "$isp_lower" == *"yandex"* ]] && isp="Yandex"
-                            [[ "$isp_lower" == *"mail.ru"* || "$isp_lower" == *"vk.com"* ]] && isp="VK"
-                            
-                            # === 10. 其他亚洲运营商 ===
-                            [[ "$isp_lower" == *"pldt"* ]] && isp="PLDT"
-                            [[ "$isp_lower" == *"globe"* && "$isp_lower" == *"philippines"* ]] && isp="Globe"
-                            [[ "$isp_lower" == *"true"* && "$isp_lower" == *"thailand"* ]] && isp="True"
-                            [[ "$isp_lower" == *"ais"* || "$isp_lower" == *"advanced info service"* ]] && isp="AIS"
-                            [[ "$isp_lower" == *"telekom malaysia"* || "$isp_lower" == *"tm net"* ]] && isp="TM"
-                            [[ "$isp_lower" == *"maxis"* ]] && isp="Maxis"
-                            [[ "$isp_lower" == *"indosat"* ]] && isp="Indosat"
-                            [[ "$isp_lower" == *"telkomsel"* ]] && isp="Telkomsel"
-                            [[ "$isp_lower" == *"xl axiata"* ]] && isp="XL Axiata"
-                            [[ "$isp_lower" == *"bsnl"* || "$isp_lower" == *"bharat sanchar"* ]] && isp="BSNL"
-                            [[ "$isp_lower" == *"jio"* || "$isp_lower" == *"reliance"* ]] && isp="Jio"
-                            [[ "$isp_lower" == *"airtel"* ]] && isp="Airtel"
-                            
-                            # === 11. CDN 与托管服务 ===
-                            [[ "$isp_lower" == *"bunny"* || "$isp_lower" == *"bunnycdn"* ]] && isp="BunnyCDN"
-                            [[ "$isp_lower" == *"stackpath"* || "$isp_lower" == *"highwinds"* ]] && isp="StackPath"
-                            [[ "$isp_lower" == *"keycdn"* ]] && isp="KeyCDN"
-                            [[ "$isp_lower" == *"sucuri"* ]] && isp="Sucuri"
-                            [[ "$isp_lower" == *"incapsula"* || "$isp_lower" == *"imperva"* ]] && isp="Imperva"
-                            [[ "$isp_lower" == *"ddos-guard"* ]] && isp="DDoS-Guard"
-                            [[ "$isp_lower" == *"path.net"* ]] && isp="Path.net"
-                            [[ "$isp_lower" == *"quadranet"* ]] && isp="QuadraNet"
-                            [[ "$isp_lower" == *"psychz"* ]] && isp="Psychz"
-                            [[ "$isp_lower" == *"colocrossing"* ]] && isp="ColoCrossing"
-                            [[ "$isp_lower" == *"hostwinds"* ]] && isp="Hostwinds"
-                            [[ "$isp_lower" == *"kamatera"* ]] && isp="Kamatera"
-                            [[ "$isp_lower" == *"upcloud"* ]] && isp="UpCloud"
-                            [[ "$isp_lower" == *"bandwagonhost"* || "$isp_lower" == *"buyvm"* ]] && isp="BuyVM"
-                            [[ "$isp_lower" == *"racknerd"* ]] && isp="RackNerd"
-                            [[ "$isp_lower" == *"greencloud"* ]] && isp="GreenCloud"
-                            [[ "$isp_lower" == *"dmit"* ]] && isp="DMIT"
-                            [[ "$isp_lower" == *"hostdare"* ]] && isp="HostDare"
-                            # 其他常见托管商
-                            [[ "$isp_lower" == *"b2 net solutions"* || "$isp_lower" == *"servermania"* ]] && isp="ServerMania"
-                            [[ "$isp_lower" == *"multacom"* ]] && isp="Multacom"
-                            [[ "$isp_lower" == *"cnservers"* ]] && isp="CNServers"
-                            [[ "$isp_lower" == *"terrahost"* ]] && isp="Terrahost"
-                            [[ "$isp_lower" == *"hosteons"* ]] && isp="Hosteons"
-                            [[ "$isp_lower" == *"cloudcone"* ]] && isp="CloudCone"
-                            [[ "$isp_lower" == *"virtono"* ]] && isp="Virtono"
-                            [[ "$isp_lower" == *"crowncloud"* ]] && isp="CrownCloud"
-                            [[ "$isp_lower" == *"ssdnodes"* ]] && isp="SSD Nodes"
-                            [[ "$isp_lower" == *"webtropia"* || "$isp_lower" == *"netcup"* ]] && isp="Netcup"
-                            [[ "$isp_lower" == *"melbicom"* ]] && isp="Melbicom"
-                            [[ "$isp_lower" == *"frantech"* || "$isp_lower" == *"buyvm"* ]] && isp="BuyVM"
-                            
+                            # 运营商名称规范化
+                            isp=$(normalize_isp_name "$isp")
                             # RTT格式：有值时追加ms，无值时显示"-"
                             if [ "$rtt" != "-" ] && [ -n "$rtt" ]; then
                                 rtt_display="$rtt ms"
@@ -2093,7 +2123,7 @@ run_trace_test() {
                             echo "### $name ($mode)"
                             # 如果是动态 CDN 目标，显示解析到的域名
                             if [[ "$name" == *"Dynamic"* ]]; then
-                                echo "> 命中 CDN 节点: \`$target\`"
+                                echo "命中 CDN 节点: \`$target\`"
                                 echo ""
                             fi
                             echo -e "$table"
@@ -2113,7 +2143,7 @@ run_trace_test() {
 }
 
 run_cdn_test() {
-    log "开始 CDN 节点测试..."
+    log "开始公共服务测试..."
     
     # 检查 NextTrace
     if [ "$NEXTTRACE_BIN" == "false" ] || [ -z "$NEXTTRACE_BIN" ]; then 
@@ -2123,8 +2153,21 @@ run_cdn_test() {
     
     create_ix_map
     
-    # 收集 CDN 目标
+    # 收集测试目标
     local cdn_targets=()
+    
+    # 公共 DNS 服务
+    echo "  ├─ 添加公共 DNS 服务..."
+    if [ "$HAS_V4" = "true" ]; then
+        cdn_targets+=("Cloudflare DNS|1.1.1.1|IPv4")
+        cdn_targets+=("Google DNS|8.8.8.8|IPv4")
+        cdn_targets+=("Quad9 DNS|9.9.9.9|IPv4")
+    fi
+    if [ "$HAS_V6" = "true" ]; then
+        cdn_targets+=("Cloudflare DNS|2606:4700:4700::1111|IPv6")
+        cdn_targets+=("Google DNS|2001:4860:4860::8888|IPv6")
+        cdn_targets+=("Quad9 DNS|2620:fe::fe|IPv6")
+    fi
     
     # YouTube CDN
     echo "  ├─ 获取 YouTube CDN 节点..."
@@ -2173,7 +2216,7 @@ run_cdn_test() {
     
     # 写入报告头
     {
-        echo "## CDN 节点路由追踪"
+        echo "## 公共服务路由追踪"
         echo ""
     } >> "$REPORT_FILE"
     
@@ -2233,6 +2276,16 @@ run_cdn_test() {
                 [ -z "$ip" ] && continue
                 [ "$ip" = "*" ] && ip="-"
                 
+                # IX Check
+                if [ "$ip" != "-" ]; then
+                    local ix_name=$(grep -F "$ip " "$TMP_DIR/ix_ip_map.txt" 2>/dev/null | head -n1 | cut -d' ' -f2-)
+                    [ -n "$ix_name" ] && isp="$isp [$ix_name]"
+                fi
+                
+                
+                # 运营商名称规范化
+                isp=$(normalize_isp_name "$isp")
+                
                 # RTT format
                 if [ "$rtt" != "-" ] && [ -n "$rtt" ]; then
                     rtt_display="$rtt ms"
@@ -2247,7 +2300,7 @@ run_cdn_test() {
             # Write to report
             {
                 echo "### $name ($mode)"
-                echo "> 命中 CDN 节点: \`$target\`"
+                echo "测试节点: \`$target\`"
                 echo ""
                 echo -e "$table"
                 echo ""
@@ -2257,7 +2310,7 @@ run_cdn_test() {
         fi
     done
     
-    info "  └─ CDN 节点测试完成"
+    info "  └─ 公共服务测试完成"
 }
 
 init_report() {
@@ -2271,7 +2324,13 @@ main() {
     clear
     
     # 提示用户可选参数
-    echo -e "💡 提示: 使用 -h 仅硬件，-n 仅网络，-t 仅路由追踪，-i 仅 IPv4 质量检测，-s 仅流媒体测试，-c 仅 YouTube 和 Netflix 的 CDN 节点"
+    echo -e "\n[可用测试模式]"
+    echo -e "  -n, --network       仅网络测试 (网络信息 + iperf + 路由追踪 + IP质量 + 流媒体)"
+    echo -e "  -h, --hardware      仅硬件性能测试 (CPU + 磁盘)"
+    echo -e "  -t, --nexttrace     仅路由追踪测试"
+    echo -e "  -p, --public        仅公共服务测试 (DNS + CDN)"
+    echo -e "  -i, --ip-quality    仅 IPv4 质量检测"
+    echo -e "  -s, --stream        仅流媒体解锁测试\n"
     
     # 致谢
     echo -e "✨ 感谢 JamChoi 提供的 Python 源码"
@@ -2287,8 +2346,8 @@ main() {
     log "输出文件: $REPORT_FILE"
     
     # Mode Log
-    if [ "$RUN_CDN" = "true" ]; then 
-        log "模式: 仅 YouTube 和 Netflix 的 CDN 节点测试 (-c)"
+    if [ "$RUN_PUBLIC" = "true" ]; then 
+        log "模式: 仅公共服务测试 (-p)"
     elif [ "$RUN_IPERF" = "false" ] && [ "$RUN_TRACE" = "false" ] && [ "$RUN_NET_INFO" = "false" ]; then 
         log "模式: 仅硬件测试 (-h)"
     elif [ "$RUN_CPU" = "false" ] && [ "$RUN_DISK" = "false" ] && [ "$RUN_TRACE" = "true" ] && [ "$RUN_IPERF" = "true" ]; then 
@@ -2334,14 +2393,14 @@ main() {
         run_iperf_test
     fi
     
+    # 公共服务测试
+    if [ "$RUN_PUBLIC" = "true" ]; then
+        run_cdn_test
+    fi
+    
     # 路由追踪测试
     if [ "$RUN_TRACE" = "true" ]; then
         run_trace_test
-    fi
-    
-    # CDN 节点测试
-    if [ "$RUN_CDN" = "true" ]; then
-        run_cdn_test
     fi
     
     info "测试完成! 报告已保存至 $REPORT_FILE"
