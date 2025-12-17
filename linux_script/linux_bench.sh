@@ -409,6 +409,7 @@ collect_network_info() {
     fi
     if [ "$HAS_V4" = "true" ]; then
         echo "  ├─ IPv4: $NET_V4_IP"
+        echo "  │  ├─ AS${NET_V4_ASN} - ${NET_V4_ORG}"
         echo "  │  └─ 位置: $NET_V4_LOC"
     else
         echo "  ├─ IPv4: N/A"
@@ -432,6 +433,7 @@ collect_network_info() {
     fi
     if [ "$HAS_V6" = "true" ]; then
         echo "  ├─ IPv6: $NET_V6_IP"
+        echo "  │  ├─ AS${NET_V6_ASN} - ${NET_V6_ORG}"
         echo "  │  └─ 位置: $NET_V6_LOC"
     else
         echo "  └─ IPv6: N/A"
