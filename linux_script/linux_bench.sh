@@ -2323,14 +2323,27 @@ init_report() {
 main() {
     clear
     
+    # ASCII 艺术字
+    echo -e "${GREEN}"
+    cat <<'EOF'
+  _     _                    ____                  _     
+ | |   (_)_ __  _   ___  __ | __ )  ___ _ __   ___| |__  
+ | |   | | '_ \| | | \ \/ / |  _ \ / _ | '_ \ / __| '_ \ 
+ | |___| | | | | |_| |>  <  | |_) |  __| | | | (__| | | |
+ |_____|_|_| |_|\__,_/_/\_\ |____/ \___|_| |_|\___|_| |_|
+                                                         
+EOF
+    echo -e "${NC}"
+    
     # 提示用户可选参数
-    echo -e "\n[可用测试模式]"
-    echo -e "  -n, --network       仅网络测试 (网络信息 + iperf + 路由追踪 + IP质量 + 流媒体)"
-    echo -e "  -h, --hardware      仅硬件性能测试 (CPU + 磁盘)"
-    echo -e "  -t, --nexttrace     仅路由追踪测试"
-    echo -e "  -p, --public        仅公共服务测试 (DNS + CDN)"
-    echo -e "  -i, --ip-quality    仅 IPv4 质量检测"
-    echo -e "  -s, --stream        仅流媒体解锁测试\n"
+    echo -e "📋 欢迎使用 Linux 系统测试工具"
+    echo -e "\n📋 可用测试模式："
+    echo -e "  -n, --network       网络测试 (网络信息 + iPerf + 路由追踪 + IP质量 + 流媒体)"
+    echo -e "  -h, --hardware      硬件性能 (CPU + 磁盘)"
+    echo -e "  -t, --nexttrace     路由追踪"
+    echo -e "  -p, --public        公共服务 (DNS + CDN)"
+    echo -e "  -i, --ip-quality    IPv4 质量检测"
+    echo -e "  -s, --stream        流媒体解锁\n"
     
     # 致谢
     echo -e "✨ 感谢 JamChoi 提供的 Python 源码"
@@ -2338,7 +2351,7 @@ main() {
     echo -e "💖 本项目依赖 NextTrace (www.nxtrace.org)"
     echo -e "🎬 使用 lmc999/RegionRestrictionCheck 项目进行流媒体测试"
     echo -e "📊 IP 信息来源于 ipapi.co，ipapi.is 和 ippure.com"
-    echo -e "🧹 测试结束时自动清理，干干净净"
+    echo -e "🧹 测试结束时自动清理，干干净净（我有洁癖）"
     echo -e ""
     
     # Initialize Report
