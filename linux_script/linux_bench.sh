@@ -269,7 +269,7 @@ ensure_dependencies() {
     # Ensure TMP_DIR exists for all modes (used by fio, logs, etc)
     mkdir -p "$TMP_DIR"
     
-    if [ "$RUN_TRACE" = "true" ]; then
+    if [ "$RUN_TRACE" = "true" ] || [ "$RUN_CDN" = "true" ]; then
         
         if ! check_cmd nexttrace; then
             local arch=$(uname -m)
