@@ -2336,22 +2336,22 @@ EOF
     echo -e "${NC}"
     
     # 提示用户可选参数
-    echo -e "📋 欢迎使用 LinuxBench，这是一个综合的测试工具"
-    echo -e "\n📋 可用测试模式："
-    echo -e "  -n, --network       网络测试 (网络信息 + iPerf + 路由追踪 + IP质量 + 流媒体)"
-    echo -e "  -h, --hardware      硬件性能 (CPU + 磁盘)"
+    echo -e "==> 欢迎使用 LinuxBench，这是一个综合的测试工具"
+    echo -e "\n--- 可选测试模式："
+    echo -e "  -n, --network       综合网络测试"
+    echo -e "  -h, --hardware      硬件性能测试"
     echo -e "  -t, --nexttrace     路由追踪"
-    echo -e "  -p, --public        公共服务 (DNS + CDN)"
+    echo -e "  -p, --public        公共服务 (DNS + 流媒体 CDN)"
     echo -e "  -i, --ip-quality    IPv4 质量检测"
     echo -e "  -s, --stream        流媒体解锁\n"
     
     # 致谢
-    echo -e "⭐ 感谢 JamChoi 提供的 Python 源码"
-    echo -e "⚙️ 由我驾驶着 Google Antigravity 进行改写和扩展"
-    echo -e "💖 本项目依赖 nxtrace/NTrace-core 进行路由追踪"
-    echo -e "🎬 本项目依赖 lmc999/RegionRestrictionCheck 进行流媒体测试"
-    echo -e "📊 IP 信息来源于 ipapi.co，ipapi.is 和 ippure.com"
-    echo -e "🧹 测试结束时自动清理，干干净净（我有洁癖）"
+    echo -e "[*] 感谢 JamChoi 提供的 Python 源码"
+    echo -e "[+] 由我驾驶着 Google Antigravity 进行改写和扩展"
+    echo -e "[>] 本项目依赖 nxtrace/NTrace-core 进行路由追踪"
+    echo -e "[>] 本项目依赖 lmc999/RegionRestrictionCheck 进行流媒体测试"
+    echo -e "[i] IP 信息来源于 ipapi.co，ipapi.is 和 ippure.com"
+    echo -e "[✓] 测试结束时自动清理，干干净净（我有洁癖）"
     echo -e ""
     
     # Initialize Report
