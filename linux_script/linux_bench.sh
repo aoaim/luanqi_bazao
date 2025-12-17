@@ -2336,7 +2336,7 @@ EOF
     echo -e "${NC}"
     
     # 提示用户可选参数
-    echo -e "📋 欢迎使用 Linux 系统测试工具"
+    echo -e "📋 欢迎使用 LinuxBench，这是一个综合的测试工具"
     echo -e "\n📋 可用测试模式："
     echo -e "  -n, --network       网络测试 (网络信息 + iPerf + 路由追踪 + IP质量 + 流媒体)"
     echo -e "  -h, --hardware      硬件性能 (CPU + 磁盘)"
