@@ -391,6 +391,8 @@ detect_versions() {
 }
 
 detect_updates_hint() {
+    # Temporarily disable pipefail for this function - empty API responses cause grep to fail
+    set +o pipefail
     EZA_UPDATE=""
     HELIX_UPDATE=""
     SPEEDTEST_UPDATE=""
@@ -407,7 +409,7 @@ detect_updates_hint() {
     if command_exists eza; then
         latest=$(curl -s --max-time 10 https://api.github.com/repos/eza-community/eza/releases/latest 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/' || true)
         current=$(get_eza_version)
-        latest_clean=$(echo "${latest#v}" | grep -Eo '[0-9]+(\.[0-9]+)+' | head -n1)
+        latest_clean=$(echo "${latest#v}" | grep -Eo '[0-9]+(\.[0-9]+)+' | head -n1 || true)
         if [ -n "$latest_clean" ] && [ -n "$current" ] && [ "$latest_clean" != "$current" ]; then
             EZA_UPDATE="$current → $latest_clean"
         fi
@@ -484,6 +486,8 @@ detect_updates_hint() {
         current=$(get_nexttrace_version)
         [ -n "$latest" ] && [ -n "$current" ] && [ "$latest" != "$current" ] && NEXTTRACE_UPDATE="$current → $latest"
     fi
+    # Restore pipefail
+    set -o pipefail
 }
 
 detect_unattended() {
@@ -501,8 +505,14 @@ detect_unattended() {
             cfg="/etc/apt/apt.conf.d/50unattended-upgrades"
         fi
         if [ -n "$cfg" ]; then
-            sec=$(grep -qE "^\s*\"origin=Debian,codename=${codename_regex}-security" "$cfg" 2>/dev/null && echo "Security" || echo "")
-            upd=$(grep -qE "^\s*\"origin=Debian,codename=${codename_regex}-updates" "$cfg" 2>/dev/null && echo "Stable-updates" || echo "")
+            sec=""
+            upd=""
+            if grep -qE "^\\s*\\\"origin=Debian,codename=${codename_regex}-security" "$cfg" 2>/dev/null; then
+                sec="Security"
+            fi
+            if grep -qE "^\\s*\\\"origin=Debian,codename=${codename_regex}-updates" "$cfg" 2>/dev/null; then
+                upd="Stable-updates"
+            fi
             tmp="${sec}${sec:+ }${upd}"
             UNATTENDED_SOURCES=${tmp:-unknown}
         fi
