@@ -822,6 +822,10 @@ install_btop() {
         print_info "Btop already installed, skipping."
         return
     fi
+    # Ensure bzip2 is installed for .tbz extraction
+    if ! command_exists bzip2; then
+        apt-get install -qq -y bzip2 >/dev/null 2>&1
+    fi
     print_info "Installing Btop..."
     # Get latest release tarball
     url=$(curl -s --max-time 10 https://api.github.com/repos/aristocratos/btop/releases/latest 2>/dev/null | grep -m1 '"browser_download_url".*btop-x86_64-linux-musl\.tbz"' | cut -d'"' -f4 || true)
