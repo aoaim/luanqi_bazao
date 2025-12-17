@@ -1847,7 +1847,7 @@ main() {
     
     # 致谢
     echo -e "✨ 感谢 JamChoi 提供的 Python 源码"
-    echo -e "🛠️ 由 aoaim 驾驶着 Claude Opus 4.5 进行改写和扩展"
+    echo -e "🛠️ 由我驾驶着 Claude Opus 4.5 进行改写和扩展"
     echo -e "💖 本项目依赖 NextTrace (www.nxtrace.org)"
     echo -e "📊 IP 信息来源于 ipapi.co，ipapi.is 和 ippure.com"
     echo -e "🧹 测试结束时自动清理，干干净净"
