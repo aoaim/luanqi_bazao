@@ -45,6 +45,8 @@ RUN_TRACE=true
 RUN_IP_QUALITY=true
 RUN_STREAM=true
 RUN_PUBLIC=false
+SKIP_V4=false
+SKIP_V6=false
 
 # 报告名称前缀 (根据参数动态设置)
 REPORT_PREFIX="report"
@@ -116,7 +118,15 @@ for arg in "$@"; do
             RUN_IP_QUALITY=false
             RUN_STREAM=false
             RUN_PUBLIC=true
-            REPORT_PREFIX="public_service"
+            REPORT_PREFIX="public"
+            shift
+            ;;
+        -4)
+            SKIP_V6=true
+            shift
+            ;;
+        -6)
+            SKIP_V4=true
             shift
             ;;
     esac
@@ -129,6 +139,8 @@ REPORT_FILE="bench_${REPORT_PREFIX}_$(date +%Y%m%d_%H%M%S).md"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+SKYBLUE='\033[0;36m'
 NC='\033[0m'
 
 # 测试完成标志
@@ -293,7 +305,7 @@ ensure_dependencies() {
         
         # yt-dlp
         if ! check_cmd yt-dlp; then
-            if curl -L -s -o "$TMP_DIR/yt-dlp" "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp" 2>/dev/null; then
+            if curl -f -L -s -o "$TMP_DIR/yt-dlp" "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp" 2>/dev/null; then
                 chmod +x "$TMP_DIR/yt-dlp"
                 export YTDLP_BIN="$TMP_DIR/yt-dlp"
                 ephemeral_tools="$ephemeral_tools yt-dlp"
@@ -340,7 +352,7 @@ collect_system_info() {
         SYS_CACHE="Unknown"
     fi
     [ -z "$SYS_CPU" ] && SYS_CPU="Unknown"
-    echo "  ├─ CPU: $SYS_CPU ($SYS_CORES vCPU)"
+    echo "  │  └─ CPU: $SYS_CPU ($SYS_CORES vCPU)"
     
     # 2. Virtualization
     echo "  ├─ 检测虚拟化类型..."
@@ -349,7 +361,7 @@ collect_system_info() {
         SYS_VIRT=$(hostnamectl 2>/dev/null | grep "Virtualization" | cut -d: -f2 | xargs)
     fi
     [ -z "$SYS_VIRT" ] && SYS_VIRT="Physical/Unknown"
-    echo "  ├─ 虚拟化: $SYS_VIRT"
+    echo "  │  └─ 虚拟化: $SYS_VIRT"
     
     # 3. RAM / SWAP
     echo "  ├─ 检测内存信息..."
@@ -368,7 +380,7 @@ collect_system_info() {
         SYS_MEM="Unknown"
         SYS_SWAP="Unknown"
     fi
-    echo "  ├─ 内存: $SYS_MEM"
+    echo "  │  └─ 内存: $SYS_MEM"
     
     # 4. Disk
     echo "  ├─ 检测磁盘信息..."
@@ -377,7 +389,7 @@ collect_system_info() {
     local disk_used=$(echo "$root_disk" | awk '{print $3}')
     local disk_dev=$(echo "$root_disk" | awk '{print $1}')
     SYS_DISK="${disk_used} / ${disk_total} ($disk_dev)"
-    echo "  ├─ 磁盘: $SYS_DISK"
+    echo "  │  └─ 磁盘: $SYS_DISK"
     
     # 5. OS / Kernel（使用脚本开头已加载的 /etc/os-release 变量）
     SYS_OS="${PRETTY_NAME:-$(uname -srm)}"
@@ -411,51 +423,65 @@ collect_network_info() {
     # 使用 ipapi.co，它同时支持 IPv4 和 IPv6 访问
     # 字段映射：ip=IP地址, org=组织, asn=AS号, city=城市, country_code=国家代码
     
-    echo "  ├─ 查询 IPv4 信息..."
-    local v4_json=$(curl -s -4 --max-time 10 https://ipapi.co/json/ 2>/dev/null)
-    if [ -n "$v4_json" ] && echo "$v4_json" | jq -e '.ip' >/dev/null 2>&1; then
-        HAS_V4="true"
-        NET_V4_IP=$(echo "$v4_json" | jq -r '.ip // empty')
-        NET_V4_ORG=$(echo "$v4_json" | jq -r '.org // empty')
-        NET_V4_ASN=$(echo "$v4_json" | jq -r '.asn // empty' | sed 's/AS//')
-        NET_V4_LOC="$(echo "$v4_json" | jq -r '.city // empty'), $(echo "$v4_json" | jq -r '.country_code // empty')"
-    else
-        HAS_V4=""
-        NET_V4_IP="N/A"
-        NET_V4_ORG=""
-        NET_V4_ASN=""
-        NET_V4_LOC=""
-    fi
-    if [ "$HAS_V4" = "true" ]; then
-        echo "  ├─ IPv4: $NET_V4_IP"
-        echo "  │  ├─ AS${NET_V4_ASN} - ${NET_V4_ORG}"
-        echo "  │  └─ 位置: $NET_V4_LOC"
-    else
-        echo "  ├─ IPv4: N/A"
+    if [ "$SKIP_V4" = "false" ]; then
+        echo "  ├─ 查询 IPv4 信息..."
+        local v4_json=$(curl -s -4 --max-time 10 https://ipapi.co/json/ 2>/dev/null)
+        if [ -n "$v4_json" ] && echo "$v4_json" | jq -e '.ip' >/dev/null 2>&1; then
+            HAS_V4="true"
+            NET_V4_IP=$(echo "$v4_json" | jq -r '.ip // empty')
+            NET_V4_ORG=$(echo "$v4_json" | jq -r '.org // empty')
+            NET_V4_ASN=$(echo "$v4_json" | jq -r '.asn // empty' | sed 's/AS//')
+            NET_V4_LOC="$(echo "$v4_json" | jq -r '.city // empty'), $(echo "$v4_json" | jq -r '.country_code // empty')"
+        else
+            HAS_V4=""
+            NET_V4_IP="N/A"
+            NET_V4_ORG=""
+            NET_V4_ASN=""
+            NET_V4_LOC=""
+        fi
+        if [ "$HAS_V4" = "true" ]; then
+            if [ "$SKIP_V6" = "true" ]; then
+                echo "  └─ IPv4: $NET_V4_IP"
+                echo "     ├─ AS${NET_V4_ASN} - ${NET_V4_ORG}"
+                echo "     └─ 位置: $NET_V4_LOC"
+            else
+                echo "  ├─ IPv4: $NET_V4_IP"
+                echo "  │  ├─ AS${NET_V4_ASN} - ${NET_V4_ORG}"
+                echo "  │  └─ 位置: $NET_V4_LOC"
+            fi
+        else
+            if [ "$SKIP_V6" = "true" ]; then
+                echo "  └─ IPv4: N/A"
+            else
+                echo "  ├─ IPv4: N/A"
+            fi
+        fi
     fi
     
-    echo "  ├─ 查询 IPv6 信息..."
-    # ipapi.co 支持 IPv6 访问，强制使用 -6 会通过 IPv6 获取信息
-    local v6_json=$(curl -s -6 --max-time 10 https://ipapi.co/json/ 2>/dev/null)
-    if [ -n "$v6_json" ] && echo "$v6_json" | jq -e '.ip' >/dev/null 2>&1; then
-        HAS_V6="true"
-        NET_V6_IP=$(echo "$v6_json" | jq -r '.ip // empty')
-        NET_V6_ORG=$(echo "$v6_json" | jq -r '.org // empty')
-        NET_V6_ASN=$(echo "$v6_json" | jq -r '.asn // empty' | sed 's/AS//')
-        NET_V6_LOC="$(echo "$v6_json" | jq -r '.city // empty'), $(echo "$v6_json" | jq -r '.country_code // empty')"
-    else
-        HAS_V6=""
-        NET_V6_IP="N/A"
-        NET_V6_ORG=""
-        NET_V6_ASN=""
-        NET_V6_LOC=""
-    fi
-    if [ "$HAS_V6" = "true" ]; then
-        echo "  ├─ IPv6: $NET_V6_IP"
-        echo "  │  ├─ AS${NET_V6_ASN} - ${NET_V6_ORG}"
-        echo "  │  └─ 位置: $NET_V6_LOC"
-    else
-        echo "  └─ IPv6: N/A"
+    if [ "$SKIP_V6" = "false" ]; then
+        echo "  ├─ 查询 IPv6 信息..."
+        # ipapi.co 支持 IPv6 访问，强制使用 -6 会通过 IPv6 获取信息
+        local v6_json=$(curl -s -6 --max-time 10 https://ipapi.co/json/ 2>/dev/null)
+        if [ -n "$v6_json" ] && echo "$v6_json" | jq -e '.ip' >/dev/null 2>&1; then
+            HAS_V6="true"
+            NET_V6_IP=$(echo "$v6_json" | jq -r '.ip // empty')
+            NET_V6_ORG=$(echo "$v6_json" | jq -r '.org // empty')
+            NET_V6_ASN=$(echo "$v6_json" | jq -r '.asn // empty' | sed 's/AS//')
+            NET_V6_LOC="$(echo "$v6_json" | jq -r '.city // empty'), $(echo "$v6_json" | jq -r '.country_code // empty')"
+        else
+            HAS_V6=""
+            NET_V6_IP="N/A"
+            NET_V6_ORG=""
+            NET_V6_ASN=""
+            NET_V6_LOC=""
+        fi
+        if [ "$HAS_V6" = "true" ]; then
+            echo "  └─ IPv6: $NET_V6_IP"
+            echo "     ├─ AS${NET_V6_ASN} - ${NET_V6_ORG}"
+            echo "     └─ 位置: $NET_V6_LOC"
+        else
+            echo "  └─ IPv6: N/A"
+        fi
     fi
 
     # === Streaming Report ===
@@ -568,7 +594,7 @@ collect_ip_quality() {
     fi
     
     # 2. ippure - 欺诈评分、原生 IP 识别
-    echo "  │  └─ 查询 ippure.com..."
+    echo "  │  ├─ 查询 ippure.com..."
     local ippure_json=$(curl -s -4 --max-time 10 "https://my.ippure.com/v1/info" 2>/dev/null)
     
     local ippure_fraud_score="" ippure_is_residential=""
@@ -608,10 +634,10 @@ collect_ip_quality() {
     [[ "$ipapi_is_vpn" = "true" || "$ipapi_is_proxy" = "true" ]] && vpn_proxy_result="true"
     
     # === 终端输出关键结果 ===
-    echo "  ├─ 欺诈评分: ${ippure_fraud_score:-N/A} | 滥用评分: ${ipapi_abuser_score:-N/A}"
-    echo "  ├─ 组织类型: ${ipapi_company_type:-N/A} | 机房: ${ipapi_is_datacenter:-N/A} | 移动: ${ipapi_is_mobile:-N/A}"
-    echo "  ├─ VPN/代理: ${vpn_proxy_result} | Tor: ${ipapi_is_tor:-N/A} | 原生: ${ippure_is_residential:-N/A}"
-    echo "  └─ 检测完成"
+    echo "  │  ├─ 欺诈评分: ${ippure_fraud_score:-N/A} | 滥用评分: ${ipapi_abuser_score:-N/A}"
+    echo "  │  ├─ 组织类型: ${ipapi_company_type:-N/A} | 机房: ${ipapi_is_datacenter:-N/A} | 移动: ${ipapi_is_mobile:-N/A}"
+    echo "  │  ├─ VPN/代理: ${vpn_proxy_result} | Tor: ${ipapi_is_tor:-N/A} | 原生: ${ippure_is_residential:-N/A}"
+    echo "  │  └─ 检测完成"
     
     # === 生成报告 ===
     {
@@ -714,16 +740,16 @@ run_cpu_test() {
     echo "  ├─ 单线程测试 (20秒)..."
     local res_1t=$(sysbench --threads=1 --time=20 --cpu-max-prime=10000 cpu run 2>&1)
     local score_1t=$(echo "$res_1t" | grep "events per second:" | awk '{print $4}')
-    echo "  ├─ 单线程结果: $score_1t events/s"
+    echo "  │  └─ 单线程结果: $score_1t events/s"
     
     local score_nt=""
     local multi="1.00"
     if [ "$SYS_CORES" -gt 1 ]; then
-        echo "  ├─ $SYS_CORES 线程测试 (20秒)..."
+        echo "  └─ $SYS_CORES 线程测试 (20秒)..."
         local res_nt=$(sysbench --threads="$SYS_CORES" --time=20 --cpu-max-prime=10000 cpu run 2>&1)
         score_nt=$(echo "$res_nt" | grep "events per second:" | awk '{print $4}')
         multi=$(calc "$score_nt / $score_1t")
-        echo "  └─ $SYS_CORES 线程结果: $score_nt events/s (${multi}x)"
+        echo "     └─ $SYS_CORES 线程结果: $score_nt events/s (${multi}x)"
     else
         echo "  └─ (单核心，跳过多线程测试)"
     fi
@@ -856,7 +882,8 @@ run_iperf_once() {
     local ret="busy"
     for i in 1 2; do
         local out
-        out=$(iperf3 "${args[@]}" 2>&1)
+        # Add timeout to prevent hanging on bad nodes
+        out=$(timeout 15 iperf3 "${args[@]}" 2>&1)
         if [[ "$out" == *"receiver"* ]]; then
              local line=$(echo "$out" | grep "receiver" | grep "SUM" | tail -n1)
              [ -z "$line" ] && line=$(echo "$out" | grep "receiver" | tail -n1)
@@ -1031,19 +1058,16 @@ run_stream_test() {
         *) detected_region_id=""; detected_region_name="" ;;
     esac
     
-    echo ""
     echo "  ├─ 检测到服务器位置: ${country_code:-未知}"
     
     # 如果检测到了对应的地区，询问用户选择
     if [ -n "$detected_region_id" ]; then
         echo "  ├─ 匹配测试区域: $detected_region_name (ID: $detected_region_id)"
-        echo ""
-        echo -e "  ${YELLOW}请选择测试模式:${NC}"
-        echo "  [1] $detected_region_name"
-        echo "  [0] 仅跨国平台检测"
-        echo ""
-        echo -n "  请输入选项 (默认: 1，当前地区，5秒后自动选择): "
-        read -t 5 -r user_choice </dev/tty 2>/dev/null || user_choice="1"
+        echo -e "  ├─ ${YELLOW}请选择测试模式:${NC}"
+        echo "  │  ├─ [1] $detected_region_name (默认)"
+        echo "  │  ├─ [0] 仅跨国平台检测"
+        echo -n -e "  │  ├─ ${YELLOW}请输入选项 (5秒后自动选择 [1]): ${NC}"
+        read -t 5 -r user_choice </dev/tty 2>/dev/null || { user_choice="1"; echo ""; }
         
         case "$user_choice" in
             0)
@@ -1061,8 +1085,7 @@ run_stream_test() {
         region_name="仅跨国平台"
     fi
     
-    echo ""
-    echo "  ├─ 选择测试区域: $region_name (ID: $region_id)"
+    echo "  │  └─ 选择测试区域: $region_name (ID: $region_id)"
     
     # 调用外部流媒体测试脚本
     # -R: 指定测试区域
@@ -1201,8 +1224,6 @@ ${stream_output_v6}"
         echo '```'
         echo ""
     } >> "$REPORT_FILE"
-    
-    info "  └─ 流媒体测试结果已写入报告"
 }
 
 # =========================
@@ -1916,7 +1937,13 @@ EOF
 }
 
 run_trace_test() {
-    log "开始路由追踪测试..."
+    local public_only="${1:-false}"  # 如果传入 "public_only"，则只测公共服务
+    
+    if [ "$public_only" = "public_only" ]; then
+        log "开始公共服务路由追踪..."
+    else
+        log "开始路由追踪测试..."
+    fi
     
     # 调试信息
     # log "NextTrace Binary: $NEXTTRACE_BIN"
@@ -1936,8 +1963,36 @@ run_trace_test() {
     echo "  ├─ 获取动态 CDN 节点..."
     local dynamic_targets=""
     if [ "$YTDLP_BIN" != "false" ] && [ -x "$YTDLP_BIN" ]; then
-        if [ "$HAS_V4" = "true" ]; then v4=$("$YTDLP_BIN" --no-warnings -g -4 "https://www.youtube.com/watch?v=G5RpJwCJDqc" 2>/dev/null | head -n1 | awk -F/ '{print $3}'); [ -n "$v4" ] && dynamic_targets+="YouTube CDN (Dynamic)|$v4|"$'\n'; fi
-        if [ "$HAS_V6" = "true" ]; then v6=$("$YTDLP_BIN" --no-warnings -g -6 "https://www.youtube.com/watch?v=G5RpJwCJDqc" 2>/dev/null | head -n1 | awk -F/ '{print $3}'); [ -n "$v6" ] && dynamic_targets+="YouTube CDN (Dynamic)||$v6"$'\n'; fi
+        # Try using "Me at the zoo" (jNQXAC9IVRw) and Android client to bypass bot detection
+        local yt_video="https://www.youtube.com/watch?v=jNQXAC9IVRw"
+        local yt_args="--no-warnings --extractor-args youtube:player_client=android -g"
+        
+        if [ "$HAS_V4" = "true" ]; then
+            # Debug: Capture stderr to see why it fails
+            local yt_err="$TMP_DIR/yt_v4.err"
+            v4=$("$YTDLP_BIN" $yt_args -4 "$yt_video" 2>"$yt_err" | head -n1 | awk -F/ '{print $3}')
+            if [ -n "$v4" ]; then
+                 dynamic_targets+="YouTube CDN (Dynamic)|$v4|"$'\n'
+            else
+                 # If failed, print warning with error content
+                 local err_msg=$(cat "$yt_err" | tr '\n' ' ' | cut -c 1-100)
+                 warn "  │  └─ YouTube (IPv4) 获取失败: $err_msg"
+            fi
+            rm -f "$yt_err"
+        fi
+        if [ "$HAS_V6" = "true" ]; then
+            local yt_err="$TMP_DIR/yt_v6.err"
+            v6=$("$YTDLP_BIN" $yt_args -6 "$yt_video" 2>"$yt_err" | head -n1 | awk -F/ '{print $3}')
+            if [ -n "$v6" ]; then
+                dynamic_targets+="YouTube CDN (Dynamic)||$v6"$'\n'
+            else
+                 local err_msg=$(cat "$yt_err" | tr '\n' ' ' | cut -c 1-100)
+                 warn "  │  └─ YouTube (IPv6) 获取失败: $err_msg"
+            fi
+            rm -f "$yt_err"
+        fi
+    else
+        warn "  │  └─ yt-dlp 未安装或不可执行，跳过 YouTube 测试"
     fi
     # Netflix (Fast.com) - simplified
     local nf_api="https://api.fast.com/netflix/speedtest/v2?https=true&token=YXNkZmFzZGxmbnNkYWZoYXNkZmhrYWxm&urlCount=5"
@@ -1961,24 +2016,46 @@ run_trace_test() {
         echo "## 路由追踪"
     } >> "$REPORT_FILE"
 
-    # 读取静态目标，处理分组标记
-    while IFS= read -r line; do
-        if [ -z "$line" ]; then
-            continue
-        elif [[ "$line" == "#GROUP:"* ]]; then
-            # 从分组标记中提取组名
-            current_group="${line#\#GROUP:}"
-            # 将分组标记添加到目标数组中
-            all_targets+=("#GROUP:$current_group")
-        else
-            all_targets+=("$line")
-        fi
-    done <<< "$raw_static"
+    # 首先添加公共服务目标（主要公共服务分组）
+    local public_targets=""
     
-    # 读取动态目标
-    while IFS= read -r line; do
-        [ -n "$line" ] && all_targets+=("$line")
-    done <<< "$dynamic_targets"
+    # 公共 DNS 服务
+    if [ "$HAS_V4" = "true" ]; then
+        public_targets+="Cloudflare DNS|1.1.1.1|"$'\n'
+        public_targets+="Google DNS|8.8.8.8|"$'\n'
+        public_targets+="Quad9 DNS|9.9.9.9|"$'\n'
+    fi
+    if [ "$HAS_V6" = "true" ]; then
+        public_targets+="Cloudflare DNS||2606:4700:4700::1111"$'\n'
+        public_targets+="Google DNS||2001:4860:4860::8888"$'\n'
+        public_targets+="Quad9 DNS||2620:fe::fe"$'\n'
+    fi
+    
+    # 添加动态 CDN 目标
+    public_targets+="$dynamic_targets"
+    
+    if [ -n "$public_targets" ]; then
+        all_targets+=("#GROUP:主要公共服务")
+        while IFS= read -r line; do
+            [ -n "$line" ] && all_targets+=("$line")
+        done <<< "$public_targets"
+    fi
+
+    # 然后读取静态目标，处理分组标记（仅在完整模式下）
+    if [ "$public_only" != "public_only" ]; then
+        while IFS= read -r line; do
+            if [ -z "$line" ]; then
+                continue
+            elif [[ "$line" == "#GROUP:"* ]]; then
+                # 从分组标记中提取组名
+                current_group="${line#\#GROUP:}"
+                # 将分组标记添加到目标数组中
+                all_targets+=("#GROUP:$current_group")
+            else
+                all_targets+=("$line")
+            fi
+        done <<< "$raw_static"
+    fi
     
     local idx=0
     local total=0
@@ -1992,24 +2069,56 @@ run_trace_test() {
         return
     fi
     
-    for entry in "${all_targets[@]}"; do
+    # 使用 C-style loop 来灵活处理数组索引
+    for ((i=0; i<${#all_targets[@]}; i++)); do
+        entry="${all_targets[$i]}"
         [ -z "$entry" ] && continue
         
         # 处理分组标记
         if [[ "$entry" == "#GROUP:"* ]]; then
             local group_name="${entry#\#GROUP:}"
-            echo ""
-            echo "  ┌── $group_name"
+            # echo ""  <-- Remove empty line to keep tree compact
+            echo "  ├── $group_name"
             # 在报告中添加分节标题
             {
                 echo ""
                 echo "### $group_name"
                 echo ""
             } >> "$REPORT_FILE"
+            
+            # --- 计算该分组的总数 ---
+            # 向后扫描直到下一个 #GROUP: 或数组结束
+            total=0
+            for ((j=i+1; j<${#all_targets[@]}; j++)); do
+                local next_entry="${all_targets[$j]}"
+                [[ "$next_entry" == "#GROUP:"* ]] && break
+                if [ -n "$next_entry" ]; then
+                    IFS='|' read -r _t_name _t_v4 _t_v6 <<< "$next_entry"
+                    # Count IPv4 test if enabled and target exists
+                    if [ -n "$_t_v4" ] && [ "$HAS_V4" = "true" ]; then total=$((total+1)); fi
+                    # Count IPv6 test if enabled and target exists
+                    if [ -n "$_t_v6" ] && [ "$HAS_V6" = "true" ]; then total=$((total+1)); fi
+                fi
+            done
+            idx=0 # 重置组内序号
+            
             continue
         fi
         
-        idx=$((idx+1))
+        # 如果一开始就没有 Group（防御性编程），先计算一个总数
+        if [ "$total" -eq 0 ]; then
+             for ((j=i; j<${#all_targets[@]}; j++)); do
+                local next_entry="${all_targets[$j]}"
+                [[ "$next_entry" == "#GROUP:"* ]] && break
+                if [ -n "$next_entry" ]; then
+                    IFS='|' read -r _t_name _t_v4 _t_v6 <<< "$next_entry"
+                    if [ -n "$_t_v4" ] && [ "$HAS_V4" = "true" ]; then total=$((total+1)); fi
+                    if [ -n "$_t_v6" ] && [ "$HAS_V6" = "true" ]; then total=$((total+1)); fi
+                fi
+            done
+        fi
+        
+        # idx=$((idx+1))  <-- Remove here, increment inside test loop
         IFS='|' read -r name ipv4 ipv6 <<< "$entry"
         
         for mode in IPv4 IPv6; do
@@ -2019,7 +2128,8 @@ run_trace_test() {
             
             # 只有当 目标存在 且 (是IPv4且有V4网 OR 是IPv6且有V6网) 时才测试
             if [ -n "$target" ] && { ([ "$mode" = "IPv4" ] && [ "$HAS_V4" = "true" ]) || ([ "$mode" = "IPv6" ] && [ "$HAS_V6" = "true" ]); }; then
-                echo "  ├─ [$idx/$total] $name ($mode)..."
+                idx=$((idx+1))
+                echo "  │  ├─ [$idx/$total] $name ($mode)..."
                 local ipflag="-4"; [ "$mode" == "IPv6" ] && ipflag="-6"
                 
                 # 运行 nexttrace
@@ -2036,13 +2146,13 @@ run_trace_test() {
                 
                 # Verify JSON
                 if [ -z "$json" ] || ! echo "$json" | jq -e . >/dev/null 2>&1; then
-                    echo "  │  └─ 失败: 无效输出"
+                    echo "  │  │  └─ 失败: 无效输出"
                     # Debug: Show what we actually got
                     if [ -z "$raw_output" ]; then
-                        echo "  │     (输出为空)"
+                        echo "  │  │     (输出为空)"
                     else
                         local clean_out=$(echo "$raw_output" | tr -d '\n' | sed 's/\x1b\[[0-9;]*m//g')
-                        echo "  │     (原始内容): ${clean_out:0:100}..."
+                        echo "  │  │     (原始内容): ${clean_out:0:100}..."
                     fi
                     
                     if [ -n "$err_out" ]; then
@@ -2116,11 +2226,13 @@ run_trace_test() {
                             table+="| $ttl | $ip | $asn | $loc | $isp | $rtt_display |\n"
                         done <<< "$rows"
                         
-                        echo "  │  └─ 追踪完成"
+
+                        
+                        echo "  │  │  └─ 追踪完成"
                         
                         # === Streaming Report (Trace Item) ===
                         {
-                            echo "### $name ($mode)"
+                            echo "#### $name ($mode)"
                             # 如果是动态 CDN 目标，显示解析到的域名
                             if [[ "$name" == *"Dynamic"* ]]; then
                                 echo "命中 CDN 节点: \`$target\`"
@@ -2130,7 +2242,7 @@ run_trace_test() {
                             echo ""
                         } >> "$REPORT_FILE"
                     else
-                        echo "  │  └─ 失败: 解析结果为空"
+                        echo "  │  │  └─ 失败: 解析结果为空"
                         # TRACE_RESULTS+=("### $name ($mode)|> Trace Failed (Parse Error)")
                     fi
                 fi
@@ -2140,177 +2252,6 @@ run_trace_test() {
     done
     
     info "  └─ 路由追踪完成"
-}
-
-run_cdn_test() {
-    log "开始公共服务测试..."
-    
-    # 检查 NextTrace
-    if [ "$NEXTTRACE_BIN" == "false" ] || [ -z "$NEXTTRACE_BIN" ]; then 
-        warn "  └─ NextTrace 二进制未找到或下载失败，跳过路由追踪"
-        return
-    fi
-    
-    create_ix_map
-    
-    # 收集测试目标
-    local cdn_targets=()
-    
-    # 公共 DNS 服务
-    echo "  ├─ 添加公共 DNS 服务..."
-    if [ "$HAS_V4" = "true" ]; then
-        cdn_targets+=("Cloudflare DNS|1.1.1.1|IPv4")
-        cdn_targets+=("Google DNS|8.8.8.8|IPv4")
-        cdn_targets+=("Quad9 DNS|9.9.9.9|IPv4")
-    fi
-    if [ "$HAS_V6" = "true" ]; then
-        cdn_targets+=("Cloudflare DNS|2606:4700:4700::1111|IPv6")
-        cdn_targets+=("Google DNS|2001:4860:4860::8888|IPv6")
-        cdn_targets+=("Quad9 DNS|2620:fe::fe|IPv6")
-    fi
-    
-    # YouTube CDN
-    echo "  ├─ 获取 YouTube CDN 节点..."
-    if [ "$YTDLP_BIN" != "false" ] && [ -x "$YTDLP_BIN" ]; then
-        # 使用 --dump-json 获取真正的视频流 URL（而非 manifest）
-        # 从 formats 中提取视频流的 hostname，正确格式为 rr*.googlevideo.com
-        if [ "$HAS_V4" = "true" ]; then
-            local yt_v4=$("$YTDLP_BIN" --no-warnings --dump-json -4 "https://www.youtube.com/watch?v=G5RpJwCJDqc" 2>/dev/null | \
-                jq -r '[.formats[]?.url // empty] | map(select(contains("googlevideo.com") and (contains("manifest") | not))) | first // empty' 2>/dev/null | \
-                awk -F/ '{print $3}')
-            if [ -n "$yt_v4" ]; then
-                echo "  │  ├─ IPv4: $yt_v4"
-                cdn_targets+=("YouTube CDN|$yt_v4|IPv4")
-            fi
-        fi
-        if [ "$HAS_V6" = "true" ]; then
-            local yt_v6=$("$YTDLP_BIN" --no-warnings --dump-json -6 "https://www.youtube.com/watch?v=G5RpJwCJDqc" 2>/dev/null | \
-                jq -r '[.formats[]?.url // empty] | map(select(contains("googlevideo.com") and (contains("manifest") | not))) | first // empty' 2>/dev/null | \
-                awk -F/ '{print $3}')
-            if [ -n "$yt_v6" ]; then
-                echo "  │  └─ IPv6: $yt_v6"
-                cdn_targets+=("YouTube CDN|$yt_v6|IPv6")
-            fi
-        fi
-    else
-        echo "  │  └─ yt-dlp 不可用，跳过 YouTube CDN"
-    fi
-    
-    # Netflix CDN
-    echo "  ├─ 获取 Netflix CDN 节点..."
-    local nf_api="https://api.fast.com/netflix/speedtest/v2?https=true&token=YXNkZmFzZGxmbnNkYWZoYXNkZmhrYWxm&urlCount=5"
-    if [ "$HAS_V4" = "true" ]; then
-        local nf_v4=$(curl -s -4 "$nf_api" 2>/dev/null | jq -r '.targets[]|select(.url|contains("ipv4"))|.url' 2>/dev/null | head -n1 | awk -F/ '{print $3}')
-        if [ -n "$nf_v4" ]; then
-            echo "  │  ├─ IPv4: $nf_v4"
-            cdn_targets+=("Netflix CDN|$nf_v4|IPv4")
-        fi
-    fi
-    if [ "$HAS_V6" = "true" ]; then
-        local nf_v6=$(curl -s -6 "$nf_api" 2>/dev/null | jq -r '.targets[]|select(.url|contains("ipv6"))|.url' 2>/dev/null | head -n1 | awk -F/ '{print $3}')
-        if [ -n "$nf_v6" ]; then
-            echo "  │  └─ IPv6: $nf_v6"
-            cdn_targets+=("Netflix CDN|$nf_v6|IPv6")
-        fi
-    fi
-    
-    # 写入报告头
-    {
-        echo "## 公共服务路由追踪"
-        echo ""
-    } >> "$REPORT_FILE"
-    
-    # 对每个 CDN 目标进行路由追踪
-    local idx=0
-    local total=${#cdn_targets[@]}
-    
-    for entry in "${cdn_targets[@]}"; do
-        idx=$((idx+1))
-        IFS='|' read -r name target mode <<< "$entry"
-        
-        echo "  ├─ [$idx/$total] 追踪 $name ($mode): $target"
-        
-        local ipflag="-4"; [ "$mode" == "IPv6" ] && ipflag="-6"
-        
-        # 运行 nexttrace
-        local err_file="$TMP_DIR/nt_cdn_err_$idx.log"
-        local raw_output=$("$NEXTTRACE_BIN" --json $ipflag "$target" 2>"$err_file")
-        rm -f "$err_file"
-        
-        # Extract JSON
-        local json=$(echo "$raw_output" | sed 's/^[^{]*//')
-        
-        if [ -z "$json" ] || ! echo "$json" | jq -e . >/dev/null 2>&1; then
-            echo "  │  └─ 追踪失败"
-            continue
-        fi
-        
-        # Parse and build table
-        local table="| 跳数 | IP | ASN | 位置 | 运营商 | 延迟 |\n"
-        table+="|---:|:---|:---|:---|:---|---:|\n"
-        
-        local rows=$(echo "$json" | jq -r '
-            .Hops | to_entries[] |
-            (.key + 1) as $hopnum |
-            .value as $probes |
-            ([$probes[] | select(.Success == true)][0] // $probes[0] // {}) as $p |
-            (if $p.Address then ($p.Address.IP // "*") else "*" end) as $ip |
-            (if $p.Geo and ($p.Geo.asnumber // "") != "" then "AS" + $p.Geo.asnumber else "-" end) as $asn |
-            (if $p.Geo then
-                ([$p.Geo.country, $p.Geo.prov, $p.Geo.city] | map(select(. and . != "") | gsub("市$|省$|州$"; "")) | reduce .[] as $x ([]; if . | index($x) then . else . + [$x] end) | join(" "))
-            else "" end) as $loc_raw |
-            (if $loc_raw == "" then "-" else $loc_raw end) as $loc |
-            (if $p.Geo then
-                (if ($p.Geo.isp // "") != "" then $p.Geo.isp
-                 elif ($p.Geo.owner // "") != "" then $p.Geo.owner
-                 else "-" end)
-            else "-" end) as $isp |
-            (if $p.RTT and $p.RTT > 0 then
-                (($p.RTT / 1000000 * 100 | floor) / 100 | tostring)
-            else "-" end) as $rtt |
-            [$hopnum, $ip, $asn, $loc, $isp, $rtt] | @tsv
-        ' 2>/dev/null)
-        
-        if [ -n "$rows" ]; then
-            while IFS=$'\t' read -r ttl ip asn loc isp rtt; do
-                [ -z "$ip" ] && continue
-                [ "$ip" = "*" ] && ip="-"
-                
-                # IX Check
-                if [ "$ip" != "-" ]; then
-                    local ix_name=$(grep -F "$ip " "$TMP_DIR/ix_ip_map.txt" 2>/dev/null | head -n1 | cut -d' ' -f2-)
-                    [ -n "$ix_name" ] && isp="$isp [$ix_name]"
-                fi
-                
-                
-                # 运营商名称规范化
-                isp=$(normalize_isp_name "$isp")
-                
-                # RTT format
-                if [ "$rtt" != "-" ] && [ -n "$rtt" ]; then
-                    rtt_display="$rtt ms"
-                else
-                    rtt_display="-"
-                fi
-                table+="| $ttl | $ip | $asn | $loc | $isp | $rtt_display |\n"
-            done <<< "$rows"
-            
-            echo "  │  └─ 追踪完成"
-            
-            # Write to report
-            {
-                echo "### $name ($mode)"
-                echo "测试节点: \`$target\`"
-                echo ""
-                echo -e "$table"
-                echo ""
-            } >> "$REPORT_FILE"
-        else
-            echo "  │  └─ 追踪失败: 解析结果为空"
-        fi
-    done
-    
-    info "  └─ 公共服务测试完成"
 }
 
 init_report() {
@@ -2343,7 +2284,9 @@ EOF
     echo -e "  -t, --nexttrace     路由追踪"
     echo -e "  -p, --public        公共服务 (DNS + 流媒体 CDN)"
     echo -e "  -i, --ip-quality    IPv4 质量检测"
-    echo -e "  -s, --stream        流媒体解锁\n"
+    echo -e "  -s, --stream        流媒体解锁"
+    echo -e "  -4                  仅进行 IPv4 测试"
+    echo -e "  -6                  仅进行 IPv6 测试\n"
     
     # 致谢
     echo -e "[*] 感谢 JamChoi 提供的 Python 源码"
@@ -2359,18 +2302,25 @@ EOF
     log "输出文件: $REPORT_FILE"
     
     # Mode Log
+    # Mode Log
     if [ "$RUN_PUBLIC" = "true" ]; then 
-        log "模式: 仅公共服务测试 (-p)"
+        log "${CYAN}模式: 仅公共服务测试 (-p)${NC}"
     elif [ "$RUN_IPERF" = "false" ] && [ "$RUN_TRACE" = "false" ] && [ "$RUN_NET_INFO" = "false" ]; then 
-        log "模式: 仅硬件测试 (-h)"
+        log "${CYAN}模式: 仅硬件测试 (-h)${NC}"
     elif [ "$RUN_CPU" = "false" ] && [ "$RUN_DISK" = "false" ] && [ "$RUN_TRACE" = "true" ] && [ "$RUN_IPERF" = "true" ]; then 
-        log "模式: 仅网络测试 (-n)"
+        log "${CYAN}模式: 仅网络测试 (-n)${NC}"
     elif [ "$RUN_TRACE" = "true" ] && [ "$RUN_IPERF" = "false" ]; then 
-        log "模式: 仅路由追踪 (-t)"
+        log "${CYAN}模式: 仅路由追踪 (-t)${NC}"
     elif [ "$RUN_IP_QUALITY" = "true" ] && [ "$RUN_TRACE" = "false" ]; then 
-        log "模式: 仅 IP 质量检测 (-i)"
+        log "${CYAN}模式: 仅 IP 质量检测 (-i)${NC}"
     elif [ "$RUN_STREAM" = "true" ] && [ "$RUN_TRACE" = "false" ]; then 
-        log "模式: 仅流媒体测试 (-s)"
+        log "${CYAN}模式: 仅流媒体测试 (-s)${NC}"
+    fi
+
+    if [ "$SKIP_V6" = "true" ]; then
+        log "${CYAN}限制: 仅运行 IPv4 测试 (-4)${NC}"
+    elif [ "$SKIP_V4" = "true" ]; then
+        log "${CYAN}限制: 仅运行 IPv6 测试 (-6)${NC}"
     fi
     
     ensure_dependencies
@@ -2406,9 +2356,9 @@ EOF
         run_iperf_test
     fi
     
-    # 公共服务测试
+    # 公共服务测试（只测公共服务，不测其他目标）
     if [ "$RUN_PUBLIC" = "true" ]; then
-        run_cdn_test
+        run_trace_test "public_only"
     fi
     
     # 路由追踪测试
