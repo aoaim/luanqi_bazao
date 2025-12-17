@@ -296,15 +296,88 @@ get_speedtest_version() {
     echo "${ver:-unknown}"
 }
 
+get_duf_version() {
+    local out ver
+    out=$(duf --version 2>/dev/null | head -n1)
+    ver=$(echo "$out" | grep -oE '[0-9]+(\.[0-9]+)+' | head -n1)
+    echo "${ver:-unknown}"
+}
+
+get_bat_version() {
+    local ver
+    ver=$(bat --version 2>/dev/null | grep -oE '[0-9]+(\.[0-9]+)+' | head -n1)
+    echo "${ver:-unknown}"
+}
+
+get_btop_version() {
+    local ver
+    ver=$(btop --version 2>/dev/null | grep -oE '[0-9]+(\.[0-9]+)+' | head -n1)
+    echo "${ver:-unknown}"
+}
+
+get_fd_version() {
+    local ver
+    ver=$(fd --version 2>/dev/null | grep -oE '[0-9]+(\.[0-9]+)+' | head -n1)
+    echo "${ver:-unknown}"
+}
+
+get_procs_version() {
+    local ver
+    ver=$(procs --version 2>/dev/null | grep -oE '[0-9]+(\.[0-9]+)+' | head -n1)
+    echo "${ver:-unknown}"
+}
+
+get_tldr_version() {
+    local ver
+    ver=$(tldr --version 2>/dev/null | grep -oE '[0-9]+(\.[0-9]+)+' | head -n1)
+    echo "${ver:-unknown}"
+}
+
+get_zoxide_version() {
+    local ver
+    ver=$(zoxide --version 2>/dev/null | grep -oE '[0-9]+(\.[0-9]+)+' | head -n1)
+    echo "${ver:-unknown}"
+}
+
+get_gping_version() {
+    local ver
+    ver=$(gping --version 2>/dev/null | grep -oE '[0-9]+(\.[0-9]+)+' | head -n1)
+    echo "${ver:-unknown}"
+}
+
+get_nexttrace_version() {
+    local ver
+    ver=$(nexttrace --version 2>/dev/null | grep -oE '[0-9]+(\.[0-9]+)+' | head -n1)
+    echo "${ver:-unknown}"
+}
+
 detect_versions() {
     EZA_VER="Not installed"
     HELIX_VER="Not installed"
     SPEEDTEST_VER="Not installed"
+    DUF_VER="Not installed"
+    BAT_VER="Not installed"
+    BTOP_VER="Not installed"
+    FD_VER="Not installed"
+    PROCS_VER="Not installed"
+    TLDR_VER="Not installed"
+    ZOXIDE_VER="Not installed"
+    GPING_VER="Not installed"
+    NEXTTRACE_VER="Not installed"
     AUTO_UPDATES="Not installed"
 
     if command_exists eza; then EZA_VER=$(get_eza_version); fi
     if command_exists hx; then HELIX_VER=$(get_helix_version); fi
     if command_exists speedtest; then SPEEDTEST_VER=$(get_speedtest_version); fi
+    if command_exists duf; then DUF_VER=$(get_duf_version); fi
+    if command_exists bat; then BAT_VER=$(get_bat_version); fi
+    if command_exists btop; then BTOP_VER=$(get_btop_version); fi
+    if command_exists fd; then FD_VER=$(get_fd_version); fi
+    if command_exists procs; then PROCS_VER=$(get_procs_version); fi
+    if command_exists tldr; then TLDR_VER=$(get_tldr_version); fi
+    if command_exists zoxide; then ZOXIDE_VER=$(get_zoxide_version); fi
+    if command_exists gping; then GPING_VER=$(get_gping_version); fi
+    if command_exists nexttrace; then NEXTTRACE_VER=$(get_nexttrace_version); fi
     if command_exists unattended-upgrade; then AUTO_UPDATES="installed"; fi
 }
 
@@ -312,6 +385,15 @@ detect_updates_hint() {
     EZA_UPDATE=""
     HELIX_UPDATE=""
     SPEEDTEST_UPDATE=""
+    DUF_UPDATE=""
+    BAT_UPDATE=""
+    BTOP_UPDATE=""
+    FD_UPDATE=""
+    PROCS_UPDATE=""
+    TLDR_UPDATE=""
+    ZOXIDE_UPDATE=""
+    GPING_UPDATE=""
+    NEXTTRACE_UPDATE=""
 
     if command_exists eza; then
         latest=$(curl -s --max-time 10 https://api.github.com/repos/eza-community/eza/releases/latest 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/' || true)
@@ -336,6 +418,62 @@ detect_updates_hint() {
         if [ -n "$latest_num" ] && [ -n "$current_num" ] && [ "$latest_num" != "$current_num" ]; then
             SPEEDTEST_UPDATE="$current_num → $latest"
         fi
+    fi
+
+    if command_exists duf; then
+        latest=$(curl -s --max-time 10 https://api.github.com/repos/muesli/duf/releases/latest 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"tag_name": "v?([^"]+)".*/\1/' || true)
+        current=$(get_duf_version)
+        if [ -n "$latest" ] && [ -n "$current" ] && [ "$latest" != "$current" ]; then
+            DUF_UPDATE="$current → $latest"
+        fi
+    fi
+
+    if command_exists bat; then
+        latest=$(curl -s --max-time 10 https://api.github.com/repos/sharkdp/bat/releases/latest 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"tag_name": "v?([^"]+)".*/\1/' || true)
+        current=$(get_bat_version)
+        [ -n "$latest" ] && [ -n "$current" ] && [ "$latest" != "$current" ] && BAT_UPDATE="$current → $latest"
+    fi
+
+    if command_exists btop; then
+        latest=$(curl -s --max-time 10 https://api.github.com/repos/aristocratos/btop/releases/latest 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"tag_name": "v?([^"]+)".*/\1/' || true)
+        current=$(get_btop_version)
+        [ -n "$latest" ] && [ -n "$current" ] && [ "$latest" != "$current" ] && BTOP_UPDATE="$current → $latest"
+    fi
+
+    if command_exists fd; then
+        latest=$(curl -s --max-time 10 https://api.github.com/repos/sharkdp/fd/releases/latest 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"tag_name": "v?([^"]+)".*/\1/' || true)
+        current=$(get_fd_version)
+        [ -n "$latest" ] && [ -n "$current" ] && [ "$latest" != "$current" ] && FD_UPDATE="$current → $latest"
+    fi
+
+    if command_exists procs; then
+        latest=$(curl -s --max-time 10 https://api.github.com/repos/dalance/procs/releases/latest 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"tag_name": "v?([^"]+)".*/\1/' || true)
+        current=$(get_procs_version)
+        [ -n "$latest" ] && [ -n "$current" ] && [ "$latest" != "$current" ] && PROCS_UPDATE="$current → $latest"
+    fi
+
+    if command_exists tldr; then
+        latest=$(curl -s --max-time 10 https://api.github.com/repos/dbrgn/tealdeer/releases/latest 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"tag_name": "v?([^"]+)".*/\1/' || true)
+        current=$(get_tldr_version)
+        [ -n "$latest" ] && [ -n "$current" ] && [ "$latest" != "$current" ] && TLDR_UPDATE="$current → $latest"
+    fi
+
+    if command_exists zoxide; then
+        latest=$(curl -s --max-time 10 https://api.github.com/repos/ajeetdsouza/zoxide/releases/latest 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"tag_name": "v?([^"]+)".*/\1/' || true)
+        current=$(get_zoxide_version)
+        [ -n "$latest" ] && [ -n "$current" ] && [ "$latest" != "$current" ] && ZOXIDE_UPDATE="$current → $latest"
+    fi
+
+    if command_exists gping; then
+        latest=$(curl -s --max-time 10 https://api.github.com/repos/orf/gping/releases/latest 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"tag_name": "gping-v?([^"]+)".*/\1/' || true)
+        current=$(get_gping_version)
+        [ -n "$latest" ] && [ -n "$current" ] && [ "$latest" != "$current" ] && GPING_UPDATE="$current → $latest"
+    fi
+
+    if command_exists nexttrace; then
+        latest=$(curl -s --max-time 10 https://api.github.com/repos/nxtrace/NTrace-core/releases/latest 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"tag_name": "v?([^"]+)".*/\1/' || true)
+        current=$(get_nexttrace_version)
+        [ -n "$latest" ] && [ -n "$current" ] && [ "$latest" != "$current" ] && NEXTTRACE_UPDATE="$current → $latest"
     fi
 }
 
@@ -419,18 +557,40 @@ show_detection() {
     print_kv "zram swap" "${ZRAM_STATUS:-not detected}"
     print_kv "Disk (/)" "$DISK_ROOT"
     print_kv "BBR / qdisc" "$BBR_STATUS / $QDISC_STATUS"
-    print_kv "Eza" "$EZA_VER"
-    print_kv "Helix" "$HELIX_VER"
-    print_kv "Speedtest" "$SPEEDTEST_VER"
+    echo ""
+    print_info "Modern CLI tools:"
+    print_kv "  Eza" "$EZA_VER"
+    print_kv "  Helix" "$HELIX_VER"
+    print_kv "  Bat" "$BAT_VER"
+    print_kv "  Btop" "$BTOP_VER"
+    print_kv "  Duf" "$DUF_VER"
+    print_kv "  Fd" "$FD_VER"
+    print_kv "  Procs" "$PROCS_VER"
+    print_kv "  Tldr" "$TLDR_VER"
+    print_kv "  Zoxide" "$ZOXIDE_VER"
+    print_kv "  Gping" "$GPING_VER"
+    print_kv "  Speedtest" "$SPEEDTEST_VER"
+    echo ""
+    print_kv "Nexttrace" "$NEXTTRACE_VER"
     print_kv "Docker" "$DOCKER_STATUS"
     print_kv "Unattended-Upgrades" "$UNATTENDED_STATUS (sources: $UNATTENDED_SOURCES, timer: $UNATTENDED_TIMER)"
     
-    if [ -n "$EZA_UPDATE$HELIX_UPDATE$SPEEDTEST_UPDATE" ]; then
+    local all_updates="$EZA_UPDATE$HELIX_UPDATE$SPEEDTEST_UPDATE$DUF_UPDATE$BAT_UPDATE$BTOP_UPDATE$FD_UPDATE$PROCS_UPDATE$TLDR_UPDATE$ZOXIDE_UPDATE$GPING_UPDATE$NEXTTRACE_UPDATE"
+    if [ -n "$all_updates" ]; then
         echo ""
         print_warning "Updates available:"
         [ -n "$EZA_UPDATE" ] && echo -e "  ${YELLOW}•${RESET} Eza $EZA_UPDATE"
         [ -n "$HELIX_UPDATE" ] && echo -e "  ${YELLOW}•${RESET} Helix $HELIX_UPDATE"
+        [ -n "$BAT_UPDATE" ] && echo -e "  ${YELLOW}•${RESET} Bat $BAT_UPDATE"
+        [ -n "$BTOP_UPDATE" ] && echo -e "  ${YELLOW}•${RESET} Btop $BTOP_UPDATE"
+        [ -n "$DUF_UPDATE" ] && echo -e "  ${YELLOW}•${RESET} Duf $DUF_UPDATE"
+        [ -n "$FD_UPDATE" ] && echo -e "  ${YELLOW}•${RESET} Fd $FD_UPDATE"
+        [ -n "$PROCS_UPDATE" ] && echo -e "  ${YELLOW}•${RESET} Procs $PROCS_UPDATE"
+        [ -n "$TLDR_UPDATE" ] && echo -e "  ${YELLOW}•${RESET} Tldr $TLDR_UPDATE"
+        [ -n "$ZOXIDE_UPDATE" ] && echo -e "  ${YELLOW}•${RESET} Zoxide $ZOXIDE_UPDATE"
+        [ -n "$GPING_UPDATE" ] && echo -e "  ${YELLOW}•${RESET} Gping $GPING_UPDATE"
         [ -n "$SPEEDTEST_UPDATE" ] && echo -e "  ${YELLOW}•${RESET} Speedtest $SPEEDTEST_UPDATE"
+        [ -n "$NEXTTRACE_UPDATE" ] && echo -e "  ${YELLOW}•${RESET} Nexttrace $NEXTTRACE_UPDATE"
     fi
 }
 
@@ -439,16 +599,16 @@ confirm_proceed() {
     print_banner "${ICON_DOC} Planned actions"
     if [ "$MODE_LITE" -eq 1 ]; then
         echo -e " ${BLUE}1)${RESET} Update/upgrade/autoremove"
-        echo -e " ${BLUE}2)${RESET} Check/install Eza, Helix, Speedtest"
+        echo -e " ${BLUE}2)${RESET} Modern CLI tools (eza, helix, bat, btop, duf, fd, procs, tldr, zoxide, gping, speedtest)"
         echo -e " ${BLUE}3)${RESET} unattended-upgrades: configure"
-        echo -e " ${BLUE}4)${RESET} Docker: install/update prompt"
+        echo -e " ${BLUE}4)${RESET} Docker + Nexttrace: install prompts"
         echo -e " ${BLUE}5)${RESET} zram swap: configure or adjust"
         echo -e " ${BLUE}6)${RESET} IP forwarding / IPv6: configure"
     else
         echo -e " ${BLUE}1)${RESET} Update/upgrade/autoremove"
-        echo -e " ${BLUE}2)${RESET} Tools + unattended-upgrades"
-        echo -e " ${BLUE}3)${RESET} Docker: install/update prompt"
-        echo -e " ${BLUE}4)${RESET} Base packages (chrony, fail2ban, htop, vnstat, etc.)"
+        echo -e " ${BLUE}2)${RESET} Modern CLI tools (eza, helix, bat, btop, duf, fd, procs, tldr, zoxide, gping, speedtest)"
+        echo -e " ${BLUE}3)${RESET} Docker + Nexttrace: install prompts"
+        echo -e " ${BLUE}4)${RESET} Base packages (chrony, fail2ban, vnstat, etc.)"
         echo -e " ${BLUE}5)${RESET} Time sync/timezone; zram swap"
         echo -e " ${BLUE}6)${RESET} Network tuning: BBR + TCP optimization + security hardening"
         echo -e " ${BLUE}7)${RESET} IP forwarding / IPv6: configure"
@@ -564,11 +724,327 @@ EOF
     rm -rf "$tmpdir" /tmp/eza.tar.gz
 }
 
+install_duf() {
+    if [ "$GITHUB_ALLOWED" -eq 0 ]; then
+        print_warning "IPv6-only detected: skipping Duf (GitHub download required)."
+        return
+    fi
+    if command_exists duf; then
+        print_info "Duf already installed, skipping."
+        return
+    fi
+    print_info "Installing Duf..."
+    # Get latest version tag from GitHub API
+    latest_tag=$(curl -s --max-time 10 https://api.github.com/repos/muesli/duf/releases/latest 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/' || true)
+    if [ -z "$latest_tag" ]; then print_error "Failed to fetch Duf release info"; return; fi
+    # Construct download URL: https://github.com/muesli/duf/releases/download/v0.9.1/duf_0.9.1_linux_x86_64.tar.gz
+    version_num="${latest_tag#v}"
+    url="https://github.com/muesli/duf/releases/download/${latest_tag}/duf_${version_num}_linux_x86_64.tar.gz"
+    wget -q "$url" -O /tmp/duf.tar.gz
+    tmpdir=$(mktemp -d)
+    if tar -xzf /tmp/duf.tar.gz -C "$tmpdir" 2>/dev/null; then
+        binpath=$(find "$tmpdir" -type f -name duf -executable -print -quit 2>/dev/null || true)
+        if [ -n "$binpath" ]; then
+            install -m 755 "$binpath" /usr/local/bin/duf
+            cat > /etc/profile.d/duf-alias.sh <<'EOF'
+alias df='duf'
+EOF
+            chmod 644 /etc/profile.d/duf-alias.sh
+            # Source alias in current shell
+            source /etc/profile.d/duf-alias.sh 2>/dev/null || true
+            print_success "Duf installed (alias: df)"
+        else
+            print_error "Duf binary not found in archive"
+        fi
+    else
+        print_error "Failed to extract Duf archive"
+    fi
+    rm -rf "$tmpdir" /tmp/duf.tar.gz
+}
+
+install_bat() {
+    if [ "$GITHUB_ALLOWED" -eq 0 ]; then
+        print_warning "IPv6-only detected: skipping Bat (GitHub download required)."
+        return
+    fi
+    if command_exists bat; then
+        print_info "Bat already installed, skipping."
+        return
+    fi
+    print_info "Installing Bat..."
+    # Get latest .deb from GitHub
+    url=$(curl -s --max-time 10 https://api.github.com/repos/sharkdp/bat/releases/latest 2>/dev/null | grep -m1 '"browser_download_url".*bat_.*_amd64\.deb"' | cut -d'"' -f4 || true)
+    if [ -z "$url" ]; then print_error "Failed to fetch Bat release"; return; fi
+    wget -q "$url" -O /tmp/bat.deb
+    if dpkg -i /tmp/bat.deb 2>/dev/null; then
+        apt-get install -f $APT_INSTALL_OPTS 2>/dev/null || true
+        cat > /etc/profile.d/bat-alias.sh <<'EOF'
+alias cat='bat --paging=never'
+alias less='bat --paging=always'
+EOF
+        chmod 644 /etc/profile.d/bat-alias.sh
+        print_success "Bat installed (aliases: cat, less)"
+    else
+        print_error "Bat installation failed"
+    fi
+    rm -f /tmp/bat.deb
+}
+
+install_btop() {
+    if [ "$GITHUB_ALLOWED" -eq 0 ]; then
+        print_warning "IPv6-only detected: skipping Btop (GitHub download required)."
+        return
+    fi
+    if command_exists btop; then
+        print_info "Btop already installed, skipping."
+        return
+    fi
+    print_info "Installing Btop..."
+    # Get latest release tarball
+    url=$(curl -s --max-time 10 https://api.github.com/repos/aristocratos/btop/releases/latest 2>/dev/null | grep -m1 '"browser_download_url".*btop-x86_64-linux-musl\.tbz"' | cut -d'"' -f4 || true)
+    if [ -z "$url" ]; then print_error "Failed to fetch Btop release"; return; fi
+    wget -q "$url" -O /tmp/btop.tbz
+    tmpdir=$(mktemp -d)
+    if tar -xjf /tmp/btop.tbz -C "$tmpdir" 2>/dev/null; then
+        # Run the install script in btop directory
+        if [ -f "$tmpdir/btop/install.sh" ]; then
+            cd "$tmpdir/btop" && ./install.sh 2>/dev/null
+            cd - >/dev/null
+            cat > /etc/profile.d/btop-alias.sh <<'EOF'
+alias htop='btop'
+alias top='btop'
+EOF
+            chmod 644 /etc/profile.d/btop-alias.sh
+            print_success "Btop installed (aliases: htop, top)"
+        elif [ -f "$tmpdir/btop/bin/btop" ]; then
+            install -m 755 "$tmpdir/btop/bin/btop" /usr/local/bin/btop
+            cat > /etc/profile.d/btop-alias.sh <<'EOF'
+alias htop='btop'
+alias top='btop'
+EOF
+            chmod 644 /etc/profile.d/btop-alias.sh
+            print_success "Btop installed (aliases: htop, top)"
+        else
+            print_error "Btop binary not found in archive"
+        fi
+    else
+        print_error "Failed to extract Btop archive"
+    fi
+    rm -rf "$tmpdir" /tmp/btop.tbz
+}
+
+install_fd() {
+    if [ "$GITHUB_ALLOWED" -eq 0 ]; then
+        print_warning "IPv6-only detected: skipping Fd (GitHub download required)."
+        return
+    fi
+    if command_exists fd; then
+        print_info "Fd already installed, skipping."
+        return
+    fi
+    print_info "Installing Fd..."
+    # Get latest .deb from GitHub
+    url=$(curl -s --max-time 10 https://api.github.com/repos/sharkdp/fd/releases/latest 2>/dev/null | grep -m1 '"browser_download_url".*fd_.*_amd64\.deb"' | cut -d'"' -f4 || true)
+    if [ -z "$url" ]; then print_error "Failed to fetch Fd release"; return; fi
+    wget -q "$url" -O /tmp/fd.deb
+    if dpkg -i /tmp/fd.deb 2>/dev/null; then
+        apt-get install -f $APT_INSTALL_OPTS 2>/dev/null || true
+        cat > /etc/profile.d/fd-alias.sh <<'EOF'
+alias find='fd'
+EOF
+        chmod 644 /etc/profile.d/fd-alias.sh
+        print_success "Fd installed (alias: find)"
+    else
+        print_error "Fd installation failed"
+    fi
+    rm -f /tmp/fd.deb
+}
+
+install_procs() {
+    if [ "$GITHUB_ALLOWED" -eq 0 ]; then
+        print_warning "IPv6-only detected: skipping Procs (GitHub download required)."
+        return
+    fi
+    if command_exists procs; then
+        print_info "Procs already installed, skipping."
+        return
+    fi
+    print_info "Installing Procs..."
+    # Get latest release binary
+    url=$(curl -s --max-time 10 https://api.github.com/repos/dalance/procs/releases/latest 2>/dev/null | grep -m1 '"browser_download_url".*procs-.*-x86_64-linux\.zip"' | cut -d'"' -f4 || true)
+    if [ -z "$url" ]; then print_error "Failed to fetch Procs release"; return; fi
+    wget -q "$url" -O /tmp/procs.zip
+    tmpdir=$(mktemp -d)
+    if unzip -q /tmp/procs.zip -d "$tmpdir" 2>/dev/null; then
+        binpath=$(find "$tmpdir" -type f -name procs -executable -print -quit 2>/dev/null || true)
+        if [ -n "$binpath" ]; then
+            install -m 755 "$binpath" /usr/local/bin/procs
+            cat > /etc/profile.d/procs-alias.sh <<'EOF'
+alias ps='procs'
+EOF
+            chmod 644 /etc/profile.d/procs-alias.sh
+            print_success "Procs installed (alias: ps)"
+        else
+            # Try finding any procs file
+            binpath=$(find "$tmpdir" -type f -name 'procs*' -print -quit 2>/dev/null || true)
+            if [ -n "$binpath" ]; then
+                install -m 755 "$binpath" /usr/local/bin/procs
+                print_success "Procs installed (alias: ps)"
+            else
+                print_error "Procs binary not found in archive"
+            fi
+        fi
+    else
+        print_error "Failed to extract Procs archive"
+    fi
+    rm -rf "$tmpdir" /tmp/procs.zip
+}
+
+install_tldr() {
+    if [ "$GITHUB_ALLOWED" -eq 0 ]; then
+        print_warning "IPv6-only detected: skipping Tldr (GitHub download required)."
+        return
+    fi
+    if command_exists tldr; then
+        print_info "Tldr already installed, skipping."
+        return
+    fi
+    print_info "Installing Tldr (tealdeer)..."
+    # Get latest tealdeer binary
+    url=$(curl -s --max-time 10 https://api.github.com/repos/dbrgn/tealdeer/releases/latest 2>/dev/null | grep -m1 '"browser_download_url".*tealdeer-linux-x86_64-musl"' | cut -d'"' -f4 || true)
+    if [ -z "$url" ]; then print_error "Failed to fetch Tldr release"; return; fi
+    wget -q "$url" -O /tmp/tldr
+    if [ -s /tmp/tldr ]; then
+        install -m 755 /tmp/tldr /usr/local/bin/tldr
+        print_success "Tldr installed (use: tldr <command>)"
+    else
+        print_error "Failed to download Tldr"
+    fi
+    rm -f /tmp/tldr
+}
+
+install_zoxide() {
+    if [ "$GITHUB_ALLOWED" -eq 0 ]; then
+        print_warning "IPv6-only detected: skipping Zoxide (GitHub download required)."
+        return
+    fi
+    if command_exists zoxide; then
+        print_info "Zoxide already installed, skipping."
+        return
+    fi
+    print_info "Installing Zoxide..."
+    # Get latest release tarball
+    url=$(curl -s --max-time 10 https://api.github.com/repos/ajeetdsouza/zoxide/releases/latest 2>/dev/null | grep -m1 '"browser_download_url".*zoxide-.*-x86_64-unknown-linux-musl\.tar\.gz"' | cut -d'"' -f4 || true)
+    if [ -z "$url" ]; then print_error "Failed to fetch Zoxide release"; return; fi
+    wget -q "$url" -O /tmp/zoxide.tar.gz
+    tmpdir=$(mktemp -d)
+    if tar -xzf /tmp/zoxide.tar.gz -C "$tmpdir" 2>/dev/null; then
+        binpath=$(find "$tmpdir" -type f -name zoxide -executable -print -quit 2>/dev/null || true)
+        if [ -n "$binpath" ]; then
+            install -m 755 "$binpath" /usr/local/bin/zoxide
+            # Add zoxide init to profile
+            cat > /etc/profile.d/zoxide-init.sh <<'EOF'
+# Zoxide init for bash
+if command -v zoxide >/dev/null 2>&1; then
+    eval "$(zoxide init bash)"
+    alias cd='z'
+fi
+EOF
+            chmod 644 /etc/profile.d/zoxide-init.sh
+            print_success "Zoxide installed (alias: cd → z, use: z <dir>)"
+        else
+            print_error "Zoxide binary not found in archive"
+        fi
+    else
+        print_error "Failed to extract Zoxide archive"
+    fi
+    rm -rf "$tmpdir" /tmp/zoxide.tar.gz
+}
+
+install_gping() {
+    if [ "$GITHUB_ALLOWED" -eq 0 ]; then
+        print_warning "IPv6-only detected: skipping Gping (GitHub download required)."
+        return
+    fi
+    if command_exists gping; then
+        print_info "Gping already installed, skipping."
+        return
+    fi
+    print_info "Installing Gping..."
+    # Get latest release tarball
+    url=$(curl -s --max-time 10 https://api.github.com/repos/orf/gping/releases/latest 2>/dev/null | grep -m1 '"browser_download_url".*gping-x86_64-unknown-linux-musl\.tar\.gz"' | cut -d'"' -f4 || true)
+    if [ -z "$url" ]; then print_error "Failed to fetch Gping release"; return; fi
+    wget -q "$url" -O /tmp/gping.tar.gz
+    tmpdir=$(mktemp -d)
+    if tar -xzf /tmp/gping.tar.gz -C "$tmpdir" 2>/dev/null; then
+        binpath=$(find "$tmpdir" -type f -name gping -executable -print -quit 2>/dev/null || true)
+        if [ -n "$binpath" ]; then
+            install -m 755 "$binpath" /usr/local/bin/gping
+            print_success "Gping installed (use: gping <host>)"
+        else
+            print_error "Gping binary not found in archive"
+        fi
+    else
+        print_error "Failed to extract Gping archive"
+    fi
+    rm -rf "$tmpdir" /tmp/gping.tar.gz
+}
+
+install_nexttrace_prompt() {
+    if [ "$GITHUB_ALLOWED" -eq 0 ]; then
+        print_warning "IPv6-only detected: skipping Nexttrace (GitHub download required)."
+        return
+    fi
+    if command_exists nexttrace; then
+        current_ver=$(nexttrace --version 2>/dev/null | head -n1 || echo "installed")
+        echo -ne "${BOLD}Nexttrace already installed (${current_ver}). Reinstall/update? [y/N]: ${RESET}"
+        read -r ans
+        ans=${ans:-n}
+        if [[ ! "$ans" =~ ^[Yy]$ ]]; then
+            print_info "Keeping existing Nexttrace installation."
+            return
+        fi
+    else
+        echo -ne "${BOLD}Install Nexttrace (network trace tool, alias: nt)? [y/N]: ${RESET}"
+        read -r ans
+        ans=${ans:-n}
+        if [[ ! "$ans" =~ ^[Yy]$ ]]; then
+            print_info "Skipping Nexttrace installation."
+            return
+        fi
+    fi
+    print_info "Installing Nexttrace..."
+    # Get latest release binary
+    url=$(curl -s --max-time 10 https://api.github.com/repos/nxtrace/NTrace-core/releases/latest 2>/dev/null | grep -m1 '"browser_download_url".*nexttrace_linux_amd64"' | cut -d'"' -f4 || true)
+    if [ -z "$url" ]; then print_error "Failed to fetch Nexttrace release"; return; fi
+    wget -q "$url" -O /tmp/nexttrace
+    if [ -s /tmp/nexttrace ]; then
+        install -m 755 /tmp/nexttrace /usr/local/bin/nexttrace
+        # Create nt alias
+        cat > /etc/profile.d/nexttrace-alias.sh <<'EOF'
+alias nt='nexttrace'
+EOF
+        chmod 644 /etc/profile.d/nexttrace-alias.sh
+        print_success "Nexttrace installed (alias: nt)"
+    else
+        print_error "Failed to download Nexttrace"
+    fi
+    rm -f /tmp/nexttrace
+}
+
 install_missing_tools() {
     print_banner "${ICON_TOOL} Tools setup"
     install_eza
     install_helix
     install_speedtest
+    install_duf
+    install_bat
+    install_btop
+    install_fd
+    install_procs
+    install_tldr
+    install_zoxide
+    install_gping
 }
 
 configure_unattended() {
@@ -655,7 +1131,7 @@ install_docker_prompt() {
 
 install_base_packages() {
     print_banner "${ICON_PKG} Installing base packages"
-    apt-get install $APT_INSTALL_OPTS openssl gnupg curl wget nano htop cron chrony fail2ban unzip logrotate vnstat nload
+    apt-get install $APT_INSTALL_OPTS openssl gnupg curl wget nano cron chrony fail2ban unzip logrotate vnstat nload
     systemctl enable --now fail2ban 2>/dev/null || true
     print_success "Base packages installed"
 }
@@ -1219,21 +1695,20 @@ show_report() {
     [ -f "$SYSCTL_FORWARDING_FILE" ] && echo -e "  ${GREEN}•${RESET} $SYSCTL_FORWARDING_FILE"
     [ -f "$SYSCTL_IPV6_FILE" ] && echo -e "  ${GREEN}•${RESET} $SYSCTL_IPV6_FILE"
     echo ""
-    if [ "$EZA_VER" != "Not installed" ]; then
-        print_kv "Eza" "$EZA_VER (use: ls, ll, la, tree)"
-    else
-        print_kv "Eza" "$EZA_VER"
-    fi
-    if [ "$HELIX_VER" != "Not installed" ]; then
-        print_kv "Helix" "$HELIX_VER (use: vi, vim, hx)"
-    else
-        print_kv "Helix" "$HELIX_VER"
-    fi
-    if [ "$SPEEDTEST_VER" != "Not installed" ]; then
-        print_kv "Speedtest" "$SPEEDTEST_VER (use: speedtest)"
-    else
-        print_kv "Speedtest" "$SPEEDTEST_VER"
-    fi
+    print_info "Modern CLI tools:"
+    [ "$EZA_VER" != "Not installed" ] && print_kv "  Eza" "$EZA_VER (ls, ll, la, lt)" || print_kv "  Eza" "$EZA_VER"
+    [ "$HELIX_VER" != "Not installed" ] && print_kv "  Helix" "$HELIX_VER (vi, vim, hx)" || print_kv "  Helix" "$HELIX_VER"
+    [ "$BAT_VER" != "Not installed" ] && print_kv "  Bat" "$BAT_VER (cat, less)" || print_kv "  Bat" "$BAT_VER"
+    [ "$BTOP_VER" != "Not installed" ] && print_kv "  Btop" "$BTOP_VER (htop, top)" || print_kv "  Btop" "$BTOP_VER"
+    [ "$DUF_VER" != "Not installed" ] && print_kv "  Duf" "$DUF_VER (df)" || print_kv "  Duf" "$DUF_VER"
+    [ "$FD_VER" != "Not installed" ] && print_kv "  Fd" "$FD_VER (find)" || print_kv "  Fd" "$FD_VER"
+    [ "$PROCS_VER" != "Not installed" ] && print_kv "  Procs" "$PROCS_VER (ps)" || print_kv "  Procs" "$PROCS_VER"
+    [ "$TLDR_VER" != "Not installed" ] && print_kv "  Tldr" "$TLDR_VER (tldr <cmd>)" || print_kv "  Tldr" "$TLDR_VER"
+    [ "$ZOXIDE_VER" != "Not installed" ] && print_kv "  Zoxide" "$ZOXIDE_VER (cd → z)" || print_kv "  Zoxide" "$ZOXIDE_VER"
+    [ "$GPING_VER" != "Not installed" ] && print_kv "  Gping" "$GPING_VER (gping <host>)" || print_kv "  Gping" "$GPING_VER"
+    [ "$SPEEDTEST_VER" != "Not installed" ] && print_kv "  Speedtest" "$SPEEDTEST_VER" || print_kv "  Speedtest" "$SPEEDTEST_VER"
+    echo ""
+    [ "$NEXTTRACE_VER" != "Not installed" ] && print_kv "Nexttrace" "$NEXTTRACE_VER (nt)" || print_kv "Nexttrace" "$NEXTTRACE_VER"
     print_kv "chrony" "$(systemctl is-active chrony 2>/dev/null || echo '?')"
     print_kv "fail2ban" "$(systemctl is-active fail2ban 2>/dev/null || echo '?')"
     if command_exists unattended-upgrade; then
@@ -1248,27 +1723,28 @@ show_report() {
     echo ""
     print_success "All steps complete. Reboot recommended for full effect."
     echo ""
-    print_info "To activate new aliases (ls, ll, vi, hx, etc.) in this session:"
-    echo -e "   ${CYAN}for f in /etc/profile.d/*.sh; do source \"\$f\"; done${RESET}"
+    # Try to activate aliases in current shell
+    source /etc/profile 2>/dev/null || true
+    print_info "Aliases should be activated. If not, run:"
+    echo -e "   ${CYAN}source /etc/profile${RESET}"
 }
 
 show_tools_summary() {
     print_banner "${ICON_DOC} Summary (lite mode)"
-    if [ "$EZA_VER" != "Not installed" ]; then
-        print_kv "Eza" "$EZA_VER (use: ls, ll, la, tree)"
-    else
-        print_kv "Eza" "$EZA_VER"
-    fi
-    if [ "$HELIX_VER" != "Not installed" ]; then
-        print_kv "Helix" "$HELIX_VER (use: vi, vim, hx)"
-    else
-        print_kv "Helix" "$HELIX_VER"
-    fi
-    if [ "$SPEEDTEST_VER" != "Not installed" ]; then
-        print_kv "Speedtest" "$SPEEDTEST_VER (use: speedtest)"
-    else
-        print_kv "Speedtest" "$SPEEDTEST_VER"
-    fi
+    print_info "Modern CLI tools:"
+    [ "$EZA_VER" != "Not installed" ] && print_kv "  Eza" "$EZA_VER (ls, ll, la, lt)" || print_kv "  Eza" "$EZA_VER"
+    [ "$HELIX_VER" != "Not installed" ] && print_kv "  Helix" "$HELIX_VER (vi, vim, hx)" || print_kv "  Helix" "$HELIX_VER"
+    [ "$BAT_VER" != "Not installed" ] && print_kv "  Bat" "$BAT_VER (cat, less)" || print_kv "  Bat" "$BAT_VER"
+    [ "$BTOP_VER" != "Not installed" ] && print_kv "  Btop" "$BTOP_VER (htop, top)" || print_kv "  Btop" "$BTOP_VER"
+    [ "$DUF_VER" != "Not installed" ] && print_kv "  Duf" "$DUF_VER (df)" || print_kv "  Duf" "$DUF_VER"
+    [ "$FD_VER" != "Not installed" ] && print_kv "  Fd" "$FD_VER (find)" || print_kv "  Fd" "$FD_VER"
+    [ "$PROCS_VER" != "Not installed" ] && print_kv "  Procs" "$PROCS_VER (ps)" || print_kv "  Procs" "$PROCS_VER"
+    [ "$TLDR_VER" != "Not installed" ] && print_kv "  Tldr" "$TLDR_VER (tldr <cmd>)" || print_kv "  Tldr" "$TLDR_VER"
+    [ "$ZOXIDE_VER" != "Not installed" ] && print_kv "  Zoxide" "$ZOXIDE_VER (cd → z)" || print_kv "  Zoxide" "$ZOXIDE_VER"
+    [ "$GPING_VER" != "Not installed" ] && print_kv "  Gping" "$GPING_VER (gping <host>)" || print_kv "  Gping" "$GPING_VER"
+    [ "$SPEEDTEST_VER" != "Not installed" ] && print_kv "  Speedtest" "$SPEEDTEST_VER" || print_kv "  Speedtest" "$SPEEDTEST_VER"
+    echo ""
+    [ "$NEXTTRACE_VER" != "Not installed" ] && print_kv "Nexttrace" "$NEXTTRACE_VER (nt)" || print_kv "Nexttrace" "$NEXTTRACE_VER"
     print_kv "zram swap" "${ZRAM_STATUS:-not detected}"
     print_kv "IP forwarding" "$(sysctl -n net.ipv4.ip_forward 2>/dev/null | grep -q 1 && echo 'enabled' || echo 'disabled')"
     print_kv "IPv6" "$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null | grep -q 1 && echo 'disabled' || echo 'enabled')"
@@ -1279,6 +1755,10 @@ show_tools_summary() {
     fi
     echo ""
     print_success "Lite mode finished (marker present)."
+    # Try to activate aliases in current shell
+    source /etc/profile 2>/dev/null || true
+    print_info "Aliases should be activated. If not, run:"
+    echo -e "   ${CYAN}source /etc/profile${RESET}"
 }
 
 main() {
@@ -1301,6 +1781,7 @@ main() {
         install_missing_tools
         configure_unattended
         install_docker_prompt
+        install_nexttrace_prompt
         maybe_enable_zram_swap
         apply_swappiness_sysctl
         # Also allow configuring forwarding/ipv6 in lite mode
@@ -1318,6 +1799,7 @@ main() {
     apt_refresh
     install_missing_tools
     install_docker_prompt
+    install_nexttrace_prompt
     configure_unattended
     install_base_packages
     configure_chrony
