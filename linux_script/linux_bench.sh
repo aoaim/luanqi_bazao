@@ -1045,15 +1045,10 @@ run_stream_test() {
     
     # 调用外部流媒体测试脚本
     # -R: 指定测试区域
-    # -M 4: 仅使用 IPv4 (如果有)
-    # -M 6: 仅使用 IPv6 (如果有)
-    # -M 0: 同时测试 IPv4 和 IPv6
-    local net_mode="0"  # 默认同时测试
-    [ "$HAS_V4" != "true" ] && net_mode="6"
-    [ "$HAS_V6" != "true" ] && net_mode="4"
+    # -M 4: 仅使用 IPv4
+    # -M 6: 仅使用 IPv6
     
     # 下载并执行流媒体测试脚本，捕获输出
-    # 使用 script 命令来捕获完整输出（避免 clear 命令的影响）
     local stream_output=""
     local stream_script_url="https://raw.githubusercontent.com/lmc999/RegionRestrictionCheck/refs/heads/main/check.sh"
     local stream_tmp_file="$TMP_DIR/stream_output.txt"
@@ -1069,43 +1064,90 @@ run_stream_test() {
     echo -e " ${GREEN}完成${NC}"
     chmod +x "$stream_script_file"
     
-    # 启动后台进度指示器
-    echo -n "  ├─ 正在执行流媒体测试 "
-    local spinner_chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-    local spinner_pid=""
-    (
-        local i=0
-        local start_time=$(date +%s)
-        while true; do
-            local elapsed=$(($(date +%s) - start_time))
-            local mins=$((elapsed / 60))
-            local secs=$((elapsed % 60))
-            printf "\r  ├─ 正在执行流媒体测试 ${spinner_chars:i++%10:1} [%02d:%02d]" "$mins" "$secs"
-            sleep 0.2
-        done
-    ) &
-    spinner_pid=$!
+    # 定义执行单次测试的函数
+    run_single_stream_test() {
+        local test_mode="$1"
+        local mode_name="$2"
+        local output_file="$3"
+        
+        # 启动后台进度指示器
+        echo -n "  ├─ 正在执行 ${mode_name} 测试 "
+        local spinner_chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+        local spinner_pid=""
+        (
+            local i=0
+            local start_time=$(date +%s)
+            while true; do
+                local elapsed=$(($(date +%s) - start_time))
+                local mins=$((elapsed / 60))
+                local secs=$((elapsed % 60))
+                printf "\r  ├─ 正在执行 ${mode_name} 测试 ${spinner_chars:i++%10:1} [%02d:%02d]" "$mins" "$secs"
+                sleep 0.2
+            done
+        ) &
+        spinner_pid=$!
+        
+        # 执行测试
+        if command -v script >/dev/null 2>&1; then
+            TERM=xterm-256color script -q -c "bash '$stream_script_file' -R '$region_id' -M '$test_mode'" "$output_file" >/dev/null 2>&1
+        else
+            bash "$stream_script_file" -R "$region_id" -M "$test_mode" > "$output_file" 2>&1
+        fi
+        
+        # 停止进度指示器
+        kill $spinner_pid 2>/dev/null
+        wait $spinner_pid 2>/dev/null
+        
+        if [ -f "$output_file" ] && [ -s "$output_file" ]; then
+            echo -e "\r  ├─ ${mode_name} 测试完成 ${GREEN}✓${NC}              "
+            return 0
+        else
+            echo -e "\r  ├─ ${mode_name} 测试失败 ${RED}✗${NC}              "
+            return 1
+        fi
+    }
     
-    # 使用 script 命令捕获完整输出（包括被 clear 清除的内容）
-    # -q: 静默模式，-c: 执行命令
-    TERM=dumb script -q -c "bash '$stream_script_file' -R '$region_id' -M '$net_mode'" "$stream_tmp_file" >/dev/null 2>&1
+    # 分开测试 IPv4 和 IPv6
+    local stream_output_v4=""
+    local stream_output_v6=""
+    local stream_tmp_v4="$TMP_DIR/stream_v4.txt"
+    local stream_tmp_v6="$TMP_DIR/stream_v6.txt"
     
-    # 停止进度指示器
-    kill $spinner_pid 2>/dev/null
-    wait $spinner_pid 2>/dev/null
+    # IPv4 测试
+    if [ "$HAS_V4" = "true" ]; then
+        if run_single_stream_test "4" "IPv4" "$stream_tmp_v4"; then
+            stream_output_v4=$(cat "$stream_tmp_v4" 2>/dev/null)
+        fi
+        rm -f "$stream_tmp_v4"
+    fi
     
-    if [ -f "$stream_tmp_file" ]; then
-        stream_output=$(cat "$stream_tmp_file")
-        rm -f "$stream_tmp_file" "$stream_script_file"
+    # IPv6 测试
+    if [ "$HAS_V6" = "true" ]; then
+        if run_single_stream_test "6" "IPv6" "$stream_tmp_v6"; then
+            stream_output_v6=$(cat "$stream_tmp_v6" 2>/dev/null)
+        fi
+        rm -f "$stream_tmp_v6"
+    fi
+    
+    # 清理脚本文件
+    rm -f "$stream_script_file"
+    
+    # 合并输出
+    stream_output=""
+    if [ -n "$stream_output_v4" ]; then
+        stream_output="${stream_output_v4}"
+    fi
+    if [ -n "$stream_output_v6" ]; then
+        stream_output="${stream_output}
+${stream_output_v6}"
     fi
     
     if [ -z "$stream_output" ]; then
-        echo -e "\r  ├─ 正在执行流媒体测试 ${RED}失败${NC}              "
         warn "  └─ 流媒体测试失败：无法获取测试结果"
         return
     fi
     
-    echo -e "\r  ├─ 流媒体测试执行完成 ${GREEN}✓${NC}              "
+    echo "  └─ 流媒体解锁测试完成"
     
     # === Streaming Report ===
     {
@@ -1122,12 +1164,19 @@ run_stream_test() {
             sed 's/\x1b\[H\x1b\[2J//g' | \
             sed 's/\x1b\[?25[hl]//g' | \
             tr -d '\r' | \
+            sed 's/^[ \t]*//' | \
             awk '
+                # 匹配 IPv4/IPv6 测试标识行: "** 正在测试 IPv4 解锁情况"
+                /正在测试.*IPv[46]/ { print ""; print; next }
+                # 匹配分隔线 --------------------------------
+                /^-{10,}$/ { print; next }
+                # 匹配区域标题 ===[ xxx ]===
                 /^=+\[.*\]=+$/ { if (NR > 1) print ""; print; next }
-                /^-+[A-Za-z]+-+$/ { print; next }
+                # 匹配子分隔线 ---Forum--- ---Game--- ---GB--- 等
+                /^-{3}[A-Za-z]+-{3}$/ { print; next }
+                # 匹配测试结果行（含Tab和冒号）
                 /\t/ && /:/ && !/脚本适配/ && !/您的网络/ && !/测试时间/ && !/版本/ && !/运行次数/ && !/t\.me/ && !/github/ && !/网站/ && !/详情/ { print; next }
-            ' | \
-            sed 's/^[ \t]*//'
+            '
         echo '```'
         echo ""
     } >> "$REPORT_FILE"
