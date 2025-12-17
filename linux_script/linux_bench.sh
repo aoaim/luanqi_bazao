@@ -1042,8 +1042,8 @@ run_stream_test() {
         echo "  [1] $detected_region_name"
         echo "  [0] 仅跨国平台检测"
         echo ""
-        echo -n "  请输入选项 (默认: 1，当前地区): "
-        read -r user_choice </dev/tty 2>/dev/null || user_choice="1"
+        echo -n "  请输入选项 (默认: 1，当前地区，5秒后自动选择): "
+        read -t 5 -r user_choice </dev/tty 2>/dev/null || user_choice="1"
         
         case "$user_choice" in
             0)
