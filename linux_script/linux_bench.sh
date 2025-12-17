@@ -270,6 +270,7 @@ ensure_dependencies() {
     mkdir -p "$TMP_DIR"
     
     if [ "$RUN_TRACE" = "true" ] || [ "$RUN_CDN" = "true" ]; then
+        local ephemeral_tools=""
         
         if ! check_cmd nexttrace; then
             local arch=$(uname -m)
@@ -282,6 +283,7 @@ ensure_dependencies() {
             if [ -n "$url" ] && curl -f -L -s -o "$TMP_DIR/nexttrace" "$url" 2>/dev/null; then
                 chmod +x "$TMP_DIR/nexttrace"
                 export NEXTTRACE_BIN="$TMP_DIR/nexttrace"
+                ephemeral_tools="$ephemeral_tools nexttrace"
             else
                 export NEXTTRACE_BIN="false"
             fi
@@ -294,12 +296,16 @@ ensure_dependencies() {
             if curl -L -s -o "$TMP_DIR/yt-dlp" "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp" 2>/dev/null; then
                 chmod +x "$TMP_DIR/yt-dlp"
                 export YTDLP_BIN="$TMP_DIR/yt-dlp"
+                ephemeral_tools="$ephemeral_tools yt-dlp"
             else
                 export YTDLP_BIN="false"
             fi
         else
             export YTDLP_BIN="yt-dlp"
         fi
+        
+        # 输出下载提示
+        [ -n "$ephemeral_tools" ] && info "下载临时工具:$ephemeral_tools"
     else
         # 即使不需要，也设个默认值防报错
         export NEXTTRACE_BIN="false"
@@ -2087,7 +2093,7 @@ run_trace_test() {
                             echo "### $name ($mode)"
                             # 如果是动态 CDN 目标，显示解析到的域名
                             if [[ "$name" == *"Dynamic"* ]]; then
-                                echo "> CDN 节点: \`$target\`"
+                                echo "> 命中 CDN 节点: \`$target\`"
                                 echo ""
                             fi
                             echo -e "$table"
@@ -2109,28 +2115,38 @@ run_trace_test() {
 run_cdn_test() {
     log "开始 CDN 节点测试..."
     
+    # 检查 NextTrace
+    if [ "$NEXTTRACE_BIN" == "false" ] || [ -z "$NEXTTRACE_BIN" ]; then 
+        warn "  └─ NextTrace 二进制未找到或下载失败，跳过路由追踪"
+        return
+    fi
+    
+    create_ix_map
+    
+    # 收集 CDN 目标
+    local cdn_targets=()
+    
     # YouTube CDN
     echo "  ├─ 获取 YouTube CDN 节点..."
-    local yt_v4="" yt_v6=""
     if [ "$YTDLP_BIN" != "false" ] && [ -x "$YTDLP_BIN" ]; then
+        # 使用 --dump-json 获取真正的视频流 URL（而非 manifest）
+        # 从 formats 中提取视频流的 hostname，正确格式为 rr*.googlevideo.com
         if [ "$HAS_V4" = "true" ]; then
-            yt_v4=$("$YTDLP_BIN" --no-warnings -g -4 "https://www.youtube.com/watch?v=G5RpJwCJDqc" 2>/dev/null | head -n1 | awk -F/ '{print $3}')
+            local yt_v4=$("$YTDLP_BIN" --no-warnings --dump-json -4 "https://www.youtube.com/watch?v=G5RpJwCJDqc" 2>/dev/null | \
+                jq -r '[.formats[]?.url // empty] | map(select(contains("googlevideo.com") and (contains("manifest") | not))) | first // empty' 2>/dev/null | \
+                awk -F/ '{print $3}')
             if [ -n "$yt_v4" ]; then
-                local yt_v4_ip=$(dig +short "$yt_v4" A 2>/dev/null | head -n1)
                 echo "  │  ├─ IPv4: $yt_v4"
-                echo "  │  │     IP: ${yt_v4_ip:-无法解析}"
-            else
-                echo "  │  ├─ IPv4: 获取失败"
+                cdn_targets+=("YouTube CDN|$yt_v4|IPv4")
             fi
         fi
         if [ "$HAS_V6" = "true" ]; then
-            yt_v6=$("$YTDLP_BIN" --no-warnings -g -6 "https://www.youtube.com/watch?v=G5RpJwCJDqc" 2>/dev/null | head -n1 | awk -F/ '{print $3}')
+            local yt_v6=$("$YTDLP_BIN" --no-warnings --dump-json -6 "https://www.youtube.com/watch?v=G5RpJwCJDqc" 2>/dev/null | \
+                jq -r '[.formats[]?.url // empty] | map(select(contains("googlevideo.com") and (contains("manifest") | not))) | first // empty' 2>/dev/null | \
+                awk -F/ '{print $3}')
             if [ -n "$yt_v6" ]; then
-                local yt_v6_ip=$(dig +short "$yt_v6" AAAA 2>/dev/null | head -n1)
                 echo "  │  └─ IPv6: $yt_v6"
-                echo "  │        IP: ${yt_v6_ip:-无法解析}"
-            else
-                echo "  │  └─ IPv6: 获取失败"
+                cdn_targets+=("YouTube CDN|$yt_v6|IPv6")
             fi
         fi
     else
@@ -2140,45 +2156,106 @@ run_cdn_test() {
     # Netflix CDN
     echo "  ├─ 获取 Netflix CDN 节点..."
     local nf_api="https://api.fast.com/netflix/speedtest/v2?https=true&token=YXNkZmFzZGxmbnNkYWZoYXNkZmhrYWxm&urlCount=5"
-    local nf_v4="" nf_v6=""
     if [ "$HAS_V4" = "true" ]; then
-        nf_v4=$(curl -s -4 "$nf_api" 2>/dev/null | jq -r '.targets[]|select(.url|contains("ipv4"))|.url' 2>/dev/null | head -n1 | awk -F/ '{print $3}')
+        local nf_v4=$(curl -s -4 "$nf_api" 2>/dev/null | jq -r '.targets[]|select(.url|contains("ipv4"))|.url' 2>/dev/null | head -n1 | awk -F/ '{print $3}')
         if [ -n "$nf_v4" ]; then
-            local nf_v4_ip=$(dig +short "$nf_v4" A 2>/dev/null | head -n1)
             echo "  │  ├─ IPv4: $nf_v4"
-            echo "  │  │     IP: ${nf_v4_ip:-无法解析}"
-        else
-            echo "  │  ├─ IPv4: 获取失败"
+            cdn_targets+=("Netflix CDN|$nf_v4|IPv4")
         fi
     fi
     if [ "$HAS_V6" = "true" ]; then
-        nf_v6=$(curl -s -6 "$nf_api" 2>/dev/null | jq -r '.targets[]|select(.url|contains("ipv6"))|.url' 2>/dev/null | head -n1 | awk -F/ '{print $3}')
+        local nf_v6=$(curl -s -6 "$nf_api" 2>/dev/null | jq -r '.targets[]|select(.url|contains("ipv6"))|.url' 2>/dev/null | head -n1 | awk -F/ '{print $3}')
         if [ -n "$nf_v6" ]; then
-            local nf_v6_ip=$(dig +short "$nf_v6" AAAA 2>/dev/null | head -n1)
             echo "  │  └─ IPv6: $nf_v6"
-            echo "  │        IP: ${nf_v6_ip:-无法解析}"
-        else
-            echo "  │  └─ IPv6: 获取失败"
+            cdn_targets+=("Netflix CDN|$nf_v6|IPv6")
         fi
     fi
     
-    # 写入报告
+    # 写入报告头
     {
-        echo "## CDN 节点测试"
-        echo ""
-        echo "### YouTube CDN"
-        echo "| 协议 | CDN 节点 | IP 地址 |"
-        echo "|:---|:---|:---|"
-        [ -n "$yt_v4" ] && echo "| IPv4 | $yt_v4 | $(dig +short "$yt_v4" A 2>/dev/null | head -n1) |" || echo "| IPv4 | - | - |"
-        [ -n "$yt_v6" ] && echo "| IPv6 | $yt_v6 | $(dig +short "$yt_v6" AAAA 2>/dev/null | head -n1) |" || echo "| IPv6 | - | - |"
-        echo ""
-        echo "### Netflix CDN"
-        echo "| 协议 | CDN 节点 | IP 地址 |"
-        echo "|:---|:---|:---|"
-        [ -n "$nf_v4" ] && echo "| IPv4 | $nf_v4 | $(dig +short "$nf_v4" A 2>/dev/null | head -n1) |" || echo "| IPv4 | - | - |"
-        [ -n "$nf_v6" ] && echo "| IPv6 | $nf_v6 | $(dig +short "$nf_v6" AAAA 2>/dev/null | head -n1) |" || echo "| IPv6 | - | - |"
+        echo "## CDN 节点路由追踪"
         echo ""
     } >> "$REPORT_FILE"
+    
+    # 对每个 CDN 目标进行路由追踪
+    local idx=0
+    local total=${#cdn_targets[@]}
+    
+    for entry in "${cdn_targets[@]}"; do
+        idx=$((idx+1))
+        IFS='|' read -r name target mode <<< "$entry"
+        
+        echo "  ├─ [$idx/$total] 追踪 $name ($mode): $target"
+        
+        local ipflag="-4"; [ "$mode" == "IPv6" ] && ipflag="-6"
+        
+        # 运行 nexttrace
+        local err_file="$TMP_DIR/nt_cdn_err_$idx.log"
+        local raw_output=$("$NEXTTRACE_BIN" --json $ipflag "$target" 2>"$err_file")
+        rm -f "$err_file"
+        
+        # Extract JSON
+        local json=$(echo "$raw_output" | sed 's/^[^{]*//')
+        
+        if [ -z "$json" ] || ! echo "$json" | jq -e . >/dev/null 2>&1; then
+            echo "  │  └─ 追踪失败"
+            continue
+        fi
+        
+        # Parse and build table
+        local table="| 跳数 | IP | ASN | 位置 | 运营商 | 延迟 |\n"
+        table+="|---:|:---|:---|:---|:---|---:|\n"
+        
+        local rows=$(echo "$json" | jq -r '
+            .Hops | to_entries[] |
+            (.key + 1) as $hopnum |
+            .value as $probes |
+            ([$probes[] | select(.Success == true)][0] // $probes[0] // {}) as $p |
+            (if $p.Address then ($p.Address.IP // "*") else "*" end) as $ip |
+            (if $p.Geo and ($p.Geo.asnumber // "") != "" then "AS" + $p.Geo.asnumber else "-" end) as $asn |
+            (if $p.Geo then
+                ([$p.Geo.country, $p.Geo.prov, $p.Geo.city] | map(select(. and . != "") | gsub("市$|省$|州$"; "")) | reduce .[] as $x ([]; if . | index($x) then . else . + [$x] end) | join(" "))
+            else "" end) as $loc_raw |
+            (if $loc_raw == "" then "-" else $loc_raw end) as $loc |
+            (if $p.Geo then
+                (if ($p.Geo.isp // "") != "" then $p.Geo.isp
+                 elif ($p.Geo.owner // "") != "" then $p.Geo.owner
+                 else "-" end)
+            else "-" end) as $isp |
+            (if $p.RTT and $p.RTT > 0 then
+                (($p.RTT / 1000000 * 100 | floor) / 100 | tostring)
+            else "-" end) as $rtt |
+            [$hopnum, $ip, $asn, $loc, $isp, $rtt] | @tsv
+        ' 2>/dev/null)
+        
+        if [ -n "$rows" ]; then
+            while IFS=$'\t' read -r ttl ip asn loc isp rtt; do
+                [ -z "$ip" ] && continue
+                [ "$ip" = "*" ] && ip="-"
+                
+                # RTT format
+                if [ "$rtt" != "-" ] && [ -n "$rtt" ]; then
+                    rtt_display="$rtt ms"
+                else
+                    rtt_display="-"
+                fi
+                table+="| $ttl | $ip | $asn | $loc | $isp | $rtt_display |\n"
+            done <<< "$rows"
+            
+            echo "  │  └─ 追踪完成"
+            
+            # Write to report
+            {
+                echo "### $name ($mode)"
+                echo "> 命中 CDN 节点: \`$target\`"
+                echo ""
+                echo -e "$table"
+                echo ""
+            } >> "$REPORT_FILE"
+        else
+            echo "  │  └─ 追踪失败: 解析结果为空"
+        fi
+    done
     
     info "  └─ CDN 节点测试完成"
 }
@@ -2194,7 +2271,7 @@ main() {
     clear
     
     # 提示用户可选参数
-    echo -e "💡 提示: 使用 -h 仅硬件，-n 仅网络，-t 仅路由追踪，-i 仅 IPv4 质量检测，-s 仅流媒体测试，-c 仅 Netflix 和 YouTube 的 CDN 节点"
+    echo -e "💡 提示: 使用 -h 仅硬件，-n 仅网络，-t 仅路由追踪，-i 仅 IPv4 质量检测，-s 仅流媒体测试，-c 仅 YouTube 和 Netflix 的 CDN 节点"
     
     # 致谢
     echo -e "✨ 感谢 JamChoi 提供的 Python 源码"
@@ -2203,14 +2280,26 @@ main() {
     echo -e "🎬 使用 lmc999/RegionRestrictionCheck 项目进行流媒体测试"
     echo -e "📊 IP 信息来源于 ipapi.co，ipapi.is 和 ippure.com"
     echo -e "🧹 测试结束时自动清理，干干净净"
+    echo -e ""
     
     # Initialize Report
     init_report
     log "输出文件: $REPORT_FILE"
     
     # Mode Log
-    if [ "$RUN_IPERF" = "false" ] && [ "$RUN_TRACE" = "false" ] && [ "$RUN_NET_INFO" = "false" ]; then log "模式: 仅硬件测试 (--hardware)"; fi
-    if [ "$RUN_CPU" = "false" ] && [ "$RUN_DISK" = "false" ]; then log "模式: 仅网络测试 (--network)"; fi
+    if [ "$RUN_CDN" = "true" ]; then 
+        log "模式: 仅 YouTube 和 Netflix 的 CDN 节点测试 (-c)"
+    elif [ "$RUN_IPERF" = "false" ] && [ "$RUN_TRACE" = "false" ] && [ "$RUN_NET_INFO" = "false" ]; then 
+        log "模式: 仅硬件测试 (-h)"
+    elif [ "$RUN_CPU" = "false" ] && [ "$RUN_DISK" = "false" ] && [ "$RUN_TRACE" = "true" ] && [ "$RUN_IPERF" = "true" ]; then 
+        log "模式: 仅网络测试 (-n)"
+    elif [ "$RUN_TRACE" = "true" ] && [ "$RUN_IPERF" = "false" ]; then 
+        log "模式: 仅路由追踪 (-t)"
+    elif [ "$RUN_IP_QUALITY" = "true" ] && [ "$RUN_TRACE" = "false" ]; then 
+        log "模式: 仅 IP 质量检测 (-i)"
+    elif [ "$RUN_STREAM" = "true" ] && [ "$RUN_TRACE" = "false" ]; then 
+        log "模式: 仅流媒体测试 (-s)"
+    fi
     
     ensure_dependencies
     
