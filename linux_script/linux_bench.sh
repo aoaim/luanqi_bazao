@@ -620,7 +620,7 @@ collect_ip_quality() {
         echo "| 检测项目 | 检测结果 | 备注 | 数据来源 |"
         echo "| :--- | :--- | :--- | :--- |"
         # 风险评分
-        echo "| 欺诈评分 | $fraud_val | $fraud_remark (越低越好) | ippure |"
+        echo "| 欺诈评分 | $fraud_val | $fraud_remark (越低越好) | ippure.com |"
         echo "| 滥用评分 | $abuser_val | $abuser_remark (越低越好) | ipapi.is |"
         echo "| ASN 信誉 | $asn_val | $asn_remark (越低越好) | ipapi.is |"
         # IP 类型
@@ -636,7 +636,7 @@ collect_ip_quality() {
             *) company_type_remark="" ;;
         esac
         echo "| 组织类型 | ${ipapi_company_type:-N/A} | $company_type_remark | ipapi.is |"
-        echo "| 原生识别 | $(format_bool_yesno "$ippure_is_residential") | | ippure |"
+        echo "| 原生识别 | $(format_bool_yesno "$ippure_is_residential") | | ippure.com |"
         echo "| 机房识别 | $datacenter_result | $datacenter_remark | ipapi.is |"
         echo "| 移动网络 | $(format_bool_yesno "$ipapi_is_mobile") | | ipapi.is |"
         echo "| 卫星网络 | $(format_bool_yesno "$ipapi_is_satellite") | Starlink/Viasat等 | ipapi.is |"
@@ -2347,9 +2347,9 @@ EOF
     
     # 致谢
     echo -e "⭐ 感谢 JamChoi 提供的 Python 源码"
-    echo -e "⚙️  由我驾驶着 Claude Opus 4.5 进行改写和扩展"
-    echo -e "💖 本项目依赖 NextTrace (www.nxtrace.org)"
-    echo -e "🎬 使用 lmc999/RegionRestrictionCheck 项目进行流媒体测试"
+    echo -e "⚙️ 由我驾驶着 Google Antigravity 进行改写和扩展"
+    echo -e "💖 本项目依赖 nxtrace/NTrace-core 进行路由追踪"
+    echo -e "🎬 本项目依赖 lmc999/RegionRestrictionCheck 进行流媒体测试"
     echo -e "📊 IP 信息来源于 ipapi.co，ipapi.is 和 ippure.com"
     echo -e "🧹 测试结束时自动清理，干干净净（我有洁癖）"
     echo -e ""
