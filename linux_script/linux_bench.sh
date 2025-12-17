@@ -2131,6 +2131,11 @@ main() {
         collect_ip_quality
     fi
     
+    # 流媒体解锁测试 (提前至此时，以便优先让用户确认地区，避免因为前面测试时间过长而等待)
+    if [ "$RUN_STREAM" = "true" ] && [ "$RUN_NET_INFO" = "true" ]; then
+        run_stream_test
+    fi
+    
     # 硬件性能测试
     if [ "$RUN_CPU" = "true" ]; then
         run_cpu_test
@@ -2145,10 +2150,7 @@ main() {
         run_iperf_test
     fi
     
-    # 流媒体解锁测试 (在“国内节点”之后)
-    if [ "$RUN_STREAM" = "true" ] && [ "$RUN_NET_INFO" = "true" ]; then
-        run_stream_test
-    fi
+    # 流媒体解锁测试 (已提前)
     
     if [ "$RUN_TRACE" = "true" ]; then
         run_trace_test
