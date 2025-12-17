@@ -722,7 +722,8 @@ collect_ip_quality() {
         fi
         
         echo ""
-        echo "**IP 质量评价**（由机器生成，仅供参考）：$summary_icon $summary"
+        echo ""
+        echo "> IP 质量评价（由机器生成，仅供参考）：$summary_icon $summary"
         echo ""
 
     } >> "$REPORT_FILE"
@@ -767,6 +768,8 @@ run_cpu_test() {
         echo "| 多线程测试 | $BENCH_CPU_NT ($BENCH_CPU_MULTI x) |"
         echo ""
     } >> "$REPORT_FILE"
+    
+    info "  └─ CPU 测试完成"
 }
 
 run_disk_test() {
@@ -1191,7 +1194,7 @@ ${stream_output_v6}"
         return
     fi
     
-    echo "  └─ 流媒体解锁测试完成"
+    info "  └─ 流媒体解锁测试完成"
     
     # === Streaming Report ===
     {
