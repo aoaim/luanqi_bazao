@@ -677,7 +677,7 @@ collect_ip_quality() {
         fi
         
         echo ""
-        echo "**质量评价**（由机器生成，仅供参考）：$summary_icon $summary"
+        echo "**IP 质量评价**（由机器生成，仅供参考）：$summary_icon $summary"
         echo ""
 
     } >> "$REPORT_FILE"
@@ -2131,7 +2131,7 @@ main() {
         collect_ip_quality
     fi
     
-    # 流媒体解锁测试 (提前至此时，以便优先让用户确认地区，避免因为前面测试时间过长而等待)
+    # 流媒体解锁测试
     if [ "$RUN_STREAM" = "true" ] && [ "$RUN_NET_INFO" = "true" ]; then
         run_stream_test
     fi
@@ -2150,8 +2150,7 @@ main() {
         run_iperf_test
     fi
     
-    # 流媒体解锁测试 (已提前)
-    
+    # 路由追踪测试
     if [ "$RUN_TRACE" = "true" ]; then
         run_trace_test
     fi
