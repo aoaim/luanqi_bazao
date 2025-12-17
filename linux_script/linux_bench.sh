@@ -1724,6 +1724,7 @@ normalize_isp_name() {
     # === 6. 云厂商与服务商 ===
     [[ "$isp_lower" == *"amazon"* || "$isp" == *"亚马逊"* ]] && { echo "AWS"; return; }
     [[ "$isp_lower" == *"cloudflare"* ]] && { echo "Cloudflare"; return; }
+    [[ "$isp_lower" == *"quad9"* ]] && { echo "Quad9"; return; }
     [[ "$isp_lower" == *"telegram"* ]] && { echo "Telegram"; return; }
     [[ "$isp_lower" == *"netflix"* ]] && { echo "Netflix"; return; }
     [[ "$isp_lower" == *"vultr"* || "$isp_lower" == *"constant.com"* || "$isp_lower" == *"as-vultr"* || "$isp_lower" == *"choopa"* ]] && { echo "Vultr"; return; }
