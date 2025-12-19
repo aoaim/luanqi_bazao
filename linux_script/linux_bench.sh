@@ -1680,9 +1680,16 @@ normalize_isp_name() {
     
     # === 4. 国际运营商 ===
     [[ "$isp_lower" == *"google"* || "$isp" == *"谷歌"* ]] && { echo "Google"; return; }
+    [[ "$isp_lower" == *"misaka"* ]] && { echo "Misaka"; return; }
     [[ "$isp_lower" == *"lumen"* || "$isp_lower" == *"level 3"* || "$isp_lower" == *"level3"* || "$isp" == *"世纪互联"* || "$isp" == *"流明"* ]] && { echo "Lumen"; return; }
     [[ "$isp_lower" == *"cogent"* || "$isp_lower" == *"psinet"* ]] && { echo "Cogent"; return; }
     [[ "$isp_lower" == *"zayo"* ]] && { echo "Zayo"; return; }
+    [[ "$isp_lower" == *"joint transit"* ]] && { echo "Joint Transit"; return; }
+    [[ "$isp_lower" == *"broadband hosting"* ]] && { echo "Broadband Hosting"; return; }
+    [[ "$isp_lower" == *"pch"* ]] && { echo "PCH"; return; }
+    [[ "$isp_lower" == *"myloc"* ]] && { echo "myLoc"; return; }
+    [[ "$isp_lower" == *"wiit.cloud"* ]] && { echo "WIIT"; return; }
+    [[ "$isp_lower" == *"lwlcom"* ]] && { echo "LWLcom"; return; }
     [[ "$isp_lower" == *"tinet"* || "$isp_lower" == *"gtt"* ]] && { echo "GTT"; return; }
     [[ "$isp_lower" == *"arelion"* ]] && { echo "Arelion"; return; }
     [[ "$isp_lower" == *"telia"* || "$isp" == *"特利亚"* ]] && { echo "Telia"; return; }
@@ -1764,15 +1771,14 @@ normalize_isp_name() {
     [[ "$isp_lower" == *"m1 limited"* || "$isp_lower" == *"m1.com.sg"* ]] && { echo "M1"; return; }
     [[ "$isp_lower" == *"telstra"* ]] && { echo "Telstra"; return; }
     [[ "$isp_lower" == *"optus"* ]] && { echo "Optus"; return; }
-    [[ "$isp_lower" == *"vodafone"* ]] && { echo "Vodafone"; return; }
+    [[ "$isp_lower" == *"vodafone"* || "$isp" == *"沃达丰"* ]] && { echo "Vodafone"; return; }
     [[ "$isp_lower" == *"deutsche telekom"* || "$isp_lower" == *"dtag"* || "$isp_lower" == *"wholesale.telekom"* ]] && { echo "DTAG"; return; }
     [[ "$isp_lower" == *"british telecom"* || "$isp_lower" == *"bt.net"* ]] && { echo "BT"; return; }
     [[ "$isp_lower" == *"internet utilities"* ]] && { echo "Internet Utilities"; return; }
     [[ "$isp_lower" == *"telefonica"* || "$isp_lower" == *"movistar"* ]] && { echo "Telefonica"; return; }
-    [[ "$isp_lower" == *"cht"* || "$isp" == *"中华电信"* || "$isp_lower" == *"hinet"* ]] && { echo "中华电信"; return; }
+    [[ "$isp_lower" == *"cht"* || "$isp" == *"中华电信"* || "$isp_lower" == *"hinet"* || "$isp_lower" == *"chunghwa"* ]] && { echo "中华电信"; return; }
     [[ "$isp_lower" == *"taiwan mobile"* || "$isp" == *"台湾大哥大"* ]] && { echo "台湾大哥大"; return; }
     [[ "$isp_lower" == *"fetnet"* || "$isp" == *"远传"* ]] && { echo "远传电信"; return; }
-    [[ "$isp_lower" == *"chunghwa"* ]] && { echo "中华电信"; return; }
     [[ "$isp_lower" == *"kt corp"* || "$isp_lower" == *"korea telecom"* ]] && { echo "KT"; return; }
     [[ "$isp_lower" == *"sk broadband"* || "$isp_lower" == *"sk telecom"* ]] && { echo "SK"; return; }
     [[ "$isp_lower" == *"lg uplus"* || "$isp_lower" == *"lg u+"* ]] && { echo "LG U+"; return; }
@@ -1803,6 +1809,9 @@ normalize_isp_name() {
     [[ "$isp_lower" == *"free.fr"* || "$isp_lower" == *"freebox"* ]] && { echo "Free"; return; }
     [[ "$isp_lower" == *"sfr"* ]] && { echo "SFR"; return; }
     [[ "$isp_lower" == *"bouygues"* ]] && { echo "Bouygues"; return; }
+    [[ "$isp_lower" == *"jose antonio vazquez quian"* || "$isp_lower" == *"andaina"* ]] && { echo "Andaina"; return; }
+    [[ "$isp_lower" == *"r cable"* ]] && { echo "R Cable"; return; }
+    [[ "$isp_lower" == *"i3d.net"* || "$isp_lower" == *"i3d net"* ]] && { echo "i3D.net"; return; }
     
     # === 9. 俄罗斯运营商 ===
     [[ "$isp_lower" == *"rostelecom"* ]] && { echo "Rostelecom"; return; }
