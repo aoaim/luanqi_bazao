@@ -1197,35 +1197,153 @@ ${stream_output_v6}"
     info "  └─ 流媒体解锁测试完成"
     
     # === Streaming Report ===
+    # 解析流媒体测试结果并转换为表格
+    parse_stream_to_table() {
+        local output="$1"
+        local ip_version="$2"
+        
+        # 清理 ANSI 颜色代码和控制字符
+        local cleaned=$(echo "$output" | \
+            sed 's/\x1b\[[0-9;]*m//g' | \
+            sed 's/\x1b\[H\x1b\[2J//g' | \
+            sed 's/\x1b\[?25[hl]//g' | \
+            tr -d '\r')
+        
+        # 提取当前 IP 版本的测试结果
+        local in_section="false"
+        local current_category=""
+        local last_category=""
+        local results=""
+        
+        while IFS= read -r line; do
+            # 检测 IP 版本测试开始
+            if echo "$line" | grep -q "正在测试.*$ip_version"; then
+                in_section="true"
+                continue
+            fi
+            
+            # 检测下一个 IP 版本测试开始（结束当前）
+            if [ "$in_section" = "true" ] && echo "$line" | grep -q "正在测试.*IPv[46]"; then
+                break
+            fi
+            
+            # 在当前 IP 版本区域内
+            if [ "$in_section" = "true" ]; then
+                # 匹配区域标题 ===[ xxx ]=== 或 ============[ xxx ]============
+                if echo "$line" | grep -qE '=+\[.*\]=+'; then
+                    current_category=$(echo "$line" | sed 's/=//g' | sed 's/\[//g' | sed 's/\]//g' | xargs)
+                    # 输出分类标题行（用 CATEGORY: 前缀标记）
+                    results="${results}CATEGORY:${current_category}|\n"
+                    last_category="$current_category"
+                    continue
+                fi
+                
+                # 匹配子分类 ---GB--- ---FR--- 等
+                if echo "$line" | grep -qE '^-{3}[A-Za-z]+-{3}$'; then
+                    current_category=$(echo "$line" | sed 's/-//g')
+                    # 输出子分类标题行（用 SUBCATEGORY: 前缀标记）
+                    results="${results}SUBCATEGORY:${current_category}|\n"
+                    continue
+                fi
+                
+                # 匹配测试结果行（含Tab或多个空格和冒号）
+                if echo "$line" | grep -qE '^\s*[A-Za-z0-9+() -]+:\s+' && \
+                   ! echo "$line" | grep -qE '脚本适配|您的网络|测试时间|版本|运行次数|t\.me|github|网站|详情'; then
+                    # 解析服务名称和状态
+                    local service=$(echo "$line" | sed 's/^\s*//' | cut -d':' -f1 | xargs)
+                    local status=$(echo "$line" | sed 's/^\s*//' | cut -d':' -f2- | xargs)
+                    
+                    # 转换状态为图标
+                    local icon=""
+                    local status_text="$status"
+                    
+                    if echo "$status" | grep -qiE '^Yes|^Originals Only'; then
+                        icon="✅"
+                        # 提取区域信息
+                        if echo "$status" | grep -qi "Region:"; then
+                            status_text=$(echo "$status" | sed 's/Yes/解锁/' | sed 's/(Region: /(/g')
+                        else
+                            status_text="解锁"
+                        fi
+                    elif echo "$status" | grep -qiE '^No$|^No |Blocked|不支持'; then
+                        icon="❌"
+                        status_text="未解锁"
+                    elif echo "$status" | grep -qiE 'Failed|Error|错误'; then
+                        icon="🔴"
+                        status_text="检测失败"
+                    elif echo "$status" | grep -qiE 'Not Currently Supported|不支持'; then
+                        icon="⚪"
+                        status_text="不支持"
+                    else
+                        icon="🔵"
+                        status_text="$status"
+                    fi
+                    
+                    # 添加结果
+                    results="${results}${service}|${icon} ${status_text}\n"
+                fi
+            fi
+        done <<< "$cleaned"
+        
+        echo -e "$results"
+    }
+    
     {
         echo "## 流媒体解锁测试"
         echo ""
         echo "测试区域: **$region_name**"
         echo ""
-        echo '```'
-        # 清理输出：
-        # 1. 移除 ANSI 颜色代码和控制字符
-        # 2. 只保留：区域标题行(===)、分隔线(---)、测试结果行(含Tab的行)
-        echo "$stream_output" | \
-            sed 's/\x1b\[[0-9;]*m//g' | \
-            sed 's/\x1b\[H\x1b\[2J//g' | \
-            sed 's/\x1b\[?25[hl]//g' | \
-            tr -d '\r' | \
-            sed 's/^[ \t]*//' | \
-            awk '
-                # 匹配 IPv4/IPv6 测试标识行: "** 正在测试 IPv4 解锁情况"
-                /正在测试.*IPv[46]/ { print ""; print; next }
-                # 匹配分隔线 --------------------------------
-                /^-{10,}$/ { print; next }
-                # 匹配区域标题 ===[ xxx ]===
-                /^=+\[.*\]=+$/ { if (NR > 1) print ""; print; next }
-                # 匹配子分隔线 ---Forum--- ---Game--- ---GB--- 等
-                /^-{3}[A-Za-z]+-{3}$/ { print; next }
-                # 匹配测试结果行（含Tab和冒号）
-                /\t/ && /:/ && !/脚本适配/ && !/您的网络/ && !/测试时间/ && !/版本/ && !/运行次数/ && !/t\.me/ && !/github/ && !/网站/ && !/详情/ { print; next }
-            '
-        echo '```'
-        echo ""
+        
+        # IPv4 结果表格
+        if [ -n "$stream_output_v4" ]; then
+            echo "### IPv4 解锁测试"
+            echo ""
+            echo "| 服务 | 状态 |"
+            echo "| :--- | :--- |"
+            
+            # 解析并输出 IPv4 结果
+            parse_stream_to_table "$stream_output_v4" "IPv4" | while IFS='|' read -r service status; do
+                if [ -n "$service" ]; then
+                    # 检测是否为分类标题
+                    if [[ "$service" == CATEGORY:* ]]; then
+                        local cat_name="${service#CATEGORY:}"
+                        echo "| **━━ $cat_name ━━** | |"
+                    elif [[ "$service" == SUBCATEGORY:* ]]; then
+                        local subcat_name="${service#SUBCATEGORY:}"
+                        echo "| **── $subcat_name ──** | |"
+                    else
+                        echo "| $service | $status |"
+                    fi
+                fi
+            done
+            echo ""
+        fi
+        
+        # IPv6 结果表格
+        if [ -n "$stream_output_v6" ]; then
+            echo "### IPv6 解锁测试"
+            echo ""
+            echo "| 服务 | 状态 |"
+            echo "| :--- | :--- |"
+            
+            # 解析并输出 IPv6 结果
+            parse_stream_to_table "$stream_output_v6" "IPv6" | while IFS='|' read -r service status; do
+                if [ -n "$service" ]; then
+                    # 检测是否为分类标题
+                    if [[ "$service" == CATEGORY:* ]]; then
+                        local cat_name="${service#CATEGORY:}"
+                        echo "| **━━ $cat_name ━━** | |"
+                    elif [[ "$service" == SUBCATEGORY:* ]]; then
+                        local subcat_name="${service#SUBCATEGORY:}"
+                        echo "| **── $subcat_name ──** | |"
+                    else
+                        echo "| $service | $status |"
+                    fi
+                fi
+            done
+            echo ""
+        fi
+        
     } >> "$REPORT_FILE"
 }
 
