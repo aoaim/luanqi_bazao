@@ -815,11 +815,10 @@ install_bat() {
     if dpkg -i /tmp/bat.deb 2>/dev/null; then
         apt-get install -f $APT_INSTALL_OPTS 2>/dev/null || true
         cat > /etc/profile.d/bat-alias.sh <<'EOF'
-alias cat='bat --paging=never'
 alias less='bat --paging=always'
 EOF
         chmod 644 /etc/profile.d/bat-alias.sh
-        print_success "Bat installed (aliases: cat, less)"
+        print_success "Bat installed (alias: less)"
     else
         print_error "Bat installation failed"
     fi
