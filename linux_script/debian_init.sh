@@ -845,27 +845,30 @@ install_btop() {
     url=$(curl -s --max-time 10 https://api.github.com/repos/aristocratos/btop/releases/latest 2>/dev/null | grep -m1 '"browser_download_url".*btop-x86_64-linux-musl\.tbz"' | cut -d'"' -f4 || true)
     if [ -z "$url" ]; then print_error "Failed to fetch Btop release"; return; fi
     wget -q "$url" -O /tmp/btop.tbz
+    if [ ! -s /tmp/btop.tbz ]; then print_error "Failed to download Btop archive"; return; fi
     tmpdir=$(mktemp -d)
     if tar -xjf /tmp/btop.tbz -C "$tmpdir" 2>/dev/null; then
-        # Run the install script in btop directory with --prefix
-        if [ -f "$tmpdir/btop/install.sh" ]; then
-            cd "$tmpdir/btop" && ./install.sh --prefix /usr/local </dev/null >/dev/null 2>&1 || true
-            cd - >/dev/null
-            cat > /etc/profile.d/btop-alias.sh <<'EOF'
-alias htop='btop'
+        # Find the btop binary dynamically (don't require -executable as it may not have +x after extraction)
+        binpath=$(find "$tmpdir" -type f -name btop ! -name "*.sh" -print -quit 2>/dev/null || true)
+        if [ -n "$binpath" ] && [ -f "$binpath" ]; then
+            install -m 755 "$binpath" /usr/local/bin/btop
+            # Also install themes if present
+            themedir=$(find "$tmpdir" -type d -name themes -print -quit 2>/dev/null || true)
+            if [ -n "$themedir" ]; then
+                mkdir -p /usr/local/share/btop/themes
+                cp -r "$themedir"/* /usr/local/share/btop/themes/ 2>/dev/null || true
+            fi
+            if command_exists btop || [ -x /usr/local/bin/btop ]; then
+                cat > /etc/profile.d/btop-alias.sh <<'EOF'
 alias top='btop'
 EOF
-            chmod 644 /etc/profile.d/btop-alias.sh
-            print_success "Btop installed (aliases: htop, top)"
-        elif [ -f "$tmpdir/btop/bin/btop" ]; then
-            install -m 755 "$tmpdir/btop/bin/btop" /usr/local/bin/btop
-            cat > /etc/profile.d/btop-alias.sh <<'EOF'
-alias htop='btop'
-alias top='btop'
-EOF
-            chmod 644 /etc/profile.d/btop-alias.sh
-            print_success "Btop installed (aliases: htop, top)"
+                chmod 644 /etc/profile.d/btop-alias.sh
+                print_success "Btop installed (alias: top)"
+            else
+                print_error "Btop binary copied but not executable"
+            fi
         else
+            # Debug: show what we found
             print_error "Btop binary not found in archive"
         fi
     else
@@ -1180,7 +1183,7 @@ install_docker_prompt() {
 
 install_base_packages() {
     print_banner "${ICON_PKG} Installing base packages"
-    apt-get install $APT_INSTALL_OPTS openssl gnupg curl wget nano cron chrony fail2ban unzip logrotate vnstat nload
+    apt-get install $APT_INSTALL_OPTS openssl gnupg curl wget nano cron chrony fail2ban unzip logrotate vnstat nload htop
     systemctl enable --now fail2ban 2>/dev/null || true
     print_success "Base packages installed"
 }
