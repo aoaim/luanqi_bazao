@@ -98,7 +98,7 @@ for arg in "$@"; do
             REPORT_PREFIX="ipquality"
             shift
             ;;
-        --stream|-s)
+        --service|-s)
             RUN_CPU=false
             RUN_DISK=false
             RUN_NET_INFO=true
@@ -106,7 +106,7 @@ for arg in "$@"; do
             RUN_TRACE=false
             RUN_IP_QUALITY=false
             RUN_STREAM=true
-            REPORT_PREFIX="stream"
+            REPORT_PREFIX="service"
             shift
             ;;
         --public|-p)
@@ -1002,14 +1002,14 @@ run_iperf_test() {
 }
 
 # =========================
-# 流媒体解锁测试
+# 服务解锁测试
 # =========================
 run_stream_test() {
-    log "开始流媒体解锁测试..."
+    log "开始服务解锁测试..."
     
     # 检查网络可用性
     if [ "$HAS_V4" != "true" ] && [ "$HAS_V6" != "true" ]; then
-        warn "  └─ 无可用网络，跳过流媒体测试"
+        warn "  └─ 无可用网络，跳过服务解锁测试"
         return
     fi
     
@@ -1064,8 +1064,8 @@ run_stream_test() {
         echo -e "  ├─ ${YELLOW}请选择测试模式:${NC}"
         echo "  │  ├─ [1] $detected_region_name (默认)"
         echo "  │  ├─ [0] 仅跨国平台检测"
-        echo -n -e "  │  ├─ ${YELLOW}请输入选项 (5秒后自动选择 [1]): ${NC}"
-        read -t 5 -r user_choice </dev/tty 2>/dev/null || { user_choice="1"; echo ""; }
+        echo -n -e "  │  ├─ ${YELLOW}请输入选项 (3 秒后自动选择模式 1): ${NC}"
+        read -t 3 -r user_choice </dev/tty 2>/dev/null || { user_choice="1"; echo ""; }
         
         case "$user_choice" in
             0)
@@ -1100,7 +1100,7 @@ run_stream_test() {
     local stream_script_file="$TMP_DIR/check_stream.sh"
     if ! curl -L -s "$stream_script_url" -o "$stream_script_file" 2>/dev/null; then
         echo -e " ${RED}失败${NC}"
-        warn "  └─ 流媒体测试失败：无法下载测试脚本"
+        warn "  └─ 服务解锁测试失败：无法下载测试脚本"
         return
     fi
     # 将脚本中的 python json.tool 替换为 jq（更轻量，脚本已有 jq 依赖）
@@ -1154,23 +1154,93 @@ run_stream_test() {
     # 分开测试 IPv4 和 IPv6
     local stream_output_v4=""
     local stream_output_v6=""
+    local stream_output_ai_v4=""
+    local stream_output_ai_v6=""
     local stream_tmp_v4="$TMP_DIR/stream_v4.txt"
     local stream_tmp_v6="$TMP_DIR/stream_v6.txt"
+    local stream_tmp_ai_v4="$TMP_DIR/stream_ai_v4.txt"
+    local stream_tmp_ai_v6="$TMP_DIR/stream_ai_v6.txt"
+    local ai_region_id="10"
+    
+    # 执行单个 IP 版本的所有测试（流媒体 + AIGC）
+    run_combined_test() {
+        local test_mode="$1"
+        local mode_name="$2"
+        local stream_file="$3"
+        local ai_file="$4"
+        local region="$5"
+        local ai_region="$6"
+        
+        # 启动后台进度指示器
+        echo -n "  ├─ 正在执行 ${mode_name} 检测 "
+        local spinner_chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+        local spinner_pid=""
+        (
+            local i=0
+            local start_time=$(date +%s)
+            while true; do
+                local elapsed=$(($(date +%s) - start_time))
+                local mins=$((elapsed / 60))
+                local secs=$((elapsed % 60))
+                printf "\r  ├─ 正在执行 ${mode_name} 检测 ${spinner_chars:i++%10:1} [%02d:%02d]" "$mins" "$secs"
+                sleep 0.2
+            done
+        ) &
+        spinner_pid=$!
+        
+        # 执行流媒体测试
+        if command -v script >/dev/null 2>&1; then
+            TERM=xterm-256color script -q -c "echo '$region' | bash '$stream_script_file' -M '$test_mode'" "$stream_file" >/dev/null 2>&1
+        else
+            echo "$region" | bash "$stream_script_file" -M "$test_mode" > "$stream_file" 2>&1
+        fi
+        
+        # 执行 AIGC 测试
+        if command -v script >/dev/null 2>&1; then
+            TERM=xterm-256color script -q -c "echo '$ai_region' | bash '$stream_script_file' -M '$test_mode'" "$ai_file" >/dev/null 2>&1
+        else
+            echo "$ai_region" | bash "$stream_script_file" -M "$test_mode" > "$ai_file" 2>&1
+        fi
+        
+        # 停止进度指示器
+        kill $spinner_pid 2>/dev/null
+        wait $spinner_pid 2>/dev/null
+        
+        # 检查结果
+        local success=false
+        if [ -f "$stream_file" ] && [ -s "$stream_file" ]; then
+            success=true
+        fi
+        if [ -f "$ai_file" ] && [ -s "$ai_file" ]; then
+            success=true
+        fi
+        
+        if [ "$success" = "true" ]; then
+            echo -e "\r  ├─ ${mode_name} 检测完成 ${GREEN}✓${NC}              "
+            return 0
+        else
+            echo -e "\r  ├─ ${mode_name} 检测失败 ${RED}✗${NC}              "
+            return 1
+        fi
+    }
     
     # IPv4 测试
     if [ "$HAS_V4" = "true" ]; then
-        if run_single_stream_test "4" "IPv4" "$stream_tmp_v4"; then
-            stream_output_v4=$(cat "$stream_tmp_v4" 2>/dev/null)
-        fi
-        rm -f "$stream_tmp_v4"
+        run_combined_test "4" "IPv4" "$stream_tmp_v4" "$stream_tmp_ai_v4" "$region_id" "$ai_region_id"
+        [ -f "$stream_tmp_v4" ] && stream_output_v4=$(cat "$stream_tmp_v4" 2>/dev/null)
+        [ -f "$stream_tmp_ai_v4" ] && stream_output_ai_v4=$(cat "$stream_tmp_ai_v4" 2>/dev/null)
+        rm -f "$stream_tmp_v4" "$stream_tmp_ai_v4"
     fi
     
     # IPv6 测试
     if [ "$HAS_V6" = "true" ]; then
-        if run_single_stream_test "6" "IPv6" "$stream_tmp_v6"; then
-            stream_output_v6=$(cat "$stream_tmp_v6" 2>/dev/null)
-        fi
-        rm -f "$stream_tmp_v6"
+        run_combined_test "6" "IPv6" "$stream_tmp_v6" "$stream_tmp_ai_v6" "$region_id" "$ai_region_id"
+        [ -f "$stream_tmp_v6" ] && stream_output_v6=$(cat "$stream_tmp_v6" 2>/dev/null)
+        [ -f "$stream_tmp_ai_v6" ] && stream_output_ai_v6=$(cat "$stream_tmp_ai_v6" 2>/dev/null)
+        rm -f "$stream_tmp_v6" "$stream_tmp_ai_v6"
+    elif [ "$SKIP_V6" != "true" ]; then
+        # 只有当用户没有指定 -4 参数时才提示跳过
+        echo "  ├─ IPv6 检测跳过 (IPv6: N/A)"
     fi
     
     # 清理脚本文件
@@ -1187,11 +1257,11 @@ ${stream_output_v6}"
     fi
     
     if [ -z "$stream_output" ]; then
-        warn "  └─ 流媒体测试失败：无法获取测试结果"
+        warn "  └─ 服务解锁测试失败：无法获取测试结果"
         return
     fi
     
-    info "  └─ 流媒体解锁测试完成"
+    info "  └─ 服务解锁测试完成"
     
     # === Streaming Report ===
     # 解析流媒体测试结果并转换为表格
@@ -1244,40 +1314,16 @@ ${stream_output_v6}"
                 fi
                 
                 # 匹配测试结果行（含Tab或多个空格和冒号）
+                # 排除: 脚本信息行、jq 错误输出
                 if echo "$line" | grep -qE '^\s*[A-Za-z0-9+() -]+:\s+' && \
-                   ! echo "$line" | grep -qE '脚本适配|您的网络|测试时间|版本|运行次数|t\.me|github|网站|详情'; then
+                   ! echo "$line" | grep -qE '脚本适配|您的网络|测试时间|版本|运行次数|t\.me|github|网站|详情' && \
+                   ! echo "$line" | grep -qE '^\s*jq\s*:'; then
                     # 解析服务名称和状态
-                    local service=$(echo "$line" | sed 's/^\s*//' | cut -d':' -f1 | xargs)
-                    local status=$(echo "$line" | sed 's/^\s*//' | cut -d':' -f2- | xargs)
+                    local service=$(echo "$line" | sed 's/^\s*//' | cut -d':' -f1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+                    local status=$(echo "$line" | sed 's/^\s*//' | cut -d':' -f2- | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
                     
-                    # 转换状态为图标
-                    local icon=""
-                    local status_text="$status"
-                    
-                    if echo "$status" | grep -qiE '^Yes|^Originals Only'; then
-                        icon="✅"
-                        # 提取区域信息
-                        if echo "$status" | grep -qi "Region:"; then
-                            status_text=$(echo "$status" | sed 's/Yes/解锁/' | sed 's/(Region: /(/g')
-                        else
-                            status_text="解锁"
-                        fi
-                    elif echo "$status" | grep -qiE '^No$|^No |Blocked|不支持'; then
-                        icon="❌"
-                        status_text="未解锁"
-                    elif echo "$status" | grep -qiE 'Failed|Error|错误'; then
-                        icon="🔴"
-                        status_text="检测失败"
-                    elif echo "$status" | grep -qiE 'Not Currently Supported|不支持'; then
-                        icon="⚪"
-                        status_text="不支持"
-                    else
-                        icon="🔵"
-                        status_text="$status"
-                    fi
-                    
-                    # 添加结果
-                    results="${results}${service}|${icon} ${status_text}\n"
+                    # 直接使用原始状态，不做转换
+                    results="${results}${service}|${status}\n"
                 fi
             fi
         done <<< "$cleaned"
@@ -1286,58 +1332,97 @@ ${stream_output_v6}"
     }
     
     {
-        echo "## 流媒体解锁测试"
+        echo "## 服务解锁测试"
         echo ""
         echo "测试区域: **$region_name**"
         echo ""
         
-        # IPv4 结果表格
-        if [ -n "$stream_output_v4" ]; then
-            echo "### IPv4 解锁测试"
-            echo ""
-            echo "| 服务 | 状态 |"
-            echo "| :--- | :--- |"
+        # 定义输出单个分类的函数
+        output_stream_category() {
+            local output="$1"
+            local ip_version="$2"
             
-            # 解析并输出 IPv4 结果
-            parse_stream_to_table "$stream_output_v4" "IPv4" | while IFS='|' read -r service status; do
+            local current_table_started=false
+            
+            parse_stream_to_table "$output" "$ip_version" | while IFS='|' read -r service status; do
                 if [ -n "$service" ]; then
-                    # 检测是否为分类标题
                     if [[ "$service" == CATEGORY:* ]]; then
                         local cat_name="${service#CATEGORY:}"
-                        echo "| **━━ $cat_name ━━** | |"
+                        if [ "$current_table_started" = "true" ]; then
+                            echo ""
+                        fi
+                        echo "#### $cat_name"
+                        echo ""
+                        echo "| 服务 | 状态 |"
+                        echo "| :--- | :--- |"
+                        current_table_started=true
                     elif [[ "$service" == SUBCATEGORY:* ]]; then
                         local subcat_name="${service#SUBCATEGORY:}"
                         echo "| **── $subcat_name ──** | |"
                     else
+                        if [ "$current_table_started" != "true" ]; then
+                            echo "| 服务 | 状态 |"
+                            echo "| :--- | :--- |"
+                            current_table_started=true
+                        fi
                         echo "| $service | $status |"
                     fi
                 fi
             done
+        }
+        
+        # 定义输出 AIGC 的函数（无分类标题）
+        output_aigc_section() {
+            local output="$1"
+            local ip_version="$2"
+            
+            echo "#### AIGC"
+            echo ""
+            echo "| 服务 | 状态 |"
+            echo "| :--- | :--- |"
+            
+            parse_stream_to_table "$output" "$ip_version" | while IFS='|' read -r service status; do
+                if [ -n "$service" ]; then
+                    # 跳过分类标题
+                    if [[ "$service" != CATEGORY:* ]] && [[ "$service" != SUBCATEGORY:* ]]; then
+                        echo "| $service | $status |"
+                    fi
+                fi
+            done
+            echo ""
+        }
+        
+        # IPv4 结果
+        if [ -n "$stream_output_v4" ] || [ -n "$stream_output_ai_v4" ]; then
+            echo "### IPv4"
+            echo ""
+            
+            # 先输出 AIGC
+            if [ -n "$stream_output_ai_v4" ]; then
+                output_aigc_section "$stream_output_ai_v4" "IPv4"
+            fi
+            
+            # 再输出其他流媒体分类
+            if [ -n "$stream_output_v4" ]; then
+                output_stream_category "$stream_output_v4" "IPv4"
+            fi
             echo ""
         fi
         
-        # IPv6 结果表格
-        if [ -n "$stream_output_v6" ]; then
-            echo "### IPv6 解锁测试"
+        # IPv6 结果
+        if [ -n "$stream_output_v6" ] || [ -n "$stream_output_ai_v6" ]; then
+            echo "### IPv6"
             echo ""
-            echo "| 服务 | 状态 |"
-            echo "| :--- | :--- |"
             
-            # 解析并输出 IPv6 结果
-            parse_stream_to_table "$stream_output_v6" "IPv6" | while IFS='|' read -r service status; do
-                if [ -n "$service" ]; then
-                    # 检测是否为分类标题
-                    if [[ "$service" == CATEGORY:* ]]; then
-                        local cat_name="${service#CATEGORY:}"
-                        echo "| **━━ $cat_name ━━** | |"
-                    elif [[ "$service" == SUBCATEGORY:* ]]; then
-                        local subcat_name="${service#SUBCATEGORY:}"
-                        echo "| **── $subcat_name ──** | |"
-                    else
-                        echo "| $service | $status |"
-                    fi
-                fi
-            done
+            # 先输出 AIGC
+            if [ -n "$stream_output_ai_v6" ]; then
+                output_aigc_section "$stream_output_ai_v6" "IPv6"
+            fi
+            
+            # 再输出其他流媒体分类
+            if [ -n "$stream_output_v6" ]; then
+                output_stream_category "$stream_output_v6" "IPv6"
+            fi
             echo ""
         fi
         
@@ -2412,7 +2497,7 @@ EOF
     echo -e "  -t, --nexttrace     路由追踪"
     echo -e "  -p, --public        公共服务 (DNS + 流媒体 CDN)"
     echo -e "  -i, --ip-quality    IPv4 质量检测"
-    echo -e "  -s, --stream        流媒体解锁"
+    echo -e "  -s, --service       服务解锁"
     echo -e "  -4                  仅进行 IPv4 测试"
     echo -e "  -6                  仅进行 IPv6 测试\n"
     
@@ -2420,10 +2505,11 @@ EOF
     echo -e "[*] 感谢 JamChoi 提供的 Python 源码"
     echo -e "[+] 由我驾驶着 Google Antigravity 进行改写和扩展"
     echo -e "[>] 本项目依赖 nxtrace/NTrace-core 进行路由追踪"
-    echo -e "[>] 本项目依赖 lmc999/RegionRestrictionCheck 进行流媒体测试"
+    echo -e "[>] 本项目依赖 1-stream/RegionRestrictionCheck 进行服务解锁测试"
     echo -e "[i] IP 信息来源于 ipapi.co，ipapi.is 和 ippure.com"
     echo -e "[✓] 测试结束时自动清理，干干净净（我有洁癖）"
     echo -e ""
+    sleep 1
     
     # Initialize Report
     init_report
@@ -2442,7 +2528,7 @@ EOF
     elif [ "$RUN_IP_QUALITY" = "true" ] && [ "$RUN_TRACE" = "false" ]; then 
         log "${CYAN}模式: 仅 IP 质量检测 (-i)${NC}"
     elif [ "$RUN_STREAM" = "true" ] && [ "$RUN_TRACE" = "false" ]; then 
-        log "${CYAN}模式: 仅流媒体测试 (-s)${NC}"
+        log "${CYAN}模式: 仅服务解锁测试 (-s)${NC}"
     fi
 
     if [ "$SKIP_V6" = "true" ]; then
@@ -2465,7 +2551,7 @@ EOF
         collect_ip_quality
     fi
     
-    # 流媒体解锁测试
+    # 服务解锁测试
     if [ "$RUN_STREAM" = "true" ] && [ "$RUN_NET_INFO" = "true" ]; then
         run_stream_test
     fi
