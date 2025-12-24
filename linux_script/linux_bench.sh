@@ -295,12 +295,16 @@ ensure_dependencies() {
             if [ -n "$url" ] && curl -f -L -s -o "$TMP_DIR/nexttrace" "$url" 2>/dev/null; then
                 chmod +x "$TMP_DIR/nexttrace"
                 export NEXTTRACE_BIN="$TMP_DIR/nexttrace"
+                # 设置 NextTrace Token
+                export NEXTTRACE_TOKEN=$(echo "ZXlKaGJHY2lPaUpJVXpJMU5pSXNJblI1Y0NJNklrcFhWQ0o5LmV5SmxlSEFpT2pFM09UYzVNRE0wTnpjNU1EVXpNek1zSW1sd0lqb2laREE1TURFeE1HWmpPVGMxTVRWbFlUQXlOVFEzWVdaaVlqaGxaRFZoTkdWaVpXRTNaV1F3TmpjNE56UTBPR0U1TldJek5EVmhaR0kwTVRJME4yTXlPU0lzSW5WaElqb2lZVEl6TWpVMU5tUm1NbUl6TkdGa1pqazVNR1ppTkRWbVlqRmhaREJoTmpnM01qbGpaamc0TW1JNU5qYzVNR0UxTUdVNE5qRmxOelpsTUdFeU1qbG1PU0o5LkJ2RVBucEJFTnNjT3FMYlptN0R0R1U5NHVpdnh1X2FNLVZkenJHQk1NUWMK" | base64 -d 2>/dev/null)
                 ephemeral_tools="$ephemeral_tools nexttrace"
             else
                 export NEXTTRACE_BIN="false"
             fi
         else
             export NEXTTRACE_BIN="nexttrace"
+            # 设置 NextTrace Token
+            export NEXTTRACE_TOKEN=$(echo "ZXlKaGJHY2lPaUpJVXpJMU5pSXNJblI1Y0NJNklrcFhWQ0o5LmV5SmxlSEFpT2pFM09UYzVNRE0wTnpjNU1EVXpNek1zSW1sd0lqb2laREE1TURFeE1HWmpPVGMxTVRWbFlUQXlOVFEzWVdaaVlqaGxaRFZoTkdWaVpXRTNaV1F3TmpjNE56UTBPR0U1TldJek5EVmhaR0kwTVRJME4yTXlPU0lzSW5WaElqb2lZVEl6TWpVMU5tUm1NbUl6TkdGa1pqazVNR1ppTkRWbVlqRmhaREJoTmpnM01qbGpaamc0TW1JNU5qYzVNR0UxTUdVNE5qRmxOelpsTUdFeU1qbG1PU0o5LkJ2RVBucEJFTnNjT3FMYlptN0R0R1U5NHVpdnh1X2FNLVZkenJHQk1NUWMK" | base64 -d 2>/dev/null)
         fi
         
         # yt-dlp
@@ -2388,7 +2392,7 @@ run_trace_test() {
 init_report() {
     > "$REPORT_FILE"
     echo "# Bench Report" >> "$REPORT_FILE"
-    echo "Generated at $(date '+%Y-%m-%d %H:%M:%S')" >> "$REPORT_FILE"
+    echo "Generated at $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S') China Standard Time" >> "$REPORT_FILE"
     echo "" >> "$REPORT_FILE"
 }
 
