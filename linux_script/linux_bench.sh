@@ -1021,12 +1021,9 @@ run_stream_test() {
         country_code=$(echo "$NET_V6_LOC" | awk -F', ' '{print $NF}' | xargs)
     fi
     
-    # RegionRestrictionCheck 的区域 ID 定义:
-    # 0=只进行跨国平台检测
-    # 1=跨国平台+台湾平台，2=跨国平台+香港平台，3=跨国平台+日本平台
-    # 4=跨国平台+北美平台，5=跨国平台+南美平台，6=跨国平台+欧洲平台
-    # 7=跨国平台+大洋洲平台，8=跨国平台+韩国平台，9=跨国平台+东南亚平台
-    # 10=跨国平台+印度平台，11=跨国平台+非洲平台
+    # 1-stream RegionRestrictionCheck 的区域 ID 定义:
+    # 0=只进行跨国平台，1=台湾，2=香港，3=日本，4=北美，5=南美
+    # 6=欧洲，7=大洋洲，8=韩国，9=东南亚，10=AI平台，11=非洲，99=体育直播
     
     local region_id="0"  # 默认仅跨国平台
     local region_name="仅跨国平台"
@@ -1041,10 +1038,10 @@ run_stream_test() {
         HK) detected_region_id="2"; detected_region_name="跨国平台+香港平台" ;;
         # 日本
         JP) detected_region_id="3"; detected_region_name="跨国平台+日本平台" ;;
-        # 北美 (美国、加拿大、墨西哥)
-        US|CA|MX) detected_region_id="4"; detected_region_name="跨国平台+北美平台" ;;
+        # 北美 (美国、加拿大)
+        US|CA) detected_region_id="4"; detected_region_name="跨国平台+北美平台" ;;
         # 南美
-        BR|AR|CL|CO|PE|VE|EC|BO|UY|PY|GY|SR) detected_region_id="5"; detected_region_name="跨国平台+南美平台" ;;
+        BR|AR|CL|CO|PE|VE|EC|BO|UY|PY|GY|SR|MX) detected_region_id="5"; detected_region_name="跨国平台+南美平台" ;;
         # 欧洲
         GB|DE|FR|IT|ES|NL|BE|AT|CH|PL|CZ|PT|SE|NO|DK|FI|IE|RO|HU|GR|RU|UA|BY) detected_region_id="6"; detected_region_name="跨国平台+欧洲平台" ;;
         # 大洋洲 (澳大利亚、新西兰等)
@@ -1053,15 +1050,9 @@ run_stream_test() {
         KR) detected_region_id="8"; detected_region_name="跨国平台+韩国平台" ;;
         # 东南亚
         SG|MY|TH|VN|ID|PH|MM|KH|LA|BN) detected_region_id="9"; detected_region_name="跨国平台+东南亚平台" ;;
-        # 印度
-        IN) detected_region_id="10"; detected_region_name="跨国平台+印度平台" ;;
         # 非洲
         ZA|EG|NG|KE|MA|TN|GH|TZ|UG|ZW|ET) detected_region_id="11"; detected_region_name="跨国平台+非洲平台" ;;
-        # 中东 -> 归类到跨国平台
-        AE|SA|IL|TR|IR|IQ|KW|QA|BH|OM|JO|LB) detected_region_id=""; detected_region_name="" ;;
-        # 中国大陆 -> 归类到跨国平台
-        CN) detected_region_id=""; detected_region_name="" ;;
-        # 其他/未知
+        # 其他 -> 归类到跨国平台
         *) detected_region_id=""; detected_region_name="" ;;
     esac
     
@@ -1101,17 +1092,19 @@ run_stream_test() {
     
     # 下载并执行流媒体测试脚本，捕获输出
     local stream_output=""
-    local stream_script_url="https://raw.githubusercontent.com/lmc999/RegionRestrictionCheck/refs/heads/main/check.sh"
+    local stream_script_url="https://github.com/1-stream/RegionRestrictionCheck/raw/main/check.sh"
     local stream_tmp_file="$TMP_DIR/stream_output.txt"
     
     # 下载脚本到临时文件
     echo -n "  ├─ 正在下载测试脚本..."
     local stream_script_file="$TMP_DIR/check_stream.sh"
-    if ! curl -sL "$stream_script_url" -o "$stream_script_file" 2>/dev/null; then
+    if ! curl -L -s "$stream_script_url" -o "$stream_script_file" 2>/dev/null; then
         echo -e " ${RED}失败${NC}"
         warn "  └─ 流媒体测试失败：无法下载测试脚本"
         return
     fi
+    # 将脚本中的 python json.tool 替换为 jq（更轻量，脚本已有 jq 依赖）
+    sed -i -E 's/python3?  *-m json\.tool( 2>\/dev\/null)?/jq \./g' "$stream_script_file"
     echo -e " ${GREEN}完成${NC}"
     chmod +x "$stream_script_file"
     
@@ -1138,11 +1131,11 @@ run_stream_test() {
         ) &
         spinner_pid=$!
         
-        # 执行测试
+        # 执行测试 (新版 1-stream 脚本不支持 -R 参数指定区域，需要通过管道输入)
         if command -v script >/dev/null 2>&1; then
-            TERM=xterm-256color script -q -c "bash '$stream_script_file' -R '$region_id' -M '$test_mode'" "$output_file" >/dev/null 2>&1
+            TERM=xterm-256color script -q -c "echo '$region_id' | bash '$stream_script_file' -M '$test_mode'" "$output_file" >/dev/null 2>&1
         else
-            bash "$stream_script_file" -R "$region_id" -M "$test_mode" > "$output_file" 2>&1
+            echo "$region_id" | bash "$stream_script_file" -M "$test_mode" > "$output_file" 2>&1
         fi
         
         # 停止进度指示器
