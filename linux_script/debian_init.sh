@@ -1183,7 +1183,7 @@ install_docker_prompt() {
 
 install_base_packages() {
     print_banner "${ICON_PKG} Installing base packages"
-    apt-get install $APT_INSTALL_OPTS openssl gnupg curl wget nano cron chrony fail2ban unzip logrotate vnstat nload htop
+    apt-get install $APT_INSTALL_OPTS rsyslog openssl gnupg curl wget nano cron chrony fail2ban unzip logrotate vnstat nload htop
     systemctl enable --now fail2ban 2>/dev/null || true
     print_success "Base packages installed"
 }

@@ -1038,13 +1038,13 @@ run_stream_test() {
         HK) detected_region_id="2"; detected_region_name="跨国平台+香港平台" ;;
         # 日本
         JP) detected_region_id="3"; detected_region_name="跨国平台+日本平台" ;;
-        # 北美 (美国、加拿大)
-        US|CA) detected_region_id="4"; detected_region_name="跨国平台+北美平台" ;;
+        # 北美
+        US|CA|MX) detected_region_id="4"; detected_region_name="跨国平台+北美平台" ;;
         # 南美
-        BR|AR|CL|CO|PE|VE|EC|BO|UY|PY|GY|SR|MX) detected_region_id="5"; detected_region_name="跨国平台+南美平台" ;;
+        BR|AR|CL|CO|PE|VE|EC|BO|UY|PY|GY|SR) detected_region_id="5"; detected_region_name="跨国平台+南美平台" ;;
         # 欧洲
         GB|DE|FR|IT|ES|NL|BE|AT|CH|PL|CZ|PT|SE|NO|DK|FI|IE|RO|HU|GR|RU|UA|BY) detected_region_id="6"; detected_region_name="跨国平台+欧洲平台" ;;
-        # 大洋洲 (澳大利亚、新西兰等)
+        # 大洋洲
         AU|NZ|FJ|PG|NC|PF) detected_region_id="7"; detected_region_name="跨国平台+大洋洲平台" ;;
         # 韩国
         KR) detected_region_id="8"; detected_region_name="跨国平台+韩国平台" ;;
