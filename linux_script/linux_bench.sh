@@ -726,9 +726,7 @@ collect_ip_quality() {
         fi
         
         echo ""
-        echo ""
-        echo "> IP 质量评价（由机器生成，仅供参考）：$summary_icon $summary"
-        echo ""
+        echo "IP 质量评价（由机器生成，仅供参考）：$summary_icon $summary"
 
     } >> "$REPORT_FILE"
     
@@ -965,10 +963,9 @@ run_iperf_test() {
     if [ "$HAS_V4" = "true" ] && [ ${#locs_cn[@]} -gt 0 ]; then
         {
             echo "### 国内节点（感谢青毅云提供测试节点）"
-            echo "> 🌐 青毅云计算 (YOUTHIDC)  "
-            echo "> ⚡️ 国内大带宽独享服务器，IEPL 跨境专线  "
-            echo "> 💬 Telegram 群组：https://t.me/YouthIDC  "
-            echo "> "
+            echo "🌐 青毅云计算 (YOUTHIDC)  "
+            echo "⚡️ 国内大带宽独享服务器，IEPL 跨境专线  "
+            echo "💬 Telegram 群组：https://t.me/YouthIDC  "
             echo "| 节点 | 线程 | 发送带宽 | 接收带宽 |"
             echo "| :--- | :--- | :--- | :--- |"
         } >> "$REPORT_FILE"
