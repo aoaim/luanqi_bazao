@@ -37,14 +37,15 @@ TMP_DIR="./tmp_bench_$(date +%s)"
 CLEANUP_PKGS=()
 
 # 运行模式标志
-RUN_CPU=true
-RUN_DISK=true
 RUN_NET_INFO=true
-RUN_IPERF=true
-RUN_TRACE=true
+RUN_BGP=true
 RUN_IP_QUALITY=true
 RUN_STREAM=true
+RUN_CPU=true
+RUN_DISK=true
+RUN_IPERF=true
 RUN_PUBLIC=false
+RUN_TRACE=true
 SKIP_V4=false
 SKIP_V6=false
 
@@ -55,69 +56,80 @@ REPORT_PREFIX="report"
 for arg in "$@"; do
     case $arg in
         --network|-n)
-            RUN_CPU=false
-            RUN_DISK=false
             RUN_NET_INFO=true
-            RUN_IPERF=true
-            RUN_TRACE=true
+            RUN_BGP=true
             RUN_IP_QUALITY=true
             RUN_STREAM=true
+            RUN_CPU=false
+            RUN_DISK=false
+            RUN_IPERF=true
+            RUN_PUBLIC=false
+            RUN_TRACE=false
             REPORT_PREFIX="network"
             shift
             ;;
         --hardware|-h)
-            RUN_CPU=true
-            RUN_DISK=true
             RUN_NET_INFO=false
-            RUN_IPERF=false
-            RUN_TRACE=false
+            RUN_BGP=false
             RUN_IP_QUALITY=false
             RUN_STREAM=false
+            RUN_CPU=true
+            RUN_DISK=true
+            RUN_IPERF=false
+            RUN_PUBLIC=false
+            RUN_TRACE=false
             REPORT_PREFIX="hardware"
             shift
             ;;
         --nexttrace|-t)
-            RUN_CPU=false
-            RUN_DISK=false
             RUN_NET_INFO=true
-            RUN_IPERF=false
-            RUN_TRACE=true
+            RUN_BGP=false
             RUN_IP_QUALITY=false
             RUN_STREAM=false
-            REPORT_PREFIX="nexttrace"
+            RUN_CPU=false
+            RUN_DISK=false
+            RUN_IPERF=false
+            RUN_PUBLIC=false
+            RUN_TRACE=true
+            REPORT_PREFIX="trace"
             shift
             ;;
         --ip-quality|-i)
-            RUN_CPU=false
-            RUN_DISK=false
             RUN_NET_INFO=true
-            RUN_IPERF=false
-            RUN_TRACE=false
+            RUN_BGP=false
             RUN_IP_QUALITY=true
             RUN_STREAM=false
-            REPORT_PREFIX="ipquality"
+            RUN_CPU=false
+            RUN_DISK=false
+            RUN_IPERF=false
+            RUN_PUBLIC=false
+            RUN_TRACE=false
+            REPORT_PREFIX="ip"
             shift
             ;;
         --service|-s)
-            RUN_CPU=false
-            RUN_DISK=false
             RUN_NET_INFO=true
-            RUN_IPERF=false
-            RUN_TRACE=false
+            RUN_BGP=false
             RUN_IP_QUALITY=false
             RUN_STREAM=true
+            RUN_CPU=false
+            RUN_DISK=false
+            RUN_IPERF=false
+            RUN_PUBLIC=false
+            RUN_TRACE=false
             REPORT_PREFIX="service"
             shift
             ;;
         --public|-p)
-            RUN_CPU=false
-            RUN_DISK=false
             RUN_NET_INFO=true
-            RUN_IPERF=false
-            RUN_TRACE=false
+            RUN_BGP=false
             RUN_IP_QUALITY=false
             RUN_STREAM=false
+            RUN_CPU=false
+            RUN_DISK=false
+            RUN_IPERF=false
             RUN_PUBLIC=true
+            RUN_TRACE=false
             REPORT_PREFIX="public"
             shift
             ;;
@@ -507,6 +519,76 @@ collect_network_info() {
         fi
         echo ""
     } >> "$REPORT_FILE"
+}
+
+# =========================
+# BGP 透视
+# =========================
+collect_bgp_view() {
+    log "开始 BGP 透视..."
+    
+    local BGP_API_BASE="https://bgp-view.jam114514.me/bgp_info?ip="
+    local has_any_bgp=false
+    
+    # === IPv4 BGP 透视 ===
+    if [ "$SKIP_V4" = "false" ] && [ "$HAS_V4" = "true" ]; then
+        echo "  ├─ 获取 IPv4 BGP 信息..."
+        local v4_svg_url="${BGP_API_BASE}${NET_V4_IP}"
+        # 验证 API 是否可访问
+        local v4_status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$v4_svg_url" 2>/dev/null)
+        if [ "$v4_status" = "200" ]; then
+            BGP_V4_URL="$v4_svg_url"
+            has_any_bgp=true
+            if [ "$SKIP_V6" = "true" ] || [ "$HAS_V6" != "true" ]; then
+                echo "  └─ IPv4 BGP 信息获取成功 ✓"
+            else
+                echo "  │  └─ IPv4 BGP 信息获取成功 ✓"
+            fi
+        else
+            BGP_V4_URL=""
+            if [ "$SKIP_V6" = "true" ] || [ "$HAS_V6" != "true" ]; then
+                echo "  └─ IPv4 BGP 信息获取失败"
+            else
+                echo "  │  └─ IPv4 BGP 信息获取失败"
+            fi
+        fi
+    fi
+    
+    # === IPv6 BGP 透视 ===
+    if [ "$SKIP_V6" = "false" ] && [ "$HAS_V6" = "true" ]; then
+        echo "  └─ 获取 IPv6 BGP 信息..."
+        local v6_svg_url="${BGP_API_BASE}${NET_V6_IP}"
+        # 验证 API 是否可访问
+        local v6_status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$v6_svg_url" 2>/dev/null)
+        if [ "$v6_status" = "200" ]; then
+            BGP_V6_URL="$v6_svg_url"
+            has_any_bgp=true
+            echo "     └─ IPv6 BGP 信息获取成功 ✓"
+        else
+            BGP_V6_URL=""
+            echo "     └─ IPv6 BGP 信息获取失败"
+        fi
+    fi
+    
+    # === 生成报告 ===
+    if [ "$has_any_bgp" = "true" ]; then
+        {
+            echo "## BGP 透视"
+            echo ""
+            if [ -n "$BGP_V4_URL" ]; then
+                echo "### IPv4"
+                echo "![IPv4 BGP 透视]($BGP_V4_URL)"
+                echo ""
+            fi
+            if [ -n "$BGP_V6_URL" ]; then
+                echo "### IPv6"
+                echo "![IPv6 BGP 透视]($BGP_V6_URL)"
+                echo ""
+            fi
+        } >> "$REPORT_FILE"
+    fi
+    
+    info "  └─ BGP 透视完成"
 }
 
 # =========================
@@ -2541,6 +2623,11 @@ EOF
     # 网络相关
     if [ "$RUN_NET_INFO" = "true" ]; then
         collect_network_info
+    fi
+    
+    # BGP 透视
+    if [ "$RUN_BGP" = "true" ] && [ "$RUN_NET_INFO" = "true" ]; then
+        collect_bgp_view
     fi
     
     # IP 质量检测
