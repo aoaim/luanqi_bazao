@@ -441,7 +441,22 @@ collect_network_info() {
     
     if [ "$SKIP_V4" = "false" ]; then
         echo "  ├─ 查询 IPv4 信息..."
-        local v4_json=$(curl -s -4 --max-time 10 https://ipapi.co/json/ 2>/dev/null)
+        local v4_json=""
+        local v4_retry=0
+        local v4_max_retry=3
+        
+        while [ $v4_retry -lt $v4_max_retry ]; do
+            v4_json=$(curl -s -4 --max-time 10 https://ipapi.co/json/ 2>/dev/null)
+            if [ -n "$v4_json" ] && echo "$v4_json" | jq -e '.ip' >/dev/null 2>&1; then
+                break
+            fi
+            v4_retry=$((v4_retry + 1))
+            if [ $v4_retry -lt $v4_max_retry ]; then
+                echo "  │  ├─ IPv4 查询失败，重试 ($v4_retry/$v4_max_retry)..."
+                sleep 3
+            fi
+        done
+        
         if [ -n "$v4_json" ] && echo "$v4_json" | jq -e '.ip' >/dev/null 2>&1; then
             HAS_V4="true"
             NET_V4_IP=$(echo "$v4_json" | jq -r '.ip // empty')
@@ -477,7 +492,22 @@ collect_network_info() {
     if [ "$SKIP_V6" = "false" ]; then
         echo "  ├─ 查询 IPv6 信息..."
         # ipapi.co 支持 IPv6 访问，强制使用 -6 会通过 IPv6 获取信息
-        local v6_json=$(curl -s -6 --max-time 10 https://ipapi.co/json/ 2>/dev/null)
+        local v6_json=""
+        local v6_retry=0
+        local v6_max_retry=3
+        
+        while [ $v6_retry -lt $v6_max_retry ]; do
+            v6_json=$(curl -s -6 --max-time 10 https://ipapi.co/json/ 2>/dev/null)
+            if [ -n "$v6_json" ] && echo "$v6_json" | jq -e '.ip' >/dev/null 2>&1; then
+                break
+            fi
+            v6_retry=$((v6_retry + 1))
+            if [ $v6_retry -lt $v6_max_retry ]; then
+                echo "  │  ├─ IPv6 查询失败，重试 ($v6_retry/$v6_max_retry)..."
+                sleep 3
+            fi
+        done
+        
         if [ -n "$v6_json" ] && echo "$v6_json" | jq -e '.ip' >/dev/null 2>&1; then
             HAS_V6="true"
             NET_V6_IP=$(echo "$v6_json" | jq -r '.ip // empty')
@@ -534,8 +564,22 @@ collect_bgp_view() {
     if [ "$SKIP_V4" = "false" ] && [ "$HAS_V4" = "true" ]; then
         echo "  ├─ 获取 IPv4 BGP 信息..."
         local v4_svg_url="${BGP_API_BASE}${NET_V4_IP}"
-        # 验证 API 是否可访问
-        local v4_status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$v4_svg_url" 2>/dev/null)
+        local v4_status=""
+        local bgp_v4_retry=0
+        local bgp_max_retry=3
+        
+        while [ $bgp_v4_retry -lt $bgp_max_retry ]; do
+            v4_status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$v4_svg_url" 2>/dev/null)
+            if [ "$v4_status" = "200" ]; then
+                break
+            fi
+            bgp_v4_retry=$((bgp_v4_retry + 1))
+            if [ $bgp_v4_retry -lt $bgp_max_retry ]; then
+                echo "  │  ├─ IPv4 BGP 获取失败，重试 ($bgp_v4_retry/$bgp_max_retry)..."
+                sleep 3
+            fi
+        done
+        
         if [ "$v4_status" = "200" ]; then
             BGP_V4_URL="$v4_svg_url"
             has_any_bgp=true
@@ -558,8 +602,21 @@ collect_bgp_view() {
     if [ "$SKIP_V6" = "false" ] && [ "$HAS_V6" = "true" ]; then
         echo "  └─ 获取 IPv6 BGP 信息..."
         local v6_svg_url="${BGP_API_BASE}${NET_V6_IP}"
-        # 验证 API 是否可访问
-        local v6_status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$v6_svg_url" 2>/dev/null)
+        local v6_status=""
+        local bgp_v6_retry=0
+        
+        while [ $bgp_v6_retry -lt $bgp_max_retry ]; do
+            v6_status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$v6_svg_url" 2>/dev/null)
+            if [ "$v6_status" = "200" ]; then
+                break
+            fi
+            bgp_v6_retry=$((bgp_v6_retry + 1))
+            if [ $bgp_v6_retry -lt $bgp_max_retry ]; then
+                echo "     ├─ IPv6 BGP 获取失败，重试 ($bgp_v6_retry/$bgp_max_retry)..."
+                sleep 3
+            fi
+        done
+        
         if [ "$v6_status" = "200" ]; then
             BGP_V6_URL="$v6_svg_url"
             has_any_bgp=true
@@ -656,7 +713,21 @@ collect_ip_quality() {
     
     # 1. ipapi.is - 滥用评分、机房识别、VPN/代理/Tor/爬虫/滥用检测
     echo "  │  ├─ 查询 ipapi.is..."
-    local ipapi_json=$(curl -s -4 --max-time 10 "https://api.ipapi.is/?q=$ip" 2>/dev/null)
+    local ipapi_json=""
+    local ipapi_retry=0
+    local quality_max_retry=3
+    
+    while [ $ipapi_retry -lt $quality_max_retry ]; do
+        ipapi_json=$(curl -s -4 --max-time 10 "https://api.ipapi.is/?q=$ip" 2>/dev/null)
+        if [ -n "$ipapi_json" ] && echo "$ipapi_json" | jq -e '.ip' >/dev/null 2>&1; then
+            break
+        fi
+        ipapi_retry=$((ipapi_retry + 1))
+        if [ $ipapi_retry -lt $quality_max_retry ]; then
+            echo "  │  │  ├─ ipapi.is 查询失败，重试 ($ipapi_retry/$quality_max_retry)..."
+            sleep 3
+        fi
+    done
     
     local ipapi_abuser_score="" ipapi_asn_abuser_score=""
     local ipapi_is_datacenter="" ipapi_datacenter_name=""
@@ -681,7 +752,20 @@ collect_ip_quality() {
     
     # 2. ippure - 欺诈评分、原生 IP 识别
     echo "  │  ├─ 查询 ippure.com..."
-    local ippure_json=$(curl -s -4 --max-time 10 "https://my.ippure.com/v1/info" 2>/dev/null)
+    local ippure_json=""
+    local ippure_retry=0
+    
+    while [ $ippure_retry -lt $quality_max_retry ]; do
+        ippure_json=$(curl -s -4 --max-time 10 "https://my.ippure.com/v1/info" 2>/dev/null)
+        if [ -n "$ippure_json" ] && echo "$ippure_json" | jq -e '.ip' >/dev/null 2>&1; then
+            break
+        fi
+        ippure_retry=$((ippure_retry + 1))
+        if [ $ippure_retry -lt $quality_max_retry ]; then
+            echo "  │  │  ├─ ippure.com 查询失败，重试 ($ippure_retry/$quality_max_retry)..."
+            sleep 3
+        fi
+    done
     
     local ippure_fraud_score="" ippure_is_residential=""
     
