@@ -43,7 +43,7 @@ RUN_IP_QUALITY=true
 RUN_STREAM=true
 RUN_CPU=true
 RUN_DISK=true
-RUN_IPERF=true
+RUN_SPEEDTEST=true
 RUN_PUBLIC=false
 RUN_TRACE=true
 SKIP_V4=false
@@ -62,7 +62,7 @@ for arg in "$@"; do
             RUN_STREAM=true
             RUN_CPU=false
             RUN_DISK=false
-            RUN_IPERF=true
+            RUN_SPEEDTEST=true
             RUN_PUBLIC=false
             RUN_TRACE=false
             REPORT_PREFIX="network"
@@ -75,7 +75,7 @@ for arg in "$@"; do
             RUN_STREAM=false
             RUN_CPU=true
             RUN_DISK=true
-            RUN_IPERF=false
+            RUN_SPEEDTEST=false
             RUN_PUBLIC=false
             RUN_TRACE=false
             REPORT_PREFIX="hardware"
@@ -88,7 +88,7 @@ for arg in "$@"; do
             RUN_STREAM=false
             RUN_CPU=false
             RUN_DISK=false
-            RUN_IPERF=false
+            RUN_SPEEDTEST=false
             RUN_PUBLIC=false
             RUN_TRACE=true
             REPORT_PREFIX="trace"
@@ -101,7 +101,7 @@ for arg in "$@"; do
             RUN_STREAM=false
             RUN_CPU=false
             RUN_DISK=false
-            RUN_IPERF=false
+            RUN_SPEEDTEST=false
             RUN_PUBLIC=false
             RUN_TRACE=false
             REPORT_PREFIX="ip"
@@ -114,7 +114,7 @@ for arg in "$@"; do
             RUN_STREAM=true
             RUN_CPU=false
             RUN_DISK=false
-            RUN_IPERF=false
+            RUN_SPEEDTEST=false
             RUN_PUBLIC=false
             RUN_TRACE=false
             REPORT_PREFIX="service"
@@ -127,7 +127,7 @@ for arg in "$@"; do
             RUN_STREAM=false
             RUN_CPU=false
             RUN_DISK=false
-            RUN_IPERF=false
+            RUN_SPEEDTEST=false
             RUN_PUBLIC=true
             RUN_TRACE=false
             REPORT_PREFIX="public"
@@ -243,7 +243,7 @@ ensure_dependencies() {
         target_pkgs="$target_pkgs sysbench fio"
     fi
     
-    if [ "$RUN_IPERF" = "true" ]; then
+    if [ "$RUN_SPEEDTEST" = "true" ]; then
         target_pkgs="$target_pkgs iperf3"
     fi
     
@@ -338,6 +338,46 @@ ensure_dependencies() {
         # 即使不需要，也设个默认值防报错
         export NEXTTRACE_BIN="false"
         export YTDLP_BIN="false"
+    fi
+    
+    # 5. Cloudflare Speedtest CLI (独立下载，用于带宽测试)
+    if [ "$RUN_SPEEDTEST" = "true" ]; then
+        if ! check_cmd cloudflare-speed-cli; then
+            local arch=$(uname -m)
+            local cf_url=""
+            # 使用 GitHub latest 重定向，自动下载最新版本
+            [ "$arch" == "x86_64" ] && cf_url="https://github.com/kavehtehrani/cloudflare-speed-cli/releases/latest/download/cloudflare-speed-cli-x86_64-unknown-linux-musl.tar.xz"
+            [ "$arch" == "aarch64" ] && cf_url="https://github.com/kavehtehrani/cloudflare-speed-cli/releases/latest/download/cloudflare-speed-cli-aarch64-unknown-linux-musl.tar.xz"
+            
+            if [ -n "$cf_url" ]; then
+                local cf_tarball="$TMP_DIR/cloudflare-speed-cli.tar.xz"
+                if curl -f -L -s -o "$cf_tarball" "$cf_url" 2>/dev/null; then
+                    # 解压 tar.xz
+                    if tar -xJf "$cf_tarball" -C "$TMP_DIR" 2>/dev/null; then
+                        # 查找解压后的二进制文件
+                        local cf_bin=$(find "$TMP_DIR" -name "cloudflare-speed-cli" -type f 2>/dev/null | head -n1)
+                        if [ -n "$cf_bin" ] && [ -f "$cf_bin" ]; then
+                            chmod +x "$cf_bin"
+                            export CFSPEED_BIN="$cf_bin"
+                            info "下载临时工具: cloudflare-speed-cli"
+                        else
+                            export CFSPEED_BIN="false"
+                        fi
+                    else
+                        export CFSPEED_BIN="false"
+                    fi
+                    rm -f "$cf_tarball"
+                else
+                    export CFSPEED_BIN="false"
+                fi
+            else
+                export CFSPEED_BIN="false"
+            fi
+        else
+            export CFSPEED_BIN="cloudflare-speed-cli"
+        fi
+    else
+        export CFSPEED_BIN="false"
     fi
 
     info "所有依赖已就绪 ✓"
@@ -1162,6 +1202,101 @@ run_iperf_test() {
     echo "" >> "$REPORT_FILE"
     info "  └─ 带宽测试完成"
 
+}
+
+run_cloudflare_speedtest() {
+    log "开始 Cloudflare Speedtest..."
+    
+    if [ "$CFSPEED_BIN" == "false" ] || [ -z "$CFSPEED_BIN" ]; then
+        warn "  └─ cloudflare-speed-cli 未安装或下载失败，跳过"
+        return
+    fi
+    
+    if [ ! -x "$CFSPEED_BIN" ] && ! command -v "$CFSPEED_BIN" >/dev/null 2>&1; then
+        warn "  └─ cloudflare-speed-cli ($CFSPEED_BIN) 不可执行，跳过"
+        return
+    fi
+    
+    echo "  ├─ 正在测试 Cloudflare CDN 速度..."
+    
+    # 运行测试并获取 JSON 输出
+    local json_output
+    json_output=$("$CFSPEED_BIN" --json 2>/dev/null)
+    
+    if [ -z "$json_output" ] || ! echo "$json_output" | jq -e . >/dev/null 2>&1; then
+        warn "  └─ Cloudflare Speedtest 失败: 无效输出"
+        return
+    fi
+    
+    # 解析 JSON 结果
+    local cf_ip=$(echo "$json_output" | jq -r '.ip // "N/A"')
+    local cf_colo=$(echo "$json_output" | jq -r '.colo // "N/A"')
+    local cf_asn=$(echo "$json_output" | jq -r '.asn // "N/A"')
+    local cf_city=$(echo "$json_output" | jq -r '.meta.city // "N/A"')
+    local cf_country=$(echo "$json_output" | jq -r '.meta.country // "N/A"')
+    
+    # 下载速度
+    local dl_mbps=$(echo "$json_output" | jq -r '.download.mbps // 0' | xargs printf "%.2f")
+    local dl_median=$(echo "$json_output" | jq -r '.download.median_mbps // 0' | xargs printf "%.2f")
+    local dl_p25=$(echo "$json_output" | jq -r '.download.p25_mbps // 0' | xargs printf "%.2f")
+    local dl_p75=$(echo "$json_output" | jq -r '.download.p75_mbps // 0' | xargs printf "%.2f")
+    
+    # 上传速度
+    local ul_mbps=$(echo "$json_output" | jq -r '.upload.mbps // 0' | xargs printf "%.2f")
+    local ul_median=$(echo "$json_output" | jq -r '.upload.median_mbps // 0' | xargs printf "%.2f")
+    local ul_p25=$(echo "$json_output" | jq -r '.upload.p25_mbps // 0' | xargs printf "%.2f")
+    local ul_p75=$(echo "$json_output" | jq -r '.upload.p75_mbps // 0' | xargs printf "%.2f")
+    
+    # 空闲延迟
+    local idle_avg=$(echo "$json_output" | jq -r '.idle_latency.mean_ms // 0' | xargs printf "%.1f")
+    local idle_median=$(echo "$json_output" | jq -r '.idle_latency.median_ms // 0' | xargs printf "%.1f")
+    local idle_jitter=$(echo "$json_output" | jq -r '.idle_latency.jitter_ms // 0' | xargs printf "%.1f")
+    local idle_loss=$(echo "$json_output" | jq -r '.idle_latency.loss // 0' | xargs printf "%.1f")
+    
+    # 负载延迟 (下载)
+    local loaded_dl_avg=$(echo "$json_output" | jq -r '.loaded_latency_download.mean_ms // 0' | xargs printf "%.1f")
+    local loaded_dl_jitter=$(echo "$json_output" | jq -r '.loaded_latency_download.jitter_ms // 0' | xargs printf "%.1f")
+    
+    # 负载延迟 (上传)
+    local loaded_ul_avg=$(echo "$json_output" | jq -r '.loaded_latency_upload.mean_ms // 0' | xargs printf "%.1f")
+    local loaded_ul_jitter=$(echo "$json_output" | jq -r '.loaded_latency_upload.jitter_ms // 0' | xargs printf "%.1f")
+    
+    # 控制台输出
+    echo "  │  ├─ 节点: $cf_colo ($cf_city, $cf_country)"
+    echo "  │  ├─ IP: $cf_ip (AS$cf_asn)"
+    echo "  │  ├─ 下载: ${dl_mbps} Mbps (中位数: ${dl_median} Mbps)"
+    echo "  │  ├─ 上传: ${ul_mbps} Mbps (中位数: ${ul_median} Mbps)"
+    echo "  │  └─ 延迟: ${idle_avg} ms (抖动: ${idle_jitter} ms)"
+    
+    # === 写入报告 ===
+    {
+        echo "## Cloudflare Speedtest"
+        echo ""
+        echo "| 指标 | 数值 |"
+        echo "|:---|:---|"
+        echo "| 测试节点 | $cf_colo ($cf_city, $cf_country) |"
+        echo "| 客户端 IP | $cf_ip |"
+        echo "| ASN | AS$cf_asn |"
+        echo ""
+        echo "### 速度测试"
+        echo "| 方向 | 速度 | 中位数 | P25 | P75 |"
+        echo "|:---|---:|---:|---:|---:|"
+        echo "| 下载 | ${dl_mbps} Mbps | ${dl_median} Mbps | ${dl_p25} Mbps | ${dl_p75} Mbps |"
+        echo "| 上传 | ${ul_mbps} Mbps | ${ul_median} Mbps | ${ul_p25} Mbps | ${ul_p75} Mbps |"
+        echo ""
+        echo "### 延迟测试"
+        echo "| 类型 | 平均 | 抖动 | 丢包 |"
+        echo "|:---|---:|---:|---:|"
+        echo "| 空闲延迟 | ${idle_avg} ms | ${idle_jitter} ms | ${idle_loss}% |"
+        echo "| 负载延迟 (下载) | ${loaded_dl_avg} ms | ${loaded_dl_jitter} ms | - |"
+        echo "| 负载延迟 (上传) | ${loaded_ul_avg} ms | ${loaded_ul_jitter} ms | - |"
+        echo ""
+    } >> "$REPORT_FILE"
+    
+    # 清理 cloudflare-speed-cli 生成的本地数据
+    rm -rf "$HOME/.local/share/cloudflare-speed-cli" 2>/dev/null
+    
+    info "  └─ Cloudflare Speedtest 完成"
 }
 
 # =========================
@@ -2682,11 +2817,11 @@ EOF
     # Mode Log
     if [ "$RUN_PUBLIC" = "true" ]; then 
         log "${CYAN}模式: 仅公共服务测试 (-p)${NC}"
-    elif [ "$RUN_IPERF" = "false" ] && [ "$RUN_TRACE" = "false" ] && [ "$RUN_NET_INFO" = "false" ]; then 
+    elif [ "$RUN_SPEEDTEST" = "false" ] && [ "$RUN_TRACE" = "false" ] && [ "$RUN_NET_INFO" = "false" ]; then 
         log "${CYAN}模式: 仅硬件测试 (-h)${NC}"
-    elif [ "$RUN_CPU" = "false" ] && [ "$RUN_DISK" = "false" ] && [ "$RUN_TRACE" = "true" ] && [ "$RUN_IPERF" = "true" ]; then 
+    elif [ "$RUN_CPU" = "false" ] && [ "$RUN_DISK" = "false" ] && [ "$RUN_TRACE" = "true" ] && [ "$RUN_SPEEDTEST" = "true" ]; then 
         log "${CYAN}模式: 仅网络测试 (-n)${NC}"
-    elif [ "$RUN_TRACE" = "true" ] && [ "$RUN_IPERF" = "false" ]; then 
+    elif [ "$RUN_TRACE" = "true" ] && [ "$RUN_SPEEDTEST" = "false" ]; then 
         log "${CYAN}模式: 仅路由追踪 (-t)${NC}"
     elif [ "$RUN_IP_QUALITY" = "true" ] && [ "$RUN_TRACE" = "false" ]; then 
         log "${CYAN}模式: 仅 IP 质量检测 (-i)${NC}"
@@ -2734,8 +2869,9 @@ EOF
     fi
     
     # 网络性能测试
-    if [ "$RUN_IPERF" = "true" ]; then
+    if [ "$RUN_SPEEDTEST" = "true" ]; then
         run_iperf_test
+        run_cloudflare_speedtest
     fi
     
     # 公共服务测试（只测公共服务，不测其他目标）
