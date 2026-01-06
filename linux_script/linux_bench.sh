@@ -414,7 +414,7 @@ collect_system_info() {
     
     # === Streaming Report ===
     {
-        echo "## 系统信息"
+        echo "### 系统信息"
         echo "| 测试项目 | 测试结果 |"
         echo "| :--- | :--- |"
         echo "| CPU 型号 | $SYS_CPU |"
@@ -532,7 +532,7 @@ collect_network_info() {
 
     # === Streaming Report ===
     {
-        echo "## 网络信息"
+        echo "### 网络信息"
         echo "| 测试项目 | 测试结果 |"
         echo "| :--- | :--- |"
         if [ "$HAS_V4" = "true" ]; then
@@ -630,15 +630,15 @@ collect_bgp_view() {
     # === 生成报告 ===
     if [ "$has_any_bgp" = "true" ]; then
         {
-            echo "## BGP 透视"
+            echo "### BGP 透视"
             echo ""
             if [ -n "$BGP_V4_URL" ]; then
-                echo "### IPv4"
+                echo "#### IPv4"
                 echo "![IPv4 BGP 透视]($BGP_V4_URL)"
                 echo ""
             fi
             if [ -n "$BGP_V6_URL" ]; then
-                echo "### IPv6"
+                echo "#### IPv6"
                 echo "![IPv6 BGP 透视]($BGP_V6_URL)"
                 echo ""
             fi
@@ -811,7 +811,7 @@ collect_ip_quality() {
     
     # === 生成报告 ===
     {
-        echo "## IPv4 质量分析"
+        echo "### IPv4 质量分析"
         echo ""
         echo "| 检测项目 | 检测结果 | 备注 | 数据来源 |"
         echo "| :--- | :--- | :--- | :--- |"
@@ -929,7 +929,7 @@ run_cpu_test() {
     
     # === Streaming Report ===
     {
-        echo "## CPU 性能测试"
+        echo "### CPU 性能测试"
         echo "| 测试项目 | 测试结果 |"
         echo "| :--- | :--- |"
         echo "| 单线程测试 | $BENCH_CPU_1T |"
@@ -1028,7 +1028,7 @@ run_disk_test() {
     
     # === Streaming Report ===
     {
-        echo "## 磁盘性能测试"
+        echo "### 磁盘性能测试"
         echo "| 测试项目 | 测试结果 |"
         echo "| :--- | :--- |"
         echo "| 写入测试 (4K) | $BENCH_DISK_W4 |"
@@ -1090,7 +1090,7 @@ run_iperf_test() {
     
     # === Streaming Report (Header) ===
     {
-        echo "## 网络带宽测试"
+        echo "### 网络带宽测试"
         echo "| IP 类型 | 运营商 | 服务器位置 | 发送带宽 | 接收带宽 | 延迟 |"
         echo "| :--- | :--- | :--- | :--- | :--- | :--- |"
     } >> "$REPORT_FILE"
@@ -1128,7 +1128,7 @@ run_iperf_test() {
     # === Streaming Report (Domestic Header) ===
     if [ "$HAS_V4" = "true" ] && [ ${#locs_cn[@]} -gt 0 ]; then
         {
-            echo "### 国内节点（感谢青毅云提供测试节点）"
+            echo "#### 国内节点（感谢青毅云提供测试节点）"
             echo "🌐 青毅云计算 (YOUTHIDC)  "
             echo "⚡️ 国内大带宽独享服务器，IEPL 跨境专线  "
             echo "💬 Telegram 群组：https://t.me/YouthIDC  "
@@ -1495,7 +1495,7 @@ ${stream_output_v6}"
     }
     
     {
-        echo "## 服务解锁测试"
+        echo "### 服务解锁测试"
         echo ""
         echo "测试区域: **$region_name**"
         echo ""
@@ -1514,7 +1514,7 @@ ${stream_output_v6}"
                         if [ "$current_table_started" = "true" ]; then
                             echo ""
                         fi
-                        echo "#### $cat_name"
+                        echo "##### $cat_name"
                         echo ""
                         echo "| 服务 | 状态 |"
                         echo "| :--- | :--- |"
@@ -1539,7 +1539,7 @@ ${stream_output_v6}"
             local output="$1"
             local ip_version="$2"
             
-            echo "#### AIGC"
+            echo "##### AIGC"
             echo ""
             echo "| 服务 | 状态 |"
             echo "| :--- | :--- |"
@@ -1557,7 +1557,7 @@ ${stream_output_v6}"
         
         # IPv4 结果
         if [ -n "$stream_output_v4" ] || [ -n "$stream_output_ai_v4" ]; then
-            echo "### IPv4"
+            echo "#### IPv4"
             echo ""
             
             # 先输出 AIGC
@@ -1574,7 +1574,7 @@ ${stream_output_v6}"
         
         # IPv6 结果
         if [ -n "$stream_output_v6" ] || [ -n "$stream_output_ai_v6" ]; then
-            echo "### IPv6"
+            echo "#### IPv6"
             echo ""
             
             # 先输出 AIGC
@@ -2389,7 +2389,7 @@ run_trace_test() {
     
     # === Streaming Report ===
     {
-        echo "## 路由追踪"
+        echo "### 路由追踪"
     } >> "$REPORT_FILE"
 
     # 首先添加公共服务目标（主要公共服务分组）
@@ -2458,7 +2458,7 @@ run_trace_test() {
             # 在报告中添加分节标题
             {
                 echo ""
-                echo "### $group_name"
+                echo "#### $group_name"
                 echo ""
             } >> "$REPORT_FILE"
             
@@ -2608,7 +2608,7 @@ run_trace_test() {
                         
                         # === Streaming Report (Trace Item) ===
                         {
-                            echo "#### $name ($mode)"
+                            echo "##### $name ($mode)"
                             # 如果是动态 CDN 目标，显示解析到的域名
                             if [[ "$name" == *"Dynamic"* ]]; then
                                 echo "命中 CDN 节点: \`$target\`"
@@ -2632,7 +2632,7 @@ run_trace_test() {
 
 init_report() {
     > "$REPORT_FILE"
-    echo "# Bench Report" >> "$REPORT_FILE"
+    echo "## Bench Report" >> "$REPORT_FILE"
     echo "Generated at $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S') China Standard Time" >> "$REPORT_FILE"
     echo "" >> "$REPORT_FILE"
 }
