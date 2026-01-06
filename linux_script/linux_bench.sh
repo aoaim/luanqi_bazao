@@ -380,6 +380,60 @@ ensure_dependencies() {
         export CFSPEED_BIN="false"
     fi
 
+    # 6. Geekbench 6 (CPU 测试时下载)
+    if [ "$RUN_CPU" = "true" ]; then
+        local arch=$(uname -m)
+        local gb6_url=""
+        local gb6_version="6.5.0"
+        
+        # 根据架构选择下载链接
+        case "$arch" in
+            x86_64)
+                gb6_url="https://cdn.geekbench.com/Geekbench-${gb6_version}-Linux.tar.gz"
+                ;;
+            aarch64)
+                gb6_url="https://cdn.geekbench.com/Geekbench-${gb6_version}-LinuxARMPreview.tar.gz"
+                ;;
+            *)
+                warn "  └─ 不支持的架构: $arch，跳过 Geekbench 6"
+                export GB6_BIN="false"
+                ;;
+        esac
+        
+        if [ -n "$gb6_url" ]; then
+            local gb6_tarball="$TMP_DIR/geekbench6.tar.gz"
+            echo -n "  ├─ 正在下载 Geekbench 6..."
+            if curl -f -L -s -o "$gb6_tarball" "$gb6_url" 2>/dev/null; then
+                # 解压 tar.gz
+                if tar -xzf "$gb6_tarball" -C "$TMP_DIR" 2>/dev/null; then
+                    # 查找解压后的 geekbench6 可执行文件
+                    local gb6_bin=$(find "$TMP_DIR" -name "geekbench6" -type f 2>/dev/null | head -n1)
+                    if [ -n "$gb6_bin" ] && [ -f "$gb6_bin" ]; then
+                        chmod +x "$gb6_bin"
+                        export GB6_BIN="$gb6_bin"
+                        echo -e " ${GREEN}完成${NC}"
+                        info "下载临时工具: Geekbench 6 ($gb6_version)"
+                    else
+                        echo -e " ${RED}失败${NC}"
+                        warn "  │  └─ 未找到 geekbench6 可执行文件"
+                        export GB6_BIN="false"
+                    fi
+                else
+                    echo -e " ${RED}失败${NC}"
+                    warn "  │  └─ 解压失败"
+                    export GB6_BIN="false"
+                fi
+                rm -f "$gb6_tarball"
+            else
+                echo -e " ${RED}失败${NC}"
+                warn "  │  └─ 下载失败"
+                export GB6_BIN="false"
+            fi
+        fi
+    else
+        export GB6_BIN="false"
+    fi
+
     info "所有依赖已就绪 ✓"
 }
 
@@ -978,6 +1032,106 @@ run_cpu_test() {
     } >> "$REPORT_FILE"
     
     info "  └─ CPU 测试完成"
+}
+
+run_gb6_test() {
+    log "开始 Geekbench 6 测试..."
+    
+    # 检查 GB6_BIN 是否可用
+    if [ "$GB6_BIN" = "false" ] || [ -z "$GB6_BIN" ]; then
+        warn "  └─ Geekbench 6 未安装或下载失败，跳过"
+        return
+    fi
+    
+    if [ ! -x "$GB6_BIN" ]; then
+        warn "  └─ Geekbench 6 不可执行，跳过"
+        return
+    fi
+    
+    echo "  ├─ 正在运行 Geekbench 6 测试 (约需 3-5 分钟)..."
+    
+    # 启动后台进度指示器
+    local spinner_chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local spinner_pid=""
+    (
+        local i=0
+        local start_time=$(date +%s)
+        while true; do
+            local elapsed=$(($(date +%s) - start_time))
+            local mins=$((elapsed / 60))
+            local secs=$((elapsed % 60))
+            printf "\r  │  ├─ 测试进行中 ${spinner_chars:i++%10:1} [%02d:%02d]" "$mins" "$secs"
+            sleep 0.2
+        done
+    ) &
+    spinner_pid=$!
+    
+    # 运行 Geekbench 6 测试，使用 --no-upload 防止上传
+    local gb6_output=""
+    gb6_output=$("$GB6_BIN" --no-upload 2>&1)
+    local gb6_exit_code=$?
+    
+    # 停止进度指示器
+    kill $spinner_pid 2>/dev/null
+    wait $spinner_pid 2>/dev/null
+    
+    if [ $gb6_exit_code -ne 0 ]; then
+        echo -e "\r  │  └─ Geekbench 6 测试失败 ${RED}✗${NC}              "
+        warn "  └─ 测试失败，请检查系统兼容性"
+        return
+    fi
+    
+    echo -e "\r  │  └─ 测试完成 ${GREEN}✓${NC}                        "
+    
+    # 解析结果
+    # Geekbench 6 输出格式示例:
+    # Single-Core Score    1234
+    # Multi-Core Score     5678
+    # 或者:
+    # Uploading results to the Geekbench Browser. (可能不会出现，因为 --no-upload)
+    # 结果可能包含 URL: https://browser.geekbench.com/v6/cpu/xxxxx
+    
+    local single_score=""
+    local multi_score=""
+    local result_url=""
+    
+    # 尝试解析分数
+    single_score=$(echo "$gb6_output" | grep -i "Single-Core Score" | awk '{print $NF}')
+    multi_score=$(echo "$gb6_output" | grep -i "Multi-Core Score" | awk '{print $NF}')
+    result_url=$(echo "$gb6_output" | grep -oE 'https://browser\.geekbench\.com/v6/cpu/[0-9]+' | head -n1)
+    
+    # 如果没有找到分数，尝试其他格式
+    if [ -z "$single_score" ]; then
+        single_score=$(echo "$gb6_output" | grep -i "single" | grep -oE '[0-9]+$' | head -n1)
+    fi
+    if [ -z "$multi_score" ]; then
+        multi_score=$(echo "$gb6_output" | grep -i "multi" | grep -oE '[0-9]+$' | head -n1)
+    fi
+    
+    # 输出结果
+    echo "  ├─ 单核分数: ${single_score:-N/A}"
+    echo "  ├─ 多核分数: ${multi_score:-N/A}"
+    [ -n "$result_url" ] && echo "  ├─ 结果链接: $result_url"
+    
+    # 保存到全局变量
+    GB6_SINGLE="${single_score:-N/A}"
+    GB6_MULTI="${multi_score:-N/A}"
+    GB6_URL="${result_url:-}"
+    
+    # === Streaming Report ===
+    {
+        echo "## Geekbench 6 测试"
+        echo "| 测试项目 | 测试结果 |"
+        echo "| :--- | :--- |"
+        echo "| 单核分数 | $GB6_SINGLE |"
+        echo "| 多核分数 | $GB6_MULTI |"
+        if [ -n "$GB6_URL" ]; then
+            echo "| 在线结果 | [$GB6_URL]($GB6_URL) |"
+        fi
+        echo ""
+    } >> "$REPORT_FILE"
+    
+    info "  └─ Geekbench 6 测试完成"
 }
 
 run_disk_test() {
@@ -2862,6 +3016,7 @@ EOF
     # 硬件性能测试
     if [ "$RUN_CPU" = "true" ]; then
         run_cpu_test
+        run_gb6_test
     fi
     
     if [ "$RUN_DISK" = "true" ]; then
