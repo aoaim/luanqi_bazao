@@ -2,7 +2,7 @@
 ## Sources:
 ## - https://raw.githubusercontent.com/Ruddernation-Designs/Adobe-URL-Block-List/master/hosts
 ## - https://raw.githubusercontent.com/ignaciocastro/a-dove-is-dumb/main/list.txt
-## Updated: 2026-01-06T00:24:38.275Z
+## Updated: 2026-01-07T00:23:18.766Z
 DOMAIN,00dg7e9i9k.adobestats.io
 DOMAIN,00nllmoilmti.p5jr3.adobestats.io
 DOMAIN,017sxef5kv.adobestats.io
@@ -1685,6 +1685,7 @@ DOMAIN,gza4nhyfl0.adobestats.io
 DOMAIN,gzuac7j2v3.adobestats.io
 DOMAIN,gzwh8uem9h.adobestats.io
 DOMAIN,h024pxgna4.adobestats.io
+DOMAIN,h09818rl8q.adobestats.io
 DOMAIN,h0no575qji.adobestats.io
 DOMAIN,h0vfo8nsx6sh.auyzf.adobestats.io
 DOMAIN,h1dyzkpb92.4p4bv.adobestats.io
@@ -1699,6 +1700,7 @@ DOMAIN,h3hqd6gjkd.adobestats.io
 DOMAIN,h3k7hafsw1.adobestats.io
 DOMAIN,h3kxx9yz355m.a13cy.adobestats.io
 DOMAIN,h4eiodaymd.adobestats.io
+DOMAIN,h4k9d8row.xwk4b.adobestats.io
 DOMAIN,h4wgsqts2k.adobestats.io
 DOMAIN,h4yf1u7ol.4p4bv.adobestats.io
 DOMAIN,h51jnwyx9jq.td3wc.adobestats.io
@@ -2190,6 +2192,7 @@ DOMAIN,lwjlmmg0.lqn0m.adobestats.io
 DOMAIN,lx3onylgy.lqn0m.adobestats.io
 DOMAIN,lxrpyw4yide.6u13v.adobestats.io
 DOMAIN,lxsx6qco94.p5jr3.adobestats.io
+DOMAIN,ly2ctwyaiczm.jyqfm.adobestats.io
 DOMAIN,lye7v569gs.adobestats.io
 DOMAIN,lyil22tko.2coyv.adobestats.io
 DOMAIN,lz2x4rks1u.adobestats.io
@@ -2242,6 +2245,7 @@ DOMAIN,md9b3ais057.lqn0m.adobestats.io
 DOMAIN,mdl4pq1jxh.adobestats.io
 DOMAIN,mdwixwn1uc.adobestats.io
 DOMAIN,me7z7bchov.adobestats.io
+DOMAIN,mf3sslrzig.adobestats.io
 DOMAIN,mfgqzz5pny.adobestats.io
 DOMAIN,mfzph1raux.g51h4.adobestats.io
 DOMAIN,mgae3bdf8f.a13cy.adobestats.io
@@ -2350,6 +2354,7 @@ DOMAIN,nrenlhdc1t.adobestats.io
 DOMAIN,ns63yrf9mq.adobestats.io
 DOMAIN,ns6ckzkjzg.adobestats.io
 DOMAIN,nsssv8iv.61y77.adobestats.io
+DOMAIN,nsvboxdnqq.adobestats.io
 DOMAIN,nth06aynso.adobestats.io
 DOMAIN,nu9fp74l.nr94p.adobestats.io
 DOMAIN,nv8ysttp93.adobestats.io
@@ -2363,6 +2368,7 @@ DOMAIN,nxq02alk63.adobestats.io
 DOMAIN,nxtvnjru66.adobestats.io
 DOMAIN,ny85ao5pog.ay6tu.adobestats.io
 DOMAIN,nypmk79jfb.adobestats.io
+DOMAIN,nzfpzxkthy.adobestats.io
 DOMAIN,o058jv5i.p5jr3.adobestats.io
 DOMAIN,o0wy73zi0u.ay6tu.adobestats.io
 DOMAIN,o1383653.ingest.sentry.io
