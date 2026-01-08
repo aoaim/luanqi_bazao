@@ -2,7 +2,7 @@
 ## Sources:
 ## - https://raw.githubusercontent.com/Ruddernation-Designs/Adobe-URL-Block-List/master/hosts
 ## - https://raw.githubusercontent.com/ignaciocastro/a-dove-is-dumb/main/list.txt
-## Updated: 2026-01-07T00:23:18.766Z
+## Updated: 2026-01-08T00:24:52.374Z
 DOMAIN,00dg7e9i9k.adobestats.io
 DOMAIN,00nllmoilmti.p5jr3.adobestats.io
 DOMAIN,017sxef5kv.adobestats.io
@@ -188,6 +188,7 @@ DOMAIN,218bokqluc.adobestats.io
 DOMAIN,21d08qeemg.xwk4b.adobestats.io
 DOMAIN,21f25nfs2j.hzm8t.adobestats.io
 DOMAIN,220zxtbjjl.adobestats.io
+DOMAIN,221povst22.adobestats.io
 DOMAIN,224me58l5q.adobestats.io
 DOMAIN,22gda3bxkb.adobe.io
 DOMAIN,22wqqv6b23.adobestats.io
@@ -570,6 +571,7 @@ DOMAIN,60mwlo8bek.hzm8t.adobestats.io
 DOMAIN,60zet1yb.xwk4b.adobestats.io
 DOMAIN,610o7ktxw7.adobestats.io
 DOMAIN,61fesv9tgn.nr94p.adobestats.io
+DOMAIN,61imhk1y.7r39q.adobestats.io
 DOMAIN,6290k2y20p7c.68gqg.hstatic.io
 DOMAIN,62hmtx8mgk.adobestats.io
 DOMAIN,62o9h5jm8h.ay6tu.adobestats.io
@@ -841,6 +843,7 @@ DOMAIN,8xz68lvyn.3ig8y.hstatic.io
 DOMAIN,8z20kcq3af.adobestats.io
 DOMAIN,8zy3wp44oe.adobestats.io
 DOMAIN,917wzppd6w.adobestats.io
+DOMAIN,92ibvort.xwk4b.adobestats.io
 DOMAIN,92o3rl4aiz.adobestats.io
 DOMAIN,938jtql2.a13cy.adobestats.io
 DOMAIN,93fk5pvs8h.1q9cz.adobestats.io
@@ -1028,6 +1031,7 @@ DOMAIN,alfga53kpk.xwk4b.adobestats.io
 DOMAIN,altz51db7t.adobestats.io
 DOMAIN,alv90bhkdr.adobestats.io
 DOMAIN,alvn3lp4h8np.xwk4b.adobestats.io
+DOMAIN,am0wgaueg9.adobestats.io
 DOMAIN,am865ml4.vf1av.adobestats.io
 DOMAIN,amofrgzifo.adobestats.io
 DOMAIN,an1dglo1h3.adobestats.io
@@ -1790,6 +1794,7 @@ DOMAIN,hvww1kah7v.adobestats.io
 DOMAIN,hw10doohv7.adobestats.io
 DOMAIN,hwfqhlenbg.adobestats.io
 DOMAIN,hx2smyc6n.pkxns.adobestats.io
+DOMAIN,hxnsjlxm.lqn0m.adobestats.io
 DOMAIN,hy1ykx5mvp.adobestats.io
 DOMAIN,hyftfarzxq.adobestats.io
 DOMAIN,hz4qukgc3c.adobestats.io
@@ -3019,6 +3024,7 @@ DOMAIN,ura7zj55r9.adobestats.io
 DOMAIN,urf2lfygxj.adobestats.io
 DOMAIN,urkzwzpgai.adobestats.io
 DOMAIN,uroc9kxpcb.adobestats.io
+DOMAIN,us0vzn00.jyqfm.adobestats.io
 DOMAIN,use-stls.adobe.com.edgesuite.net
 DOMAIN,usf8gay90x.adobestats.io
 DOMAIN,ut91q9c889.adobestats.io
