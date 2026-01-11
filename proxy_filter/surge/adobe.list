@@ -2,7 +2,7 @@
 ## Sources:
 ## - https://raw.githubusercontent.com/Ruddernation-Designs/Adobe-URL-Block-List/master/hosts
 ## - https://raw.githubusercontent.com/ignaciocastro/a-dove-is-dumb/main/list.txt
-## Updated: 2026-01-10T00:24:21.699Z
+## Updated: 2026-01-11T00:27:14.288Z
 DOMAIN,00dg7e9i9k.adobestats.io
 DOMAIN,00nllmoilmti.p5jr3.adobestats.io
 DOMAIN,017sxef5kv.adobestats.io
@@ -708,6 +708,7 @@ DOMAIN,7en8gisy.lqn0m.adobestats.io
 DOMAIN,7eo38hy105c.lqn0m.adobestats.io
 DOMAIN,7f123zl39r9c.ay6tu.adobestats.io
 DOMAIN,7fj42ny0sd.adobestats.io
+DOMAIN,7fjh2kcfc4.adobestats.io
 DOMAIN,7ft5r2tw1c.adobestats.io
 DOMAIN,7g2gzgk9g1.adobe.io
 DOMAIN,7gag9ygrcx.adobestats.io
@@ -828,6 +829,7 @@ DOMAIN,8t99wx0fjf.adobestats.io
 DOMAIN,8tegcsplp5.adobestats.io
 DOMAIN,8u23q07fai.adobestats.io
 DOMAIN,8u64swpty.lqn0m.adobestats.io
+DOMAIN,8u84vwdq7u.adobestats.io
 DOMAIN,8umv3i8xyz.7r39q.adobestats.io
 DOMAIN,8uwenabqq9.adobestats.io
 DOMAIN,8veoid76u7.adobestats.io
@@ -872,6 +874,8 @@ DOMAIN,99mfvo7plse.vf1av.adobestats.io
 DOMAIN,99pfl4vazm.adobestats.io
 DOMAIN,9a986rrksw.adobestats.io
 DOMAIN,9aa2r7kikj.adobestats.io
+DOMAIN,9au6enhcfc.adobestats.io
+DOMAIN,9b1ftezqa6.adobestats.io
 DOMAIN,9b2hch4xc9.adobestats.io
 DOMAIN,9bswpwg73a.2coyv.adobestats.io
 DOMAIN,9bszftj3.4p4bv.adobestats.io
@@ -1025,6 +1029,7 @@ DOMAIN,aiqsd6ckcx.hzm8t.adobestats.io
 DOMAIN,aj8ig4glcf.adobestats.io
 DOMAIN,ajfj7oxpyi.adobestats.io
 DOMAIN,ajs31fsy2t.adobestats.io
+DOMAIN,ak0zpyw0y7.adobestats.io
 DOMAIN,ak1ow4e0u3.adobestats.io
 DOMAIN,ak88robdps.adobestats.io
 DOMAIN,akaucwwf52.adobestats.io
@@ -1189,6 +1194,7 @@ DOMAIN,bw0wzbt1at.adobestats.io
 DOMAIN,bw2xf1ue9v.adobestats.io
 DOMAIN,bw59wxr92v.adobestats.io
 DOMAIN,bwzv8qn3ht.adobestats.io
+DOMAIN,by5kj7xvti.adobestats.io
 DOMAIN,bydffmgkt2.adobestats.io
 DOMAIN,byvb7ktk3mze.1q9cz.adobestats.io
 DOMAIN,bz5nqiwnhr.xwk4b.adobestats.io
@@ -1334,6 +1340,7 @@ DOMAIN,d53eo6ty.4cbdo.adobestats.io
 DOMAIN,d53eo6tyxzs.4cbdo.adobestats.io
 DOMAIN,d54bxbdx6i.adobestats.io
 DOMAIN,d5qylk77uu.adobestats.io
+DOMAIN,d6h1wkbnpw.adobestats.io
 DOMAIN,d6lmu8yoj2.adobestats.io
 DOMAIN,d6w6n60lcq.lqn0m.adobestats.io
 DOMAIN,d6zco8is6l.adobestats.io
@@ -1361,6 +1368,7 @@ DOMAIN,dfwv44wffr.adobestats.io
 DOMAIN,dgm7qrfuc6.adobestats.io
 DOMAIN,dgtuzwnmefz3.zavjl.adobestats.io
 DOMAIN,di320pgpl6.adobestats.io
+DOMAIN,di37e1krlz.adobestats.io
 DOMAIN,dio7fli6oc.adobestats.io
 DOMAIN,dithj6gbpg.adobe.io
 DOMAIN,dj06zaouol.adobestats.io
@@ -1396,6 +1404,7 @@ DOMAIN,dsj4bsmk6i.adobestats.io
 DOMAIN,dswx0w5f.g51h4.adobestats.io
 DOMAIN,dt549nqpx7.adobestats.io
 DOMAIN,dtt06hnkyj.adobestats.io
+DOMAIN,dtu22il5d8.adobestats.io
 DOMAIN,du19xw8i.4p4bv.adobestats.io
 DOMAIN,du5073s4ae.adobestats.io
 DOMAIN,dua6pyan9v4m.7r39q.adobestats.io
@@ -1624,6 +1633,7 @@ DOMAIN,g3x2gf65lr.adobestats.io
 DOMAIN,g3y09mbaam.adobestats.io
 DOMAIN,g4izav8ox2.adobestats.io
 DOMAIN,g58jqxdh3y.adobestats.io
+DOMAIN,g5clbxpipq.adobestats.io
 DOMAIN,g5o5m0sahp.n5wo7.adobestats.io
 DOMAIN,g6elufzgx7.adobestats.io
 DOMAIN,g6ld7orx5r.adobestats.io
@@ -1855,6 +1865,7 @@ DOMAIN,ij0gdyrfka.adobe.io
 DOMAIN,ij8ajnroc.jdr5y.adobestats.io
 DOMAIN,ij8v4nutnk.adobestats.io
 DOMAIN,ijl01wuoed.adobestats.io
+DOMAIN,ik6ozw03pw3.jyqfm.adobestats.io
 DOMAIN,ikkd18x760.adobestats.io
 DOMAIN,ikkhseo2jp.adobestats.io
 DOMAIN,ikpqwlvsczg.xapgj.adobestats.io
@@ -1959,6 +1970,7 @@ DOMAIN,jatil41mhk.adobestats.io
 DOMAIN,jbzxbl44wj.adobestats.io
 DOMAIN,jc95y2v12r.adobe.io
 DOMAIN,jcodlo8xro.adobestats.io
+DOMAIN,jct5z37nr5.adobestats.io
 DOMAIN,jd2cphis4k.pkxns.adobestats.io
 DOMAIN,je4duxsj4u.adobestats.io
 DOMAIN,je5ufnklzs.adobestats.io
@@ -2291,6 +2303,7 @@ DOMAIN,muzq4c9g3d.adobestats.io
 DOMAIN,mv6oldyd9rv.iwl5c.adobestats.io
 DOMAIN,mvnfbgfx93.adobestats.io
 DOMAIN,mwg28dtpub4v.61y77.adobestats.io
+DOMAIN,mxvdngflqc.adobestats.io
 DOMAIN,myd1zjxo6.61y77.adobestats.io
 DOMAIN,mz70n8q2ec.adobestats.io
 DOMAIN,mz7ja1bjvp6z.ay6tu.adobestats.io
@@ -2341,6 +2354,7 @@ DOMAIN,niav1ta97.4wbo1.adobestats.io
 DOMAIN,nidfrl30z8.adobestats.io
 DOMAIN,nirmean75t.adobestats.io
 DOMAIN,nj444fqls5.h2uqz.adobestats.io
+DOMAIN,nj5fxgu5p2.adobestats.io
 DOMAIN,nj5kgb6nkn.adobestats.io
 DOMAIN,nj66fd4dzr.adobestats.io
 DOMAIN,nj9rqrql3b.adobestats.io
@@ -2487,6 +2501,7 @@ DOMAIN,oxzqylsebc.adobestats.io
 DOMAIN,oy0w95vx8w1.6u13v.adobestats.io
 DOMAIN,oyejvmv0gt.adobestats.io
 DOMAIN,oyrwhbwltp.adobestats.io
+DOMAIN,oyuk9wtth2.adobestats.io
 DOMAIN,oz06yhpprv.adobestats.io
 DOMAIN,oz280i3sru.adobestats.io
 DOMAIN,oz5i3yutuw.adobestats.io
@@ -2516,6 +2531,7 @@ DOMAIN,p549vipmpj.adobestats.io
 DOMAIN,p5gp8jho78.adobestats.io
 DOMAIN,p5lgspcidh.adobestats.io
 DOMAIN,p5lr643921.adobestats.io
+DOMAIN,p6j97i0rxmm.7r39q.adobestats.io
 DOMAIN,p7uxzbht8h.adobe.io
 DOMAIN,p7v92zcuwnp8.vf1av.adobestats.io
 DOMAIN,p882on2mec.adobestats.io
@@ -2525,6 +2541,7 @@ DOMAIN,p9t0tf8p73.adobestats.io
 DOMAIN,pa7hyy5z3an.a13cy.adobestats.io
 DOMAIN,pa944mkf2k.adobestats.io
 DOMAIN,pbfo7vi40s.adobestats.io
+DOMAIN,pc2oj0abjn.adobestats.io
 DOMAIN,pc6sk9bygv.adobestats.io
 DOMAIN,pcmdl6zcfd.adobestats.io
 DOMAIN,pcsab5rog7.adobestats.io
@@ -2554,6 +2571,8 @@ DOMAIN,plworabsle.h2uqz.adobestats.io
 DOMAIN,pmr72onayt.adobestats.io
 DOMAIN,pmrur4hi81l6.4cbdo.adobestats.io
 DOMAIN,pndiszyo9k.adobestats.io
+DOMAIN,pnha3o014p.adobestats.io
+DOMAIN,po98dr99mz.adobestats.io
 DOMAIN,pojvrj7ho5.adobe.io
 DOMAIN,popur8q4fd.adobestats.io
 DOMAIN,powfb7xi5v.adobestats.io
@@ -2750,6 +2769,7 @@ DOMAIN,rojck0pp6a.adobestats.io
 DOMAIN,roybdo8jin.adobestats.io
 DOMAIN,rp9pax976k.adobestats.io
 DOMAIN,rpf9vp92.7kdvx.hstatic.io
+DOMAIN,rpknsfc54n.adobestats.io
 DOMAIN,rptowanjjh.adobestats.io
 DOMAIN,rqmmgkoxrf.adobestats.io
 DOMAIN,rqsqu2iyi.xwk4b.adobestats.io
@@ -2838,6 +2858,7 @@ DOMAIN,soirhk7bm2.adobestats.io
 DOMAIN,sp9attfizo.adobestats.io
 DOMAIN,spbuswk2di.adobestats.io
 DOMAIN,spkdbhz62v.adobestats.io
+DOMAIN,spz88tgwkm.adobestats.io
 DOMAIN,sq0h8p84nioh.4p4bv.adobestats.io
 DOMAIN,sqfpk848.h2uqz.adobestats.io
 DOMAIN,sqvd1bcaxz.adobestats.io
@@ -3036,6 +3057,7 @@ DOMAIN,usf8gay90x.adobestats.io
 DOMAIN,ut91q9c889.adobestats.io
 DOMAIN,uta1ygva6x.adobestats.io
 DOMAIN,utl2ryss9g.adobestats.io
+DOMAIN,utrlo5uen0.adobestats.io
 DOMAIN,uuijal8hudh.p5jr3.adobestats.io
 DOMAIN,uv121bktcl.adobestats.io
 DOMAIN,uwhtnmsiz4.g51h4.adobestats.io
@@ -3082,6 +3104,7 @@ DOMAIN,vgmer1n6iytd.uvtmo.hstatic.io
 DOMAIN,vhmdu6zolr.adobestats.io
 DOMAIN,vicsj37lhf.adobestats.io
 DOMAIN,vjjq62zrf.t8gxe.adobestats.io
+DOMAIN,vjk29o5dx7.adobestats.io
 DOMAIN,vkh9adbpux.adobestats.io
 DOMAIN,vkv3qffxbm.4p4bv.adobestats.io
 DOMAIN,vlr9l8d0hw.adobestats.io
@@ -3137,6 +3160,7 @@ DOMAIN,w58drkayqf.adobestats.io
 DOMAIN,w5xq5rip7z.adobestats.io
 DOMAIN,w6bkweoejn.adobestats.io
 DOMAIN,w6ohx8zncphw.48fwz.adobestats.io
+DOMAIN,w6x0q3tek5.adobestats.io
 DOMAIN,w76a6nm3fs.adobestats.io
 DOMAIN,w7oczuxueqht.4p4bv.adobestats.io
 DOMAIN,w7wnvpf6it.adobestats.io
@@ -3178,6 +3202,7 @@ DOMAIN,wn9kta1iw4.adobestats.io
 DOMAIN,wntfgdo4ki.adobestats.io
 DOMAIN,woeyv5sidj.wzwva.adobestats.io
 DOMAIN,wojee26p4t.adobestats.io
+DOMAIN,wojos4ldr6.adobestats.io
 DOMAIN,workflow-ui-prod.licensingstack.com
 DOMAIN,wozkyv628d.adobestats.io
 DOMAIN,wq8zhf1h3v.1q9cz.adobestats.io
@@ -3525,6 +3550,7 @@ DOMAIN,z3shmocdp4.adobestats.io
 DOMAIN,z3usbr88vs.1q9cz.adobestats.io
 DOMAIN,z43cczzydm0.2coyv.adobestats.io
 DOMAIN,z49samj1a0.adobestats.io
+DOMAIN,z4fgjo79v9.adobestats.io
 DOMAIN,z5kk79wxif.adobestats.io
 DOMAIN,z5l625i5kf.adobestats.io
 DOMAIN,z5xiq0c9mw.adobestats.io
@@ -3562,6 +3588,7 @@ DOMAIN,zfkju3qu.xwk4b.adobestats.io
 DOMAIN,zfzx6hae4g.adobestats.io
 DOMAIN,zglaizubbj.adobestats.io
 DOMAIN,zgo89lg9nya5.48fwz.adobestats.io
+DOMAIN,zgucy25y3w.adobestats.io
 DOMAIN,zh673tbi73.adobestats.io
 DOMAIN,zh9yrmh2lu.adobe.io
 DOMAIN,zhh0l34xcf0m.pkxns.adobestats.io
