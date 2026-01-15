@@ -4,6 +4,13 @@
 .ib.snssdk.com
 .xlog.snssdk.com
 .log.snssdk.com
+.analytics.vinovo.si
+.cs.media.net
+.bidder.doceree.com
+.fpcdn.io
+.fpjs.io
+.winsurbox.com
+.telemetry.tataritv.com
 .cpu-api.infor.pl
 .cse.rakanto.com
 .repo.rakanto.com
@@ -47301,6 +47308,11 @@
 .tagman.britishairways.com
 .ct.pinterest.com
 .incoming.telemetry.mozilla.org
+.st.freedom24.com
+.rum.api.intuit.com
+.trafficmanager.anyclip.com
+.r.anime-go.cc
+.doppler.hulu.com
 .events.insiad.com
 .hw-t.hypers.com.cn
 .prd-collect-llm.xverse.cn
@@ -50483,6 +50495,7 @@
 .analytics-sprint.qoqa.com
 .analytics.qoqa.ch
 .analytics.qoqa.com
+.skadsdk.appsflyersdk.com
 .attr.appsflyersdk.com
 .privacy-sandbox.appsflyersdk.com
 .adrevenue.appsflyer.com
@@ -50535,6 +50548,13 @@
 .int.vlancaa.site
 .int.vlancaa.fun
 .tok.vaicore.xyz
+.events-stream-svc.cordial.io
+.events.gonative.io
+.matomo.podslink.net
+.mab-mob2.websearchapp.com
+.news-events.apple.com
+.news-app-events.apple.com
+.news-sports-events.apple.com
 .track.applicaster.com
 .hb-mob2.optiword.com
 .telemetry.doxo.com
