@@ -104,8 +104,13 @@ echo "  - /etc/apt/sources.list.d/debian-backports.sources"
 echo ""
 
 # 执行现代化
-apt modernize-sources -y
-echo "✓ Sources modernized to deb822 format"
+if apt modernize-sources --help &>/dev/null; then
+    apt modernize-sources -y
+    echo "✓ Sources modernized to deb822 format"
+else
+    echo "⚠️  apt modernize-sources not available (requires apt 2.9+), skipping..."
+    echo "   Your sources.list files will continue to work in legacy format."
+fi
 
 # 步骤 3: 修复 trixie-backports 的签名密钥 (如果存在)
 echo ""
@@ -133,8 +138,8 @@ else
     elif ! grep -q "^Signed-By:" "$BACKPORTS_FILE"; then
         echo "⚠️  Backports file missing Signed-By field, adding..."
         
-        # 如果完全没有 Signed-By 字段，则添加
-        sed -i '1i Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' "$BACKPORTS_FILE"
+        # 在 Types: 行后添加 Signed-By 字段（符合 deb822 格式）
+        sed -i '/^Types:/a Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' "$BACKPORTS_FILE"
         
         echo "✓ Added Signed-By to debian-backports.sources"
     else
@@ -172,7 +177,7 @@ echo "  - BBR network optimization"
 echo "  - Security hardening (fail2ban, chrony)"
 echo "  - System limits and performance tuning"
 echo ""
-read -p "Run system optimization script now? (y/yes): " run_optimization
+read -p "Run system optimization script now? (y/yes): " run_optimization || run_optimization=""
 
 # Convert to lowercase for comparison
 run_optimization_lower=$(echo "$run_optimization" | tr '[:upper:]' '[:lower:]')

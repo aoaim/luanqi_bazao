@@ -75,7 +75,7 @@ echo "  3. Change sources from bookworm to trixie"
 echo "  4. Upgrade to Debian 13 (trixie)"
 echo "  5. Remove obsolete packages after the upgrade"
 echo ""
-read -p "Do you want to continue? (y/yes): " confirm
+read -p "Do you want to continue? (y/yes): " confirm || confirm=""
 
 # Convert to lowercase for comparison
 confirm_lower=$(echo "$confirm" | tr '[:upper:]' '[:lower:]')
@@ -117,7 +117,7 @@ replace_codename() {
         return
     fi
     if grep -q 'bookworm' "$target_file"; then
-        sed -i -E 's/\<bookworm\>/trixie/g' "$target_file"
+        sed -i 's/bookworm/trixie/g' "$target_file"
         if grep -q 'bookworm' "$target_file"; then
             echo "⚠️  Warning: Some bookworm entries remain in $target_file. Please review manually."
         else

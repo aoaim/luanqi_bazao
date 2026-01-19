@@ -10,6 +10,7 @@ export DEBIAN_FRONTEND=noninteractive
 GITHUB_ALLOWED=1
 
 DISABLE_IPV6=0
+
 APT_INSTALL_OPTS="-y -qq -o=Dpkg::Use-Pty=0 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
 TEMP_DIR=$(mktemp -d -p /var/tmp)
 
@@ -374,26 +375,25 @@ install_cf_speedtest() {
     fi
 
     if download_file "$arch_url" "${TEMP_DIR}/cfspeed.tar.xz"; then
-    if extract_archive "${TEMP_DIR}/cfspeed.tar.xz" "$TEMP_DIR"; then
-        binpath=$(find "$TEMP_DIR" -type f -name "cloudflare-speed-cli*" -executable -print -quit 2>/dev/null || true)
-        if [ -z "$binpath" ]; then
-            binpath=$(find "$TEMP_DIR" -type f -name "cloudflare-speed-cli*" -print -quit 2>/dev/null || true)
-        fi
+        if extract_archive "${TEMP_DIR}/cfspeed.tar.xz" "$TEMP_DIR"; then
+            binpath=$(find "$TEMP_DIR" -type f -name "cloudflare-speed-cli*" -executable -print -quit 2>/dev/null || true)
+            if [ -z "$binpath" ]; then
+                binpath=$(find "$TEMP_DIR" -type f -name "cloudflare-speed-cli*" -print -quit 2>/dev/null || true)
+            fi
 
-        if [ -n "$binpath" ]; then
-            install -m 755 "$binpath" /usr/local/bin/cloudflare-speed-cli
-            cat > /etc/profile.d/cfspeed-alias.sh <<'EOF'
+            if [ -n "$binpath" ]; then
+                install -m 755 "$binpath" /usr/local/bin/cloudflare-speed-cli
+                cat > /etc/profile.d/cfspeed-alias.sh <<'EOF'
 alias cf='cloudflare-speed-cli'
 EOF
-            chmod 644 /etc/profile.d/cfspeed-alias.sh
-            print_success "Cloudflare Speedtest CLI installed (alias: cf)"
+                chmod 644 /etc/profile.d/cfspeed-alias.sh
+                print_success "Cloudflare Speedtest CLI installed (alias: cf)"
+            else
+                print_error "Binary not found in archive"
+            fi
         else
-            print_error "Binary not found in archive"
+            print_error "Failed to extract archive"
         fi
-    else
-        print_error "Failed to extract archive"
-    fi
-
         rm -f "${TEMP_DIR}/cfspeed.tar.xz"
     else
         print_error "Failed to download Cloudflare Speedtest CLI"
@@ -434,27 +434,24 @@ install_helix() {
     fi
     print_info "Installing Helix..."
 
-    local url="" ver=""
-    
-    # Method 1: Get version from redirect header (no API call)
-    ver=$(curl -sIL "https://github.com/helix-editor/helix/releases/latest" 2>/dev/null | \
-          grep -i "^location:" | tail -1 | \
-          grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)
-    
-    if [ -n "$ver" ]; then
-        url="https://github.com/helix-editor/helix/releases/download/${ver}/helix-${ver}-${ARCH}-linux.tar.xz"
+    local tag="" ver="" url=""
+
+    tag=$(get_github_latest_version "helix-editor/helix")
+    if [ -n "$tag" ]; then
+        ver=$(echo "$tag" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?')
+        [ -n "$ver" ] && url="https://github.com/helix-editor/helix/releases/download/${tag}/helix-${ver}-${ARCH}-linux.tar.xz"
     fi
-    
-    # Method 2: Fallback to API if method 1 failed
+
+    # Fallback to API if tag/url construction failed
     if [ -z "$url" ]; then
         url=$(get_github_api_asset_url "helix-editor/helix" "helix-.*-${ARCH}-linux\\.tar\\.xz$")
     fi
-    
+
     if [ -z "$url" ]; then
         print_error "Unable to get Helix download URL"
         return
     fi
-    
+
     if download_file "$url" "${TEMP_DIR}/helix.tar.xz"; then
         if extract_archive "${TEMP_DIR}/helix.tar.xz" "$TEMP_DIR"; then
             helix_dir=$(find "$TEMP_DIR" -maxdepth 1 -type d -name "helix-*" -print -quit)
@@ -475,6 +472,8 @@ EOF
             else
                 print_error "Helix binary or directory structure not found in archive"
             fi
+        else
+            print_error "Failed to extract Helix archive"
         fi
         rm -f "${TEMP_DIR}/helix.tar.xz"
         rm -rf "${TEMP_DIR}/helix-"* 2>/dev/null || true
@@ -526,19 +525,13 @@ install_duf() {
 
     local tag="" ver="" url=""
     
-    # Method 1: Get version from redirect header (no API call)
-    tag=$(curl -sIL "https://github.com/muesli/duf/releases/latest" 2>/dev/null | \
-          grep -i "^location:" | tail -1 | \
-          grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-    
+    tag=$(get_github_latest_version "muesli/duf")
     if [ -n "$tag" ]; then
         ver="${tag#v}"
         url="https://github.com/muesli/duf/releases/download/${tag}/duf_${ver}_linux_${ARCH_DEB}.deb"
     else
-        # Method 2: Fallback to API
-        tag=$(get_github_latest_version "muesli/duf")
-        ver="${tag#v}"
-        url="https://github.com/muesli/duf/releases/download/${tag}/duf_${ver}_linux_${ARCH_DEB}.deb"
+        print_error "Unable to resolve Duf version"
+        return
     fi
     
     if download_file "$url" "${TEMP_DIR}/duf.deb"; then
@@ -568,19 +561,13 @@ install_bat() {
 
     local tag="" ver="" url=""
     
-    # Method 1: Get version from redirect header (no API call)
-    tag=$(curl -sIL "https://github.com/sharkdp/bat/releases/latest" 2>/dev/null | \
-          grep -i "^location:" | tail -1 | \
-          grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-    
+    tag=$(get_github_latest_version "sharkdp/bat")
     if [ -n "$tag" ]; then
         ver="${tag#v}"
         url="https://github.com/sharkdp/bat/releases/download/${tag}/bat_${ver}_${ARCH_DEB}.deb"
     else
-        # Method 2: Fallback to API
-        tag=$(get_github_latest_version "sharkdp/bat")
-        ver="${tag#v}"
-        url="https://github.com/sharkdp/bat/releases/download/${tag}/bat_${ver}_${ARCH_DEB}.deb"
+        print_error "Unable to resolve Bat version"
+        return
     fi
     
     if download_file "$url" "${TEMP_DIR}/bat.deb"; then
@@ -653,19 +640,13 @@ install_fd() {
     
     local tag="" ver="" url=""
     
-    # Method 1: Get version from redirect header (no API call)
-    tag=$(curl -sIL "https://github.com/sharkdp/fd/releases/latest" 2>/dev/null | \
-          grep -i "^location:" | tail -1 | \
-          grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-    
+    tag=$(get_github_latest_version "sharkdp/fd")
     if [ -n "$tag" ]; then
         ver="${tag#v}"
         url="https://github.com/sharkdp/fd/releases/download/${tag}/fd_${ver}_${ARCH_DEB}.deb"
     else
-        # Method 2: Fallback to API
-        tag=$(get_github_latest_version "sharkdp/fd")
-        ver="${tag#v}"
-        url="https://github.com/sharkdp/fd/releases/download/${tag}/fd_${ver}_${ARCH_DEB}.deb"
+        print_error "Unable to resolve Fd version"
+        return
     fi
     
     if download_file "$url" "${TEMP_DIR}/fd.deb"; then
@@ -694,19 +675,13 @@ install_zoxide() {
     
     local tag="" ver="" url=""
     
-    # Method 1: Get version from redirect header (no API call)
-    tag=$(curl -sIL "https://github.com/ajeetdsouza/zoxide/releases/latest" 2>/dev/null | \
-          grep -i "^location:" | tail -1 | \
-          grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-    
+    tag=$(get_github_latest_version "ajeetdsouza/zoxide")
     if [ -n "$tag" ]; then
         ver="${tag#v}"
         url="https://github.com/ajeetdsouza/zoxide/releases/download/${tag}/zoxide-${ver}-${ARCH}-unknown-linux-musl.tar.gz"
     else
-        # Method 2: Fallback to API
-        tag=$(get_github_latest_version "ajeetdsouza/zoxide")
-        ver="${tag#v}"
-        url="https://github.com/ajeetdsouza/zoxide/releases/download/${tag}/zoxide-${ver}-${ARCH}-unknown-linux-musl.tar.gz"
+        print_error "Unable to resolve Zoxide version"
+        return
     fi
     
     if download_file "$url" "${TEMP_DIR}/zoxide.tar.gz"; then
@@ -761,26 +736,32 @@ install_gping() {
     fi
 }
 
-install_nexttrace_auto() {
-    if [ "$GITHUB_ALLOWED" -eq 0 ]; then
-        print_warning "IPv6-only detected: skipping Nexttrace (GitHub download required)."
+ask_yes_no() {
+    local prompt="$1"
+    local choice
+    while true; do
+        printf "${CYAN}${BOLD}>>> %s (y/n): ${RESET}" "$prompt"
+        read choice
+        case "$choice" in
+            y|Y|yes|Yes) return 0 ;;
+            n|N|no|No) return 1 ;;
+            *) echo "Please enter 'y' or 'n'." ;;
+        esac
+    done
+}
+
+install_docker() {
+    print_info "Installing Docker..."
+    if command_exists docker; then
+        print_success "Docker already installed"
         return
     fi
-    print_info "Installing Nexttrace..."
-    # Use static latest URL instead of API to avoid redirect issues
-    # nexttrace_linux_amd64 or nexttrace_linux_arm64
-    url="https://github.com/nxtrace/NTrace-core/releases/latest/download/nexttrace_linux_${ARCH_DEB}"
-
-    if download_file "$url" "${TEMP_DIR}/nexttrace"; then
-        install -m 755 "${TEMP_DIR}/nexttrace" /usr/local/bin/nexttrace
-        # Create nt alias
-        cat > /etc/profile.d/nexttrace-alias.sh <<'EOF'
-alias nt='nexttrace'
-EOF
-        chmod 644 /etc/profile.d/nexttrace-alias.sh
-        print_success "Nexttrace installed (alias: nt)"
+    
+    if curl -fsSL https://get.docker.com | sh; then
+        print_success "Docker installed successfully"
+        usermod -aG docker debian 2>/dev/null || usermod -aG docker root 2>/dev/null || true
     else
-        print_error "Failed to download Nexttrace"
+        print_error "Failed to install Docker"
     fi
 }
 
@@ -796,34 +777,6 @@ install_tools() {
     install_fd
     install_zoxide
     install_gping
-    install_nexttrace_auto
-}
-
-prompt_disable_ipv6_final() {
-    # Only prompt if IPv6 was detected
-    if [ "${IPV6_ADDR:-N/A}" = "N/A" ] || [ -z "$IPV6_ADDR" ]; then
-        return
-    fi
-    
-    echo ""
-    echo -ne "${BOLD}Disable IPv6? [y/N] (Default: No): ${RESET}"
-    read -r ans
-    ans=${ans:-n}
-    if [[ "$ans" =~ ^[Yy]$ ]]; then
-        print_info "Disabling IPv6..."
-        DISABLE_IPV6=1
-        apply_ipv6_sysctl
-        sysctl --system >/dev/null 2>&1 || true
-    else
-        print_info "Keeping IPv6 enabled."
-    fi
-}
-
-install_base_packages() {
-    print_section "${ICON_PKG} Installing base packages"
-    run_with_spinner "Installing packages..." apt-get install $APT_INSTALL_OPTS rsyslog openssl gnupg nano cron chrony fail2ban logrotate vnstat nload htop unzip
-    systemctl enable --now fail2ban 2>/dev/null || true
-    print_success "Base packages installed"
 }
 
 configure_chrony() {
@@ -846,9 +799,6 @@ configure_chrony() {
     esac
     CHRONY_CONF="/etc/chrony/chrony.conf"
     mkdir -p /etc/chrony
-    if [ -f "$CHRONY_CONF" ]; then
-        cp "$CHRONY_CONF" "${CHRONY_CONF}.bak"
-    fi
     cat > "$CHRONY_CONF" <<EOF
 server 0.${region_prefix}pool.ntp.org iburst
 server 1.${region_prefix}pool.ntp.org iburst
@@ -1112,6 +1062,50 @@ EOF
     fi
 }
 
+install_base_packages() {
+    print_section "${ICON_PKG} Installing base packages"
+    apt-get install $APT_INSTALL_OPTS rsyslog openssl gnupg nano cron chrony fail2ban python3-systemd logrotate vnstat nload htop unzip unattended-upgrades
+    
+    # Ensure rsyslog is enabled and started
+    systemctl enable --now rsyslog 2>/dev/null || true
+
+    # Configure Fail2Ban for Debian 12 (systemd backend)
+    cat > /etc/fail2ban/jail.local <<EOF
+[DEFAULT]
+bantime = 1h
+findtime = 10m
+maxretry = 5
+
+[sshd]
+enabled = true
+backend = systemd
+mode = normal
+port = ssh
+EOF
+    systemctl enable --now fail2ban 2>/dev/null || true
+
+    # Configure unattended-upgrades for security and stable updates
+    cat > /etc/apt/apt.conf.d/50unattended-upgrades <<'EOF'
+Unattended-Upgrade::Origins-Pattern {
+    "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
+    "origin=Debian,codename=${distro_codename},label=Debian";
+};
+Unattended-Upgrade::AutoFixInterruptedDpkg "true";
+Unattended-Upgrade::MinimalSteps "true";
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+EOF
+
+    # Enable automatic updates
+    cat > /etc/apt/apt.conf.d/20auto-upgrades <<'EOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+APT::Periodic::AutocleanInterval "7";
+EOF
+
+    print_success "Base packages installed"
+}
+
 apply_all_sysctl() {
     sysctl --system >/dev/null 2>&1 || true
     BBR_APPLIED=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "unknown")
@@ -1123,16 +1117,16 @@ get_recommended_zram_config() {
     # Returns: "size_mb algorithm"
     local mem_mb=$1
     if [ "$mem_mb" -lt 800 ]; then
-        echo "1024 zstd"   # < 800MB RAM (e.g. 512MB VPS): Fixed 1GB ZRAM
+        echo "1024 zstd"   # < 800MB RAM: Try zstd (fallback to lz4 in auto_enable)
     else
-        echo "2048 lz4"    # >= 800MB RAM (e.g. 1GB+ VPS): Fixed 2GB ZRAM
+        echo "2048 lz4"    # >= 800MB RAM: Fixed 2GB ZRAM (lz4 default)
     fi
 }
 
 configure_zram() {
     local size_mb="$1"
     local algo="$2"
-    local mem_mb="$3"
+    local expected_kb=$((size_mb * 1024))
     
     # Ensure zram-tools is installed
     if ! dpkg -l zram-tools 2>/dev/null | grep -q "^ii"; then
@@ -1140,26 +1134,43 @@ configure_zram() {
         apt-get install $APT_INSTALL_OPTS zram-tools
     fi
     
-    # Stop service first
+    # Completely stop and destroy existing zram
     systemctl stop zramswap.service 2>/dev/null || true
+    swapoff /dev/zram0 2>/dev/null || true
+    # Unload zram module to fully destroy the device
+    rmmod zram 2>/dev/null || true
     
-    # Write configuration
+    # Write configuration BEFORE starting service
     cat > /etc/default/zramswap <<EOF
 # zramswap config managed by init script
 ALGO=${algo}
-PERCENT=0
 SIZE=${size_mb}
 PRIORITY=100
 EOF
     
-    # Start with new config
-    systemctl enable --now zramswap.service 2>/dev/null || true
+    # Load zram module
+    modprobe zram 2>/dev/null || true
+    
+    # Start service (not restart, since we fully stopped it)
+    systemctl enable zramswap.service 2>/dev/null || true
+    systemctl start zramswap.service 2>/dev/null || true
+    
+    # Wait for ZRAM to initialize with correct size (up to 5s)
+    local retries=5
+    while [ $retries -gt 0 ]; do
+        local current_kb
+        current_kb=$(awk '$1 ~ /zram/ {print $3; exit}' /proc/swaps 2>/dev/null || echo 0)
+        if [ "${current_kb:-0}" -gt $((expected_kb * 9 / 10)) ]; then
+            break
+        fi
+        sleep 1
+        retries=$((retries - 1))
+    done
     
     print_success "zram configured: ${size_mb}MB (algo: ${algo})"
 }
 
 auto_enable_zram_swap() {
-    local has_zram=0
     local mem_mb config recommended_size recommended_algo
     
     mem_mb=$((MEM_KB / 1024))
@@ -1167,18 +1178,16 @@ auto_enable_zram_swap() {
     recommended_size=$(echo "$config" | cut -d' ' -f1)
     recommended_algo=$(echo "$config" | cut -d' ' -f2)
     
-    # Check current swap status
-    if grep -q "^/dev/zram" /proc/swaps 2>/dev/null; then
-        has_zram=1
+    # Check if zstd is supported, fallback to lz4 if not
+    if [ "$recommended_algo" = "zstd" ]; then
+        if ! modprobe zstd >/dev/null 2>&1 && ! grep -q "zstd" /proc/crypto 2>/dev/null; then
+             print_warning "zstd not supported by kernel, falling back to lz4."
+             recommended_algo="lz4"
+        fi
     fi
-    
-    # Auto-enable if not present or just ensure config is correct
-    if [ "$has_zram" -eq 0 ]; then
-        print_info "Configuring zram swap (auto: ${recommended_size}MB, algo: ${recommended_algo})..."
-        configure_zram "$recommended_size" "$recommended_algo" "$mem_mb"
-    else
-        print_info "${BOLD}zram already active, skipping re-configuration.${RESET}"
-    fi
+
+    print_info "Configuring zram swap (${recommended_size}MB, algo: ${recommended_algo})..."
+    configure_zram "$recommended_size" "$recommended_algo" "$mem_mb"
 }
 
 show_report() {
@@ -1217,6 +1226,25 @@ show_report() {
     print_kv "fail2ban" "$(systemctl is-active fail2ban 2>/dev/null || echo '?')"
     print_kv "zram swap" "${ZRAM_STATUS:-not detected}"
     print_kv "Timezone" "${TIMEZONE_FINAL:-unknown}"
+    
+    # Auto-update status
+    local auto_updates=""
+    if [ -f /etc/apt/apt.conf.d/50unattended-upgrades ]; then
+        if grep -q 'codename=.*-security' /etc/apt/apt.conf.d/50unattended-upgrades 2>/dev/null; then
+            auto_updates+="security, "
+        fi
+        if grep -qE '"origin=Debian,codename=\$\{distro_codename\},label=Debian"' /etc/apt/apt.conf.d/50unattended-upgrades 2>/dev/null; then
+            auto_updates+="stable, "
+        fi
+        if grep -q 'codename=.*-updates' /etc/apt/apt.conf.d/50unattended-upgrades 2>/dev/null; then
+            auto_updates+="updates, "
+        fi
+    fi
+    if [ -n "$auto_updates" ]; then
+        print_kv "Auto-updates" "${GREEN}${auto_updates%, }${RESET}"
+    else
+        print_kv "Auto-updates" "${YELLOW}not configured${RESET}"
+    fi
     echo ""
     
     # Installed tools with versions
@@ -1270,8 +1298,17 @@ main() {
     apply_ipv6_sysctl
     apply_all_sysctl
     
-    # IPv6 prompt at the very end
-    prompt_disable_ipv6_final
+    # Final Interactive Prompts
+    if ask_yes_no "Install Docker? (default: n)"; then
+        install_docker
+    fi
+
+    if ask_yes_no "Disable IPv6? (default: n)"; then
+        DISABLE_IPV6=1
+        print_info "Disabling IPv6..."
+        apply_ipv6_sysctl
+        sysctl --system >/dev/null 2>&1 || true
+    fi
 
     detect_zram_status
     show_report
