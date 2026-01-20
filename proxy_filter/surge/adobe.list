@@ -2,7 +2,7 @@
 ## Sources:
 ## - https://raw.githubusercontent.com/Ruddernation-Designs/Adobe-URL-Block-List/master/hosts
 ## - https://raw.githubusercontent.com/ignaciocastro/a-dove-is-dumb/main/list.txt
-## Updated: 2026-01-19T00:26:29.273Z
+## Updated: 2026-01-20T00:23:58.038Z
 DOMAIN,00dg7e9i9k.adobestats.io
 DOMAIN,00nllmoilmti.p5jr3.adobestats.io
 DOMAIN,017sxef5kv.adobestats.io
@@ -2539,6 +2539,7 @@ DOMAIN,p1ev0qf92u.adobestats.io
 DOMAIN,p1glrap40.lqn0m.adobestats.io
 DOMAIN,p1tkn3p09d.adobestats.io
 DOMAIN,p1v5bnz4lt.adobestats.io
+DOMAIN,p1x9echx.lqn0m.adobestats.io
 DOMAIN,p2cz8i9q.xwk4b.adobestats.io
 DOMAIN,p2hljfs4ui.adobestats.io
 DOMAIN,p3ikw13xc7.adobestats.io
