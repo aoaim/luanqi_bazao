@@ -1118,11 +1118,6 @@ show_ss_surge_config() {
     local ss_password=$(echo "$ss_config" | cut -d'|' -f2)
     local ss_method=$(echo "$ss_config" | cut -d'|' -f3)
     
-    local stls_config=$(get_ss_shadowtls_config)
-    local stls_port=$(echo "$stls_config" | cut -d'|' -f1)
-    local stls_password=$(echo "$stls_config" | cut -d'|' -f2)
-    local stls_host=$(echo "$stls_config" | cut -d'|' -f4)
-    
     echo "Getting server IP address..."
     local ip=$(curl -s ip.sb -4)
     
@@ -1134,7 +1129,17 @@ show_ss_surge_config() {
     echo ""
     echo "Copy the following node configuration to Surge:"
     echo "=========================================="
-    echo "node_name = ss, ${ip}, ${stls_port}, encrypt-method=${ss_method}, password=${ss_password}, shadow-tls-password=${stls_password}, shadow-tls-sni=${stls_host}, shadow-tls-version=3"
+    
+    if is_ss_shadowtls_installed; then
+        local stls_config=$(get_ss_shadowtls_config)
+        local stls_port=$(echo "$stls_config" | cut -d'|' -f1)
+        local stls_password=$(echo "$stls_config" | cut -d'|' -f2)
+        local stls_host=$(echo "$stls_config" | cut -d'|' -f4)
+        echo "node_name = ss, ${ip}, ${stls_port}, encrypt-method=${ss_method}, password=${ss_password}, shadow-tls-password=${stls_password}, shadow-tls-sni=${stls_host}, shadow-tls-version=3"
+    else
+        echo "node_name = ss, ${ip}, ${ss_port}, encrypt-method=${ss_method}, password=${ss_password}"
+    fi
+    
     echo "=========================================="
 }
 
