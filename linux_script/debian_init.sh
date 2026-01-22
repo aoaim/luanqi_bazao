@@ -736,6 +736,35 @@ install_gping() {
     fi
 }
 
+install_nexttrace() {
+    if [ "$GITHUB_ALLOWED" -eq 0 ]; then
+        print_warning "IPv6-only detected: skipping Nexttrace (GitHub download required)."
+        return
+    fi
+    print_info "Installing Nexttrace..."
+    # nexttrace_linux_amd64 or nexttrace_linux_arm64
+    local arch_suffix
+    if [ "$ARCH" = "x86_64" ]; then
+        arch_suffix="amd64"
+    else
+        arch_suffix="arm64"
+    fi
+    
+    url="https://github.com/nxtrace/NTrace-core/releases/latest/download/nexttrace_linux_${arch_suffix}"
+    
+    if download_file "$url" "${TEMP_DIR}/nexttrace"; then
+        install -m 755 "${TEMP_DIR}/nexttrace" /usr/local/bin/nexttrace
+        cat > /etc/profile.d/nexttrace-alias.sh <<'EOF'
+alias nt='nexttrace'
+EOF
+        chmod 644 /etc/profile.d/nexttrace-alias.sh
+        print_success "Nexttrace installed (alias: nt)"
+        rm -f "${TEMP_DIR}/nexttrace"
+    else
+        print_error "Nexttrace download failed"
+    fi
+}
+
 ask_yes_no() {
     local prompt="$1"
     local choice
@@ -777,6 +806,7 @@ install_tools() {
     install_fd
     install_zoxide
     install_gping
+    install_nexttrace
 }
 
 configure_chrony() {
