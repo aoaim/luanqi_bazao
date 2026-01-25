@@ -1,5 +1,5 @@
 ## 屏蔽软件正版验证（可能有副作用）
-## 最后更新时间：2024-11-07
+## 最后更新时间：2026-01-25
 ## Surge
 
 # Wondershare 万兴
@@ -9,6 +9,9 @@ DOMAIN,account.wondershare.cn
 
 # GraphPad Prism
 DOMAIN,licenses.graphpad.com
+
+# FlowJo
+DOMAIN-SUFFIX,flowjo.com
 
 # Parallel Desktops
 DOMAIN-SUFFIX,static.parallels.com
