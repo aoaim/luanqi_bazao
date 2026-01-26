@@ -439,7 +439,11 @@ select_obfs_host() {
     echo "     sf1-cdn-tos.huoshanstatic.com" >&2
     echo "  8) Microsoft CDN" >&2
     echo "     software-static.download.prss.microsoft.com" >&2
-    echo "  9) Custom host" >&2
+    echo "  9) UCSC Genome Browser (Asia)" >&2
+    echo "     genome-asia.ucsc.edu" >&2
+    echo "  10) UCSC Genome Browser (US)" >&2
+    echo "     genome.ucsc.edu" >&2
+    echo "  11) Custom host" >&2
     
     while true; do
         read -p "Enter the host option number [1]: " host_choice
@@ -478,6 +482,14 @@ select_obfs_host() {
                 break
                 ;;
             9)
+                selected_host="genome-asia.ucsc.edu"
+                break
+                ;;
+            10)
+                selected_host="genome.ucsc.edu"
+                break
+                ;;
+            11)
                 read -p "Enter custom host: " custom_host
                 if [[ -z "$custom_host" ]]; then
                     echo "Custom host cannot be empty. Please try again." >&2
@@ -487,7 +499,7 @@ select_obfs_host() {
                 break
                 ;;
             *)
-                echo "Invalid choice. Please enter a number between 1 and 9." >&2
+                echo "Invalid choice. Please enter a number between 1 and 11." >&2
                 ;;
         esac
     done
