@@ -51,12 +51,14 @@ jobs:
             proxy_filter/surge/tracking-protection-filter.txt \
             proxy_filter/surge/chinese-filter.txt \
             proxy_filter/surge/base-filter.txt \
-            proxy_filter/surge/dns-filter.txt | grep -q .; then
+            proxy_filter/surge/dns-filter.txt \
+            proxy_filter/surge/hagezi-pro-filter.txt | grep -q .; then
             git add \
               proxy_filter/surge/tracking-protection-filter.txt \
               proxy_filter/surge/chinese-filter.txt \
               proxy_filter/surge/base-filter.txt \
-              proxy_filter/surge/dns-filter.txt
+              proxy_filter/surge/dns-filter.txt \
+              proxy_filter/surge/hagezi-pro-filter.txt
             git commit -m 'actions: Update AdGuard Surge domain sets'
             git pull --rebase origin main
             git push origin HEAD:main

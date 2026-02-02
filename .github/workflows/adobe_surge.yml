@@ -49,7 +49,7 @@ jobs:
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if git status --porcelain proxy_filter/surge/adobe.list | grep -q .; then
             git add proxy_filter/surge/adobe.list
-            git commit -m 'chore: update Adobe Surge rules'
+            git commit -m 'actions: Update Adobe Surge rules'
             git push origin HEAD:main
           else
             echo 'No changes to commit'
