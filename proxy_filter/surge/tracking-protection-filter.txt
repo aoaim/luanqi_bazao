@@ -4,6 +4,7 @@
 .ib.snssdk.com
 .xlog.snssdk.com
 .log.snssdk.com
+.verint-cdn.com
 .1mythtracker.xyz
 .analytic.is
 .hsadspixel.net
@@ -66905,6 +66906,7 @@
 .melodioussymphony.com
 .melodyglobe.com
 .meltmilk.com
+.membernook.com
 .memeorigin.com
 .memolight.com
 .memopilot.com
@@ -66950,6 +66952,7 @@
 .moorshoes.com
 .morefolks.com
 .morefriendly.com
+.motionarray.net
 .motionflowers.com
 .motionlessbelief.com
 .motionlessmeeting.com
