@@ -47,6 +47,16 @@ const configurations = [
     ],
     transformations: ['RemoveComments', 'RemoveModifiers', 'Validate', 'Deduplicate'],
   },
+  {
+    name: 'Hagezi Pro filter',
+    sources: [
+      {
+        source:
+          'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/pro.txt',
+      },
+    ],
+    transformations: ['RemoveComments', 'RemoveModifiers', 'Validate', 'Deduplicate'],
+  },
 ]
 
 const outputFiles = configurations.map((config) => `${slugify(config.name)}.txt`)
