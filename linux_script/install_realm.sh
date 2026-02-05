@@ -116,6 +116,7 @@ Description=realm
 After=network-online.target
 Wants=network-online.target systemd-networkd-wait-online.service
 
+
 [Service]
 Type=simple
 User=root
@@ -363,15 +364,20 @@ show_menu() {
         rule_count=$(grep -c "\[\[endpoints\]\]" "$REALM_CONF")
     fi
 
-    echo -e "${GREEN}Realm Manager Script${PLAIN}"
-    echo -e "${GREEN} ____                     ___                  ${PLAIN}"
-    echo -e "${GREEN}/\  _'\                  /\_ \                 ${PLAIN}"
-    echo -e "${GREEN}\ \ \L\ \     __     __  \//\ \     ___ ___    ${PLAIN}"
-    echo -e "${GREEN} \ \ ,  /   /'__'\ /'__'\  \ \ \  /' __' __'\  ${PLAIN}"
-    echo -e "${GREEN}  \ \ \\ \ /\  __//\ \L\.\_ \_\ \_/\ \/\ \/\ \ ${PLAIN}"
-    echo -e "${GREEN}   \ \_\ \_\ \____\ \__/.\_\/\____\ \_\ \_\ \_\ ${PLAIN}"
-    echo -e "${GREEN}    \/_/\/ /\/____/\/__/\/_/\/____/\/_/\/_/\/_/${PLAIN}"
+    echo -e ""
+    echo -e "${GREEN} ,ggggggggggg,                                                  ${PLAIN}"
+    echo -e "${GREEN}dP\"\"\"88\"\"\"\"\"\"Y8,                       ,dPYb,                   ${PLAIN}"
+    echo -e "${GREEN}Yb,  88      \`8b                       IP'\`Yb                   ${PLAIN}"
+    echo -e "${GREEN} \`\"  88      ,8P                       I8  8I                   ${PLAIN}"
+    echo -e "${GREEN}     88aaaad8P\"                        I8  8'                   ${PLAIN}"
+    echo -e "${GREEN}     88\"\"\"\"Yb,     ,ggg,     ,gggg,gg  I8 dP   ,ggg,,ggg,,ggg,  ${PLAIN}"
+    echo -e "${GREEN}     88     \"8b   i8\" \"8i   dP\"  \"Y8I  I8dP   ,8\" \"8P\" \"8P\" \"8, ${PLAIN}"
+    echo -e "${GREEN}     88      \`8i  I8, ,8I  i8'    ,8I  I8P    I8   8I   8I   8I ${PLAIN}"
+    echo -e "${GREEN}     88       Yb, \`YbadP' ,d8,   ,d8b,,d8b,_ ,dP   8I   8I   Yb,${PLAIN}"
+    echo -e "${GREEN}     88        Y8888P\"Y888P\"Y8888P\"\`Y88P'\"Y888P'   8I   8I   \`Y8${PLAIN}"
+    echo -e "                                                                "
     echo -e "                                               "
+    echo -e "${GREEN}Realm Manager Script${PLAIN}"
     echo -e "--------------------------------"
     echo -e "Realm Status: $status"
     echo -e "Version: $current_version (Latest: ${GREEN}$latest_version${PLAIN})"
