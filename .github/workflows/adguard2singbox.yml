@@ -6,10 +6,10 @@ on:
     branches:
       - main
     paths:
-      - '.github/workflows/adguard2singbox.yml'
-      - 'rule_generator/adguard2singbox/**'
+      - ".github/workflows/adguard2singbox.yml"
+      - "rule_generator/adguard2singbox/**"
   schedule:
-    - cron: '0 0 */2 * *'
+    - cron: "0 0 */2 * *"
 
 permissions:
   contents: write
@@ -36,27 +36,33 @@ jobs:
 
       - name: Fetch AdGuard DNS Filter Lists
         run: |
-          wget -O tmp/convert/AdGuardDNSFilter.txt https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt
-          wget -O tmp/convert/CHN_anti-AD.txt https://anti-ad.net/adguard.txt
+          mkdir -p tmp/downloads
+          wget -O tmp/downloads/adguard-dns-filter.txt https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt
+          wget -O tmp/downloads/anti-ad.txt https://anti-ad.net/adguard.txt
+          wget -O tmp/downloads/adguard-chinese-filter.txt https://raw.githubusercontent.com/AdguardTeam/FiltersRegistry/master/filters/filter_224_Chinese/filter.txt
+          wget -O tmp/downloads/adguard-base-filter.txt https://raw.githubusercontent.com/AdguardTeam/FiltersRegistry/master/filters/filter_2_Base/filter.txt
+          wget -O tmp/downloads/adguard-tracking-protection-filter.txt https://raw.githubusercontent.com/AdguardTeam/FiltersRegistry/master/filters/filter_3_Spyware/filter.txt
+          wget -O tmp/downloads/hagezi-pro-filter.txt https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/pro.txt
+          wget -O tmp/downloads/hagezi-anti-piracy-filter.txt https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/anti.piracy.txt
 
       - name: Convert with sing-box
         run: |
-          cd tmp/convert
+          mkdir -p proxy_filter/sing-box/
+          rm -f proxy_filter/sing-box/*.srs
+
+          cd tmp/downloads
           for file in *.txt; do
-            ./sing-box rule-set convert "$file" --output "${file%.txt}.srs" --type adguard
+            ../../sing-box rule-set convert "$file" --output "../../proxy_filter/sing-box/${file%.txt}.srs" --type adguard
           done
           cd ../..
-          mkdir -p proxy_filter/sing-box/
-          rm -f proxy_filter/sing-box/AdGuardDNSFilter.srs proxy_filter/sing-box/CHN_anti-AD.srs
-          cp tmp/convert/*.srs proxy_filter/sing-box/
           rm -r tmp
 
       - name: Commit and push changes
         run: |
           git config --local user.name "github-actions[bot]"
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git status --porcelain proxy_filter/sing-box/AdGuardDNSFilter.srs proxy_filter/sing-box/CHN_anti-AD.srs | grep -q .; then
-            git add proxy_filter/sing-box/AdGuardDNSFilter.srs proxy_filter/sing-box/CHN_anti-AD.srs
+          if git status --porcelain proxy_filter/sing-box/ | grep -q .; then
+            git add proxy_filter/sing-box/*.srs
             git commit -m 'actions: Update AdGuard SRS rule sets'
             git pull --rebase origin main
             git push origin HEAD:main

@@ -6,10 +6,10 @@ on:
     branches:
       - main
     paths:
-      - '.github/workflows/adguard2surge.yml'
-      - 'rule_generator/adguard2surge/**'
+      - ".github/workflows/adguard2surge.yml"
+      - "rule_generator/adguard2surge/**"
   schedule:
-    - cron: '0 0 */2 * *'
+    - cron: "0 0 */2 * *"
 
 permissions:
   contents: write
@@ -34,7 +34,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Install dependencies
         run: npm install
@@ -48,17 +48,19 @@ jobs:
           git config --local user.name "github-actions[bot]"
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if git status --porcelain \
-            proxy_filter/surge/tracking-protection-filter.txt \
-            proxy_filter/surge/chinese-filter.txt \
-            proxy_filter/surge/base-filter.txt \
-            proxy_filter/surge/dns-filter.txt \
-            proxy_filter/surge/hagezi-pro-filter.txt | grep -q .; then
+            proxy_filter/surge/adguard-tracking-protection-filter.txt \
+            proxy_filter/surge/adguard-chinese-filter.txt \
+            proxy_filter/surge/adguard-base-filter.txt \
+            proxy_filter/surge/adguard-dns-filter.txt \
+            proxy_filter/surge/hagezi-pro-filter.txt \
+            proxy_filter/surge/hagezi-anti-piracy-filter.txt | grep -q .; then
             git add \
-              proxy_filter/surge/tracking-protection-filter.txt \
-              proxy_filter/surge/chinese-filter.txt \
-              proxy_filter/surge/base-filter.txt \
-              proxy_filter/surge/dns-filter.txt \
-              proxy_filter/surge/hagezi-pro-filter.txt
+              proxy_filter/surge/adguard-tracking-protection-filter.txt \
+              proxy_filter/surge/adguard-chinese-filter.txt \
+              proxy_filter/surge/adguard-base-filter.txt \
+              proxy_filter/surge/adguard-dns-filter.txt \
+              proxy_filter/surge/hagezi-pro-filter.txt \
+              proxy_filter/surge/hagezi-anti-piracy-filter.txt
             git commit -m 'actions: Update AdGuard Surge domain sets'
             git pull --rebase origin main
             git push origin HEAD:main

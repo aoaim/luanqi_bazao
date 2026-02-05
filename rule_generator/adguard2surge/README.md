@@ -1,13 +1,24 @@
 # AdGuard to Surge
 
-- Converts AdGuard block lists into Surge domain-set files (workflow adapted from `geekdada/surge-list`).
-- GitHub Actions workflow: `.github/workflows/adguard2surge.yml` (cron `0 0 */2 * *`, plus manual dispatch).
-- Output files: `proxy_filter/surge/tracking-protection-filter.txt`, `chinese-filter.txt`, `base-filter.txt`, `dns-filter.txt`.
-- Source URLs:
-	- Tracking Protection: https://raw.githubusercontent.com/AdguardTeam/FiltersRegistry/master/filters/filter_3_Spyware/filter.txt
-	- Chinese: https://raw.githubusercontent.com/AdguardTeam/FiltersRegistry/master/filters/filter_224_Chinese/filter.txt
-	- Base: https://raw.githubusercontent.com/AdguardTeam/FiltersRegistry/master/filters/filter_2_Base/filter.txt
-	- DNS: https://raw.githubusercontent.com/AdguardTeam/FiltersRegistry/master/filters/filter_15_DnsFilter/filter.txt
+Converts AdGuard block lists into Surge domain-set files.
+
+## Workflow
+
+- **Workflow File**: `.github/workflows/adguard2surge.yml`
+- **Schedule**: Every 2 days at 00:00 UTC (`0 0 */2 * *`), plus manual dispatch.
+
+## Output Files
+
+Generated rules are saved in `proxy_filter/surge/`.
+
+| Rule Name | Output File | Source |
+| :--- | :--- | :--- |
+| **Adguard Tracking Protection Filter** | `adguard-tracking-protection-filter.txt` | [Source](https://raw.githubusercontent.com/AdguardTeam/FiltersRegistry/master/filters/filter_3_Spyware/filter.txt) |
+| **Adguard Chinese Filter** | `adguard-chinese-filter.txt` | [Source](https://raw.githubusercontent.com/AdguardTeam/FiltersRegistry/master/filters/filter_224_Chinese/filter.txt) |
+| **Adguard Base Filter** | `adguard-base-filter.txt` | [Source](https://raw.githubusercontent.com/AdguardTeam/FiltersRegistry/master/filters/filter_2_Base/filter.txt) |
+| **Adguard DNS Filter** | `adguard-dns-filter.txt` | [Source](https://raw.githubusercontent.com/AdguardTeam/FiltersRegistry/master/filters/filter_15_DnsFilter/filter.txt) |
+| **Hagezi Pro Filter** | `hagezi-pro-filter.txt` | [Source](https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/pro.txt) |
+| **Hagezi Anti-Piracy Filter** | `hagezi-anti-piracy-filter.txt` | [Source](https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/anti.piracy.txt) |
 
 ## Manual Run
 
