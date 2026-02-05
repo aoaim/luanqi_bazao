@@ -58,6 +58,7 @@ jobs:
 
       - name: Commit and push changes
         run: |
+          rm -f sing-box
           git config --local user.name "github-actions[bot]"
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if git status --porcelain proxy_filter/sing-box/ | grep -q .; then
