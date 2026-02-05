@@ -328,12 +328,13 @@ show_detection() {
     print_kv "Location" "${IP_CITY:-?}, ${IP_REGION:-?}, ${IP_COUNTRY:-?}"
     CURRENT_TZ_DISPLAY=$(timedatectl show --property=Timezone --value 2>/dev/null || echo "Unknown")
     print_kv "Timezone" "${CURRENT_TZ_DISPLAY}"
+    print_kv "Kernel" "$(uname -r)"
     print_kv "CPU" "$(lscpu 2>/dev/null | grep 'Model name' | cut -d: -f2- | xargs || echo '?')"
     print_kv "Memory" "$(echo "$MEM_KB" | awk '{printf "%.1f MB", $1/1024}')"
     print_kv "Swap" "$SWAP_STR"
-    print_kv "zram swap" "${ZRAM_STATUS:-not detected}"
+    print_kv "ZRAM Swap" "${ZRAM_STATUS:-not detected}"
     print_kv "Disk (/)" "$DISK_ROOT"
-    print_kv "BBR / qdisc" "$BBR_STATUS / $QDISC_STATUS"
+    print_kv "BBR / Qdisc" "$BBR_STATUS / $QDISC_STATUS"
 }
 
 get_github_latest_version() {
@@ -773,7 +774,7 @@ ask_yes_no() {
         read choice
         case "$choice" in
             y|Y|yes|Yes) return 0 ;;
-            n|N|no|No) return 1 ;;
+            n|N|no|No|"") return 1 ;;
             *) echo "Please enter 'y' or 'n'." ;;
         esac
     done
@@ -1092,6 +1093,17 @@ EOF
     fi
 }
 
+install_cloud_kernel() {
+    print_info "Installing Cloud Kernel..."
+    if apt-get install $APT_INSTALL_OPTS "linux-image-cloud-${ARCH_DEB}"; then
+        print_success "Cloud Kernel installed"
+        print_info "Updating GRUB..."
+        update-grub 2>/dev/null || true
+    else
+        print_error "Failed to install Cloud Kernel"
+    fi
+}
+
 install_base_packages() {
     print_section "${ICON_PKG} Installing base packages"
     apt-get install $APT_INSTALL_OPTS rsyslog openssl gnupg nano cron chrony fail2ban python3-systemd logrotate vnstat nload htop unzip unattended-upgrades
@@ -1226,7 +1238,7 @@ show_report() {
     # Network settings
     print_kv "BBR" "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo '?')"
     print_kv "Queueing" "$(sysctl -n net.core.default_qdisc 2>/dev/null || echo '?')"
-    print_kv "swappiness" "$(sysctl -n vm.swappiness 2>/dev/null || echo '?')"
+    print_kv "Swappiness" "$(sysctl -n vm.swappiness 2>/dev/null || echo '?')"
     
     # IPv6 status: combine sysctl state with assignment state
     local ipv6_display
@@ -1252,9 +1264,9 @@ show_report() {
     echo ""
     
     # Services
-    print_kv "chrony" "$(systemctl is-active chrony 2>/dev/null || echo '?')"
-    print_kv "fail2ban" "$(systemctl is-active fail2ban 2>/dev/null || echo '?')"
-    print_kv "zram swap" "${ZRAM_STATUS:-not detected}"
+    print_kv "Chrony" "$(systemctl is-active chrony 2>/dev/null || echo '?')"
+    print_kv "Fail2Ban" "$(systemctl is-active fail2ban 2>/dev/null || echo '?')"
+    print_kv "ZRAM Swap" "${ZRAM_STATUS:-not detected}"
     print_kv "Timezone" "${TIMEZONE_FINAL:-unknown}"
     
     # Auto-update status
@@ -1282,6 +1294,18 @@ show_report() {
     get_ver() {
         "$@" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1
     }
+    
+    # Kernel Version
+    local current_kernel
+    current_kernel=$(uname -r)
+    local latest_kernel
+    latest_kernel=$(ls -1vr /boot/vmlinuz* 2>/dev/null | head -n1 | xargs -n1 basename 2>/dev/null | sed 's/vmlinuz-//')
+    
+    print_kv "Current Kernel" "$current_kernel"
+    if [ -n "$latest_kernel" ] && [ "$latest_kernel" != "$current_kernel" ]; then
+        print_kv "Latest Kernel" "$latest_kernel (will load on reboot)"
+    fi
+    
     local tools=""
     command -v eza >/dev/null && tools+="  eza $(get_ver eza --version)\n"
     command -v hx >/dev/null && tools+="  helix $(get_ver hx --version)\n"
@@ -1325,19 +1349,31 @@ main() {
     auto_enable_zram_swap
     apply_swappiness_sysctl
     apply_network_sysctl
-    apply_ipv6_sysctl
+    
+    if [ -n "${IPV6_ADDR:-}" ] && [ "${IPV6_ADDR}" != "N/A" ]; then
+        apply_ipv6_sysctl
+    else
+        print_info "IPv6 not detected, skipping IPv6 configuration."
+    fi
+
     apply_all_sysctl
     
     # Final Interactive Prompts
+    if ask_yes_no "Install Cloud Kernel? (default: n)"; then
+        install_cloud_kernel
+    fi
+
     if ask_yes_no "Install Docker? (default: n)"; then
         install_docker
     fi
 
-    if ask_yes_no "Disable IPv6? (default: n)"; then
-        DISABLE_IPV6=1
-        print_info "Disabling IPv6..."
-        apply_ipv6_sysctl
-        sysctl --system >/dev/null 2>&1 || true
+    if [ -n "${IPV6_ADDR:-}" ] && [ "${IPV6_ADDR}" != "N/A" ]; then
+        if ask_yes_no "Disable IPv6? (default: n)"; then
+            DISABLE_IPV6=1
+            print_info "Disabling IPv6..."
+            apply_ipv6_sysctl
+            sysctl --system >/dev/null 2>&1 || true
+        fi
     fi
 
     detect_zram_status
