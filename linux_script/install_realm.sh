@@ -363,23 +363,30 @@ show_menu() {
         rule_count=$(grep -c "\[\[endpoints\]\]" "$REALM_CONF")
     fi
 
-    echo -e "Realm Manager Script"
+    echo -e "${GREEN}Realm Manager Script${PLAIN}"
+    echo -e "${GREEN} ____                     ___                  ${PLAIN}"
+    echo -e "${GREEN}/\  _'\                  /\_ \                 ${PLAIN}"
+    echo -e "${GREEN}\ \ \L\ \     __     __  \//\ \     ___ ___    ${PLAIN}"
+    echo -e "${GREEN} \ \ ,  /   /'__'\ /'__'\  \ \ \  /' __' __'\  ${PLAIN}"
+    echo -e "${GREEN}  \ \ \\ \ /\  __//\ \L\.\_ \_\ \_/\ \/\ \/\ \ ${PLAIN}"
+    echo -e "${GREEN}   \ \_\ \_\ \____\ \__/.\_\/\____\ \_\ \_\ \_\ ${PLAIN}"
+    echo -e "${GREEN}    \/_/\/ /\/____/\/__/\/_/\/____/\/_/\/_/\/_/${PLAIN}"
+    echo -e "                                               "
     echo -e "--------------------------------"
     echo -e "Realm Status: $status"
     echo -e "Version: $current_version (Latest: ${GREEN}$latest_version${PLAIN})"
     echo -e "Rules: ${GREEN}$rule_count${PLAIN}"
+    echo -e "IPv4: ${GREEN}${LOCAL_IPV4}${PLAIN} [${YELLOW}${LOCAL_IPV4_COUNTRY}${PLAIN}]"
+    echo -e "IPv6: ${GREEN}${LOCAL_IPV6}${PLAIN} [${YELLOW}${LOCAL_IPV6_COUNTRY}${PLAIN}]"
     echo -e "--------------------------------"
     echo -e "${GREEN}1.${PLAIN} Install Realm"
     echo -e "${GREEN}2.${PLAIN} Update Realm"
     echo -e "${GREEN}3.${PLAIN} Uninstall Realm"
-    echo -e "--------------------------------"
     echo -e "${GREEN}4.${PLAIN} Start/Restart Service"
     echo -e "${GREEN}5.${PLAIN} Stop Service"
-    echo -e "--------------------------------"
     echo -e "${GREEN}6.${PLAIN} Add Forwarding Rule"
     echo -e "${GREEN}7.${PLAIN} Delete Forwarding Rule"
     echo -e "${GREEN}8.${PLAIN} Show Forwarding Rules"
-    echo -e "--------------------------------"
     echo -e "${GREEN}9.${PLAIN} Show Raw Config File"
     echo -e "--------------------------------"
     echo -e "${GREEN}0.${PLAIN} Exit"
@@ -427,6 +434,26 @@ if [[ $# -gt 0 ]]; then
     esac
 else
     LATEST_VERSION=$(get_latest_version)
+
+    # Fetch IP/Location info
+    LOCAL_IPV4=$(wget -qO- -t1 -T2 ipv4.icanhazip.com)
+    if [[ -n "$LOCAL_IPV4" ]]; then
+        LOCAL_IPV4_COUNTRY=$(wget -qO- -t1 -T2 "http://ip-api.com/json/$LOCAL_IPV4?fields=country" | jq -r .country)
+        [[ "$LOCAL_IPV4_COUNTRY" == "null" || -z "$LOCAL_IPV4_COUNTRY" ]] && LOCAL_IPV4_COUNTRY="Unknown"
+    else
+        LOCAL_IPV4="Not Assigned"
+        LOCAL_IPV4_COUNTRY=""
+    fi
+
+    LOCAL_IPV6=$(wget -qO- -t1 -T2 ipv6.icanhazip.com)
+    if [[ -n "$LOCAL_IPV6" ]]; then
+        LOCAL_IPV6_COUNTRY=$(wget -qO- -t1 -T2 "http://ip-api.com/json/$LOCAL_IPV6?fields=country" | jq -r .country)
+        [[ "$LOCAL_IPV6_COUNTRY" == "null" || -z "$LOCAL_IPV6_COUNTRY" ]] && LOCAL_IPV6_COUNTRY="Unknown"
+    else
+        LOCAL_IPV6="Not Assigned"
+        LOCAL_IPV6_COUNTRY=""
+    fi
+
     show_menu
 fi
 
