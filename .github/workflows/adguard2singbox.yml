@@ -62,7 +62,7 @@ jobs:
           git config --local user.name "github-actions[bot]"
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if git status --porcelain proxy_filter/sing-box/ | grep -q .; then
-            git add proxy_filter/sing-box/*.srs
+            git add -A proxy_filter/sing-box/
             git commit -m 'actions: Update AdGuard SRS rule sets'
             git pull --rebase origin main
             git push origin HEAD:main
