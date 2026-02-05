@@ -4,9 +4,7 @@
 # Based on: https://github.com/leitbogioro/Tools
 
 set -e
-
-PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 18)
-
+echo ""
 echo "Select OS:"
 echo "1) Debian 13   2) Ubuntu 24"
 echo "3) Rocky 9     4) Alma 9"
@@ -24,27 +22,55 @@ case $choice in
     *) echo "Invalid"; exit 1 ;;
 esac
 
+# 基础参数 (- 开头)
+BASE_OPTS="$OS"
+
 # Hostname
 echo ""
 read -rp "Set hostname? (enter to skip): " HOSTNAME
-[[ -n "$HOSTNAME" ]] && OS="$OS -hostname $HOSTNAME"
+[[ -n "$HOSTNAME" ]] && BASE_OPTS="$BASE_OPTS -hostname $HOSTNAME"
 
 # SSH Port
 read -rp "SSH port? (default 22): " PORT
 PORT=${PORT:-22}
-OS="$OS -port $PORT"
 
-# Cloud kernel
-read -rp "Use cloud kernel? (y/N): " CK
-[[ "$CK" == "y" || "$CK" == "Y" ]] && OS="$OS --cloudkernel 1"
+# Password
+AUTO_PWD=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 18)
+read -rp "Password? (enter for auto-generated): " USER_PWD
+PASSWORD=${USER_PWD:-$AUTO_PWD}
 
-# BBR
-read -rp "Enable BBR? (y/N): " BBR
-[[ "$BBR" == "y" || "$BBR" == "Y" ]] && OS="$OS --bbr"
+BASE_OPTS="$BASE_OPTS -port $PORT -pwd \"$PASSWORD\""
+
+# 可选参数 (-- 开头)
+EXTRA_OPTS=""
+
+# Cloud kernel (only for Debian 11+/Alpine)
+CK=""
+if [[ "$choice" == "1" || "$choice" == "5" ]]; then
+    read -rp "Use cloud kernel? [y/N, default: N]: " CK
+    [[ "$CK" == "y" || "$CK" == "Y" ]] && EXTRA_OPTS="$EXTRA_OPTS --cloudkernel 1"
+fi
+
+# BBR (only for Debian 11+)
+BBR=""
+if [[ "$choice" == "1" ]]; then
+    read -rp "Enable BBR? [y/N, default: N]: " BBR
+    [[ "$BBR" == "y" || "$BBR" == "Y" ]] && EXTRA_OPTS="$EXTRA_OPTS --bbr"
+fi
+
+# Set DNS (only for Debian)
+SETDNS=""
+if [[ "$choice" == "1" ]]; then
+    read -rp "Set DNS to Google/Cloudflare? [y/N, default: N]: " SETDNS
+    [[ "$SETDNS" == "y" || "$SETDNS" == "Y" ]] && EXTRA_OPTS="$EXTRA_OPTS --setdns"
+fi
 
 # Fail2ban
-read -rp "Enable fail2ban? (y/N): " F2B
-[[ "$F2B" == "y" || "$F2B" == "Y" ]] && OS="$OS --fail2ban 1"
+read -rp "Enable fail2ban? [y/N, default: N]: " F2B
+[[ "$F2B" == "y" || "$F2B" == "Y" ]] && EXTRA_OPTS="$EXTRA_OPTS --fail2ban 1"
+
+# 完整命令
+FULL_CMD="bash InstallNET.sh $BASE_OPTS$EXTRA_OPTS"
 
 echo ""
 echo "OS: $NAME"
@@ -52,12 +78,23 @@ echo "OS: $NAME"
 echo "SSH Port: $PORT"
 [[ "$CK" == "y" || "$CK" == "Y" ]] && echo "Cloud kernel: enabled"
 [[ "$BBR" == "y" || "$BBR" == "Y" ]] && echo "BBR: enabled"
+[[ "$SETDNS" == "y" || "$SETDNS" == "Y" ]] && echo "Set DNS: enabled (run resolvconf after install)"
 [[ "$F2B" == "y" || "$F2B" == "Y" ]] && echo "Fail2ban: enabled"
-echo -e "Password: \033[31m$PASSWORD\033[0m"
+echo -e "Password: \033[32m$PASSWORD\033[0m"
+echo ""
+echo "Command: $FULL_CMD"
+
+# DNS 提示（确认前显示）
+if [[ "$SETDNS" == "y" || "$SETDNS" == "Y" ]]; then
+    echo ""
+    echo -e "\033[33m[NOTE] To activate DNS, run after install:\033[0m"
+    echo 'echo "O" | apt install resolvconf -y && reboot'
+fi
+
 echo ""
 read -rp "Confirm reinstall? (yes): " c
 [[ "$c" != "yes" ]] && exit 0
 
 wget --no-check-certificate -qO InstallNET.sh 'https://raw.githubusercontent.com/leitbogioro/Tools/master/Linux_reinstall/InstallNET.sh'
 chmod +x InstallNET.sh
-bash InstallNET.sh $OS -pwd "$PASSWORD"
+eval $FULL_CMD
