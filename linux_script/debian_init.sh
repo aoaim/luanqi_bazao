@@ -329,7 +329,11 @@ show_detection() {
     CURRENT_TZ_DISPLAY=$(timedatectl show --property=Timezone --value 2>/dev/null || echo "Unknown")
     print_kv "Timezone" "${CURRENT_TZ_DISPLAY}"
     print_kv "Kernel" "$(uname -r)"
-    print_kv "CPU" "$(lscpu 2>/dev/null | grep 'Model name' | cut -d: -f2- | xargs || echo '?')"
+    local cpu_info
+    cpu_info=$(lscpu 2>/dev/null | grep 'Model name' | cut -d: -f2- | xargs || echo '?')
+    local cpu_cores
+    cpu_cores=$(nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo '?')
+    print_kv "CPU" "$cpu_info (${cpu_cores} Cores)"
     print_kv "Memory" "$(echo "$MEM_KB" | awk '{printf "%.1f MB", $1/1024}')"
     print_kv "Swap" "$SWAP_STR"
     print_kv "ZRAM Swap" "${ZRAM_STATUS:-not detected}"
