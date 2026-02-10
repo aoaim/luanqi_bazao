@@ -38,6 +38,9 @@ PORT=${PORT:-22}
 AUTO_PWD=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 18)
 read -rp "Password? (enter for auto-generated): " USER_PWD
 PASSWORD=${USER_PWD:-$AUTO_PWD}
+if [[ -z "$USER_PWD" ]]; then
+    echo -e "Password: \033[32m$PASSWORD\033[0m"
+fi
 
 BASE_OPTS="$BASE_OPTS -port $PORT -pwd \"$PASSWORD\""
 
