@@ -5,6 +5,8 @@
 
 set -e
 echo ""
+echo -e "\033[36;1m✦ Easy Reinstallation\033[0m"
+echo ""
 echo "Select OS:"
 echo "1) Debian 13   2) Ubuntu 24"
 echo "3) Rocky 9     4) Alma 9"
