@@ -4,6 +4,7 @@
 # Based on: https://github.com/leitbogioro/Tools
 
 set -e
+clear
 echo ""
 echo -e "\033[36;1m✦ Easy Reinstallation\033[0m"
 echo ""
