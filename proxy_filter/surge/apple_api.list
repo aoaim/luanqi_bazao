@@ -1,9 +1,13 @@
-## 应当代理的苹果服务 API
+## 应当代理的苹果服务
+## 包括 Apple API 和在中国大陆无 CDN 的 Apple 服务
 ## 参见 https://github.com/geekdada/surge-list/blob/master/surgio-snippet/apple.tpl
-## 最后更新 2023-11-07
+## 相关域名作用说明 https://support.apple.com/zh-cn/101555
+## 最后更新 2026-02-18
 ## Surge
 
+#
 # 一些 com.apple.appstored* 会连接的 API（优先级高）
+#
 DOMAIN,guzzoni.apple.com
 DOMAIN,apps.apple.com
 DOMAIN,xp.apple.com
@@ -19,35 +23,43 @@ DOMAIN,beta.music.apple.com
 DOMAIN-KEYWORD,buy.itunes.apple.com
 DOMAIN-SUFFIX,itunes-apple.com.akadns.net
 
+#
 # Apple Intelligence
+#
 DOMAIN,apple-relay.apple.com
 
+#
 # Apple Non-China CDN
+#
 # iTunes
-DOMAIN-SUFFIX,hls.itunes.apple.com,{{ default_rule }}
-DOMAIN-SUFFIX,hls-amt.itunes.apple.com,{{ default_rule }}
-DOMAIN-SUFFIX,audio-ssl.itunes.apple.com,{{ default_rule }}
-DOMAIN-SUFFIX,cdn-apple.com,{{ default_rule }}
-DOMAIN,cdn.apple-cloudkit.com,{{ default_rule }}
+DOMAIN-SUFFIX,hls.itunes.apple.com
+DOMAIN-SUFFIX,hls-amt.itunes.apple.com
+DOMAIN-SUFFIX,audio-ssl.itunes.apple.com
+DOMAIN-SUFFIX,cdn-apple.com
+DOMAIN,cdn.apple-cloudkit.com
 # Developer
-DOMAIN,devimages-cdn.apple.com,{{ default_rule }}
-DOMAIN,devstreaming-cdn.apple.com,{{ default_rule }}
-DOMAIN,js-cdn.music.apple.com,{{ default_rule }}
-DOMAIN,docs-assets.developer.apple.com,{{ default_rule }}
+DOMAIN,devimages-cdn.apple.com
+DOMAIN,devstreaming-cdn.apple.com
+DOMAIN,js-cdn.music.apple.com
+DOMAIN,docs-assets.developer.apple.com
 # Other
-DOMAIN-SUFFIX,apple-dns.net,{{ default_rule }}
+DOMAIN-SUFFIX,apple-dns.net
 # OCSP
-DOMAIN-SUFFIX,ocsp.apple.com,{{ default_rule }}
-USER-AGENT,com.apple.trustd*,{{ default_rule }}
+DOMAIN-SUFFIX,ocsp.apple.com
+USER-AGENT,com.apple.trustd*
 
+#
 # Apple News
-USER-AGENT,AppleNews*,{{apple_news_rule}}
-DOMAIN-SUFFIX,apple.news,{{apple_news_rule}}
-DOMAIN,news-events.apple.com,{{apple_news_rule}}
-DOMAIN,news-edge.apple.com,{{apple_news_rule}}
-DOMAIN,apple.comscoreresearch.com,{{apple_news_rule}}
+#
+USER-AGENT,AppleNews*
+DOMAIN-SUFFIX,apple.news
+DOMAIN,news-events.apple.com
+DOMAIN,news-edge.apple.com
+DOMAIN,apple.comscoreresearch.com
 
-# Apple 其他
+#
+# Apple 其他自选
+#
 # iMessage
 DOMAIN-SUFFIX,ess.apple.com
 # Apple Music
@@ -68,22 +80,3 @@ DOMAIN-SUFFIX,me.com
 DOMAIN-SUFFIX,apple.com
 DOMAIN-SUFFIX,icloud.com
 DOMAIN-SUFFIX,apple-cloudkit.com
-
-# 以下参见 https://github.com/DivineEngine/Profiles/blob/master/Surge/Ruleset/Global.list
-# Apple URL Shortener
-DOMAIN-SUFFIX,appsto.re
-# Spotlight
-DOMAIN-SUFFIX,smoot.apple.com
-# Podcasts
-DOMAIN,amp-api.podcasts.apple.com
-# Apple Music Web
-DOMAIN,beta.music.apple.com
-# iBooks Store download
-DOMAIN,books.itunes.apple.com
-# Apple Music Radio
-DOMAIN,radio.itunes.apple.com
-# Web Preview
-DOMAIN,apps.apple.com
-DOMAIN,books.apple.com
-DOMAIN,itunes.apple.com
-DOMAIN,tv.apple.com
