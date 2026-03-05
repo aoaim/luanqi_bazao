@@ -77,30 +77,6 @@ print_kv() {
     printf "${DIM}%-22s${RESET} : %b\n" "$key" "$val"
 }
 
-# Run command with spinner animation
-run_with_spinner() {
-    local msg="$1"
-    shift
-    local pid
-    local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-    local i=0
-
-    printf "${CYAN}${ICON_INFO} %s${RESET} " "$msg"
-    
-    "$@" >/dev/null 2>&1 &
-    pid=$!
-    
-    while kill -0 "$pid" 2>/dev/null; do
-        printf "\b%s" "${spin:i++%${#spin}:1}"
-        sleep 0.1
-    done
-    
-    wait "$pid"
-    local ret=$?
-    printf "\b \n"
-    return $ret
-}
-
 require_root() {
     if [ "$(id -u)" -ne 0 ]; then
         print_error "Root privileges required. Please run with sudo."
@@ -351,22 +327,12 @@ get_github_latest_version() {
     curl "${curl_opts[@]}" -o /dev/null -w %{url_effective} "https://github.com/$1/releases/latest" | grep -oE '[^/]+$'
 }
 
-get_github_api_asset_url() {
-    # $1 = repo (user/repo), $2 = regex for asset filename
-    local repo="$1"
-    local pattern="$2"
-    local curl_opts=("-sL" "--connect-timeout" "5" "--max-time" "15" "--retry" "3" "--retry-delay" "1" "--retry-connrefused" "-H" "Accept: application/vnd.github+json")
-    if [ -n "${IPV4_ADDR:-}" ] && [ "${IPV4_ADDR}" != "N/A" ]; then
-        curl_opts+=("-4")
-    fi
-    curl "${curl_opts[@]}" "https://api.github.com/repos/${repo}/releases/latest" \
-        | grep -Eo '"browser_download_url":\s*"[^"]+"' \
-        | cut -d'"' -f4 \
-        | grep -E "$pattern" \
-        | head -n1
-}
 
 install_cf_speedtest() {
+    if [ "$GITHUB_ALLOWED" -eq 0 ]; then
+        print_warning "IPv6-only detected: skipping Cloudflare Speedtest CLI (GitHub download required)."
+        return
+    fi
     print_info "Installing Cloudflare Speedtest CLI..."
 
     local arch_url=""
@@ -381,6 +347,7 @@ install_cf_speedtest() {
 
     if download_file "$arch_url" "${TEMP_DIR}/cfspeed.tar.xz"; then
         if extract_archive "${TEMP_DIR}/cfspeed.tar.xz" "$TEMP_DIR"; then
+            local binpath
             binpath=$(find "$TEMP_DIR" -type f -name "cloudflare-speed-cli*" -executable -print -quit 2>/dev/null || true)
             if [ -z "$binpath" ]; then
                 binpath=$(find "$TEMP_DIR" -type f -name "cloudflare-speed-cli*" -print -quit 2>/dev/null || true)
@@ -407,8 +374,8 @@ EOF
 
 apt_refresh() {
     print_section "${ICON_PKG} System update"
-    apt-get update -qq
-    apt-get upgrade $APT_INSTALL_OPTS
+    apt-get update -qq || true
+    apt-get upgrade $APT_INSTALL_OPTS || true
     apt-get autoremove $APT_INSTALL_OPTS
     apt-get clean
     print_success "System update completed"
@@ -416,6 +383,7 @@ apt_refresh() {
 
 install_speedtest() {
     print_info "Installing Speedtest..."
+    local pkg_path url
     pkg_path=$(curl -sL "https://packagecloud.io/ookla/speedtest-cli/debian/dists/${DISTRO_CODENAME}/main/binary-${ARCH_DEB}/Packages" 2>/dev/null | grep -A10 "Package: speedtest" | grep "^Filename:" | head -n1 | awk '{print $2}' || true)
     if [ -z "$pkg_path" ]; then
         print_error "Unable to get Speedtest package path"
@@ -459,6 +427,7 @@ install_helix() {
 
     if download_file "$url" "${TEMP_DIR}/helix.tar.xz"; then
         if extract_archive "${TEMP_DIR}/helix.tar.xz" "$TEMP_DIR"; then
+            local helix_dir
             helix_dir=$(find "$TEMP_DIR" -maxdepth 1 -type d -name "helix-*" -print -quit)
 
             if [ -n "$helix_dir" ] && [ -f "${helix_dir}/hx" ]; then
@@ -495,10 +464,11 @@ install_eza() {
     print_info "Installing Eza..."
     # Static latest URL
     # eza_x86_64-unknown-linux-gnu.tar.gz or eza_aarch64-unknown-linux-gnu.tar.gz
-    url="https://github.com/eza-community/eza/releases/latest/download/eza_${ARCH}-unknown-linux-gnu.tar.gz"
+    local url="https://github.com/eza-community/eza/releases/latest/download/eza_${ARCH}-unknown-linux-gnu.tar.gz"
     
     if download_file "$url" "${TEMP_DIR}/eza.tar.gz"; then
         if extract_archive "${TEMP_DIR}/eza.tar.gz" "$TEMP_DIR"; then
+            local binpath
             binpath=$(find "$TEMP_DIR" -type f -name eza -executable -print -quit 2>/dev/null || true)
             if [ -n "$binpath" ]; then
                 install -m 755 "$binpath" /usr/local/bin/eza
@@ -542,11 +512,7 @@ install_duf() {
     if download_file "$url" "${TEMP_DIR}/duf.deb"; then
         if dpkg -i "${TEMP_DIR}/duf.deb" >/dev/null 2>&1; then
             apt-get install -f $APT_INSTALL_OPTS >/dev/null 2>&1 || true
-            cat > /etc/profile.d/duf-alias.sh <<'EOF'
-alias df='duf'
-EOF
-            chmod 644 /etc/profile.d/duf-alias.sh
-            print_success "Duf installed (alias: df)"
+            print_success "Duf installed (use: duf)"
         else
             print_error "Duf installation failed"
         fi
@@ -561,7 +527,6 @@ install_bat() {
         print_warning "IPv6-only detected: skipping Bat (GitHub download required)."
         return
     fi
-    remove_apt_pkg bat
     print_info "Installing Bat..."
 
     local tag="" ver="" url=""
@@ -576,13 +541,10 @@ install_bat() {
     fi
     
     if download_file "$url" "${TEMP_DIR}/bat.deb"; then
+        remove_apt_pkg bat
         if dpkg -i "${TEMP_DIR}/bat.deb" >/dev/null 2>&1; then
             apt-get install -f $APT_INSTALL_OPTS >/dev/null 2>&1 || true
-            cat > /etc/profile.d/bat-alias.sh <<'EOF'
-alias less='bat --paging=always'
-EOF
-            chmod 644 /etc/profile.d/bat-alias.sh
-            print_success "Bat installed (alias: less)"
+            print_success "Bat installed (use: bat)"
         else
             print_error "Bat installation failed"
         fi
@@ -597,33 +559,25 @@ install_btop() {
         print_warning "IPv6-only detected: skipping Btop (GitHub download required)."
         return
     fi
-    remove_apt_pkg btop
     print_info "Installing Btop..."
-    
-    tag="v1.4.5"
-    # btop-x86_64-linux-musl.tbz or btop-aarch64-unknown-linux-musl.tbz
-    if [ "$ARCH" = "x86_64" ]; then
-        url="https://github.com/aristocratos/btop/releases/download/${tag}/btop-x86_64-linux-musl.tbz"
-    else
-        url="https://github.com/aristocratos/btop/releases/download/${tag}/btop-aarch64-unknown-linux-musl.tbz"
-    fi
-    
+    # Static latest URL (file naming stable since v1.4.6)
+    local url="https://github.com/aristocratos/btop/releases/latest/download/btop-${ARCH}-unknown-linux-musl.tbz"
+
     if download_file "$url" "${TEMP_DIR}/btop.tbz"; then
+        remove_apt_pkg btop
         mkdir -p "${TEMP_DIR}/btop_extract"
         if extract_archive "${TEMP_DIR}/btop.tbz" "${TEMP_DIR}/btop_extract"; then
+            local binpath
             binpath=$(find "${TEMP_DIR}/btop_extract" -type f -name btop ! -name "*.sh" -print -quit 2>/dev/null || true)
             if [ -n "$binpath" ] && [ -f "$binpath" ]; then
                 install -m 755 "$binpath" /usr/local/bin/btop
+                local themedir
                 themedir=$(find "${TEMP_DIR}/btop_extract" -type d -name themes -print -quit 2>/dev/null || true)
                 if [ -n "$themedir" ]; then
                     mkdir -p /usr/local/share/btop/themes
                     cp -r "$themedir"/* /usr/local/share/btop/themes/ 2>/dev/null || true
                 fi
-                cat > /etc/profile.d/btop-alias.sh <<'EOF'
-alias top='btop'
-EOF
-                chmod 644 /etc/profile.d/btop-alias.sh
-                print_success "Btop installed (alias: top)"
+                print_success "Btop installed (use: btop)"
             else
                 print_error "Btop binary not found"
             fi
@@ -640,7 +594,6 @@ install_fd() {
         print_warning "IPv6-only detected: skipping Fd (GitHub download required)."
         return
     fi
-    remove_apt_pkg fd-find
     print_info "Installing Fd..."
     
     local tag="" ver="" url=""
@@ -655,13 +608,10 @@ install_fd() {
     fi
     
     if download_file "$url" "${TEMP_DIR}/fd.deb"; then
+        remove_apt_pkg fd-find
         if dpkg -i "${TEMP_DIR}/fd.deb" >/dev/null 2>&1; then
             apt-get install -f $APT_INSTALL_OPTS >/dev/null 2>&1 || true
-            cat > /etc/profile.d/fd-alias.sh <<'EOF'
-alias find='fd'
-EOF
-            chmod 644 /etc/profile.d/fd-alias.sh
-            print_success "Fd installed (alias: find)"
+            print_success "Fd installed (use: fd)"
         else
             print_error "Fd installation failed"
         fi
@@ -723,10 +673,11 @@ install_gping() {
     print_info "Installing Gping..."
     # Static latest URL
     # gping-Linux-musl-x86_64.tar.gz or aarch64
-    url="https://github.com/orf/gping/releases/latest/download/gping-Linux-musl-${ARCH}.tar.gz"
+    local url="https://github.com/orf/gping/releases/latest/download/gping-Linux-musl-${ARCH}.tar.gz"
     
     if download_file "$url" "${TEMP_DIR}/gping.tar.gz"; then
         if extract_archive "${TEMP_DIR}/gping.tar.gz" "$TEMP_DIR"; then
+            local binpath
             binpath=$(find "$TEMP_DIR" -type f -name gping -executable -print -quit 2>/dev/null || true)
             if [ -n "$binpath" ]; then
                 install -m 755 "$binpath" /usr/local/bin/gping
@@ -754,8 +705,8 @@ install_nexttrace() {
     else
         arch_suffix="arm64"
     fi
-    
-    url="https://github.com/nxtrace/NTrace-core/releases/latest/download/nexttrace_linux_${arch_suffix}"
+
+    local url="https://github.com/nxtrace/NTrace-core/releases/latest/download/nexttrace_linux_${arch_suffix}"
     
     if download_file "$url" "${TEMP_DIR}/nexttrace"; then
         install -m 755 "${TEMP_DIR}/nexttrace" /usr/local/bin/nexttrace
@@ -817,7 +768,7 @@ install_tools() {
 configure_chrony() {
     print_section "${ICON_TIME} Time sync & timezone"
     # Choose NTP pool based on IP
-    region_prefix=""
+    local region_prefix=""
     case "${IP_TZ:-}" in
         Asia/*) region_prefix="asia." ;;
         Europe/*) region_prefix="europe." ;;
@@ -1134,7 +1085,6 @@ EOF
     cat > /etc/apt/apt.conf.d/50unattended-upgrades <<'EOF'
 Unattended-Upgrade::Origins-Pattern {
     "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
-    "origin=Debian,codename=${distro_codename},label=Debian";
 };
 Unattended-Upgrade::AutoFixInterruptedDpkg "true";
 Unattended-Upgrade::MinimalSteps "true";
@@ -1233,7 +1183,7 @@ auto_enable_zram_swap() {
     fi
 
     print_info "Configuring zram swap (${recommended_size}MB, algo: ${recommended_algo})..."
-    configure_zram "$recommended_size" "$recommended_algo" "$mem_mb"
+    configure_zram "$recommended_size" "$recommended_algo"
 }
 
 show_report() {
@@ -1332,7 +1282,7 @@ show_report() {
     for f in /etc/profile.d/*.sh; do
         [ -r "$f" ] && . "$f" 2>/dev/null || true
     done
-    print_info "If aliases (cf, nt, vi, etc.) don't work, run: ${BOLD}source /etc/profile${RESET} or re-login."
+    print_info "If aliases (cf, nt, vi, ls, cd, etc.) don't work, run: ${BOLD}source /etc/profile${RESET} or re-login."
 }
 
 main() {
