@@ -122,8 +122,23 @@ fetch_ipinfo() {
     IP_COUNTRY=$(echo "$raw" | grep -oP '"country":\s*"\K[^"]+' || true)
     IP_ORG=$(echo "$raw" | grep -oP '"org":\s*"\K[^"]+' || true)
     IP_TZ=$(echo "$raw" | grep -oP '"timezone":\s*"\K[^"]+' || true)
-    IPV4_ADDR=$(curl -s --max-time 5 -4 ip.sb 2>/dev/null || echo "N/A")
-    IPV6_ADDR=$(curl -s --max-time 5 -6 ip.sb 2>/dev/null || echo "N/A")
+    IPV4_ADDR="N/A"
+    for api in "ip.sb" "api.ipify.org" "ifconfig.me" "ipinfo.io/ip"; do
+        tmp_ip=$(curl -fsSL --max-time 5 -4 "$api" 2>/dev/null || true)
+        if [ -n "$tmp_ip" ]; then
+            IPV4_ADDR="$tmp_ip"
+            break
+        fi
+    done
+
+    IPV6_ADDR="N/A"
+    for api in "ip.sb" "ifconfig.co" "icanhazip.com" "ident.me"; do
+        tmp_ip=$(curl -fsSL --max-time 5 -6 "$api" 2>/dev/null || true)
+        if [ -n "$tmp_ip" ]; then
+            IPV6_ADDR="$tmp_ip"
+            break
+        fi
+    done
     
     # Detect IPv6 status: disabled by sysctl, no address assigned, or working
     IPV6_STATUS=""
