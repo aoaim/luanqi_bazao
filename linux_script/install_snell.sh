@@ -51,6 +51,19 @@ generate_password() {
     tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24
 }
 
+# --- 获取 IPv4 地址 (保留多接口回退机制) ---
+get_ipv4() {
+    local tmp_ip
+    for api in "ip.sb" "api.ipify.org" "ifconfig.me" "ipinfo.io/ip"; do
+        tmp_ip=$(curl -fsSL --max-time 5 -4 "$api" 2>/dev/null || true)
+        if [ -n "$tmp_ip" ]; then
+            echo "$tmp_ip"
+            return 0
+        fi
+    done
+    return 1
+}
+
 # --- 获取已使用的端口列表 ---
 get_used_ports() {
     local ports=()
@@ -1131,7 +1144,7 @@ show_ss_surge_config() {
     local ss_method=$(echo "$ss_config" | cut -d'|' -f3)
     
     echo "Getting server IP address..."
-    local ip=$(curl -s ip.sb -4)
+    local ip=$(get_ipv4)
     
     if [ -z "$ip" ]; then
         log_error "Failed to get server IP address!"
@@ -1578,7 +1591,7 @@ show_ss_config() {
     local ss_port=$(grep -oP '"server_port"\s*:\s*\K[0-9]+' /etc/shadowsocks-rust/config.json)
     local ss_password=$(grep -oP '"password"\s*:\s*"\K[^"]+' /etc/shadowsocks-rust/config.json)
     local ss_method=$(grep -oP '"method"\s*:\s*"\K[^"]+' /etc/shadowsocks-rust/config.json)
-    local ip=$(curl -s ip.sb -4)
+    local ip=$(get_ipv4)
     
     echo "IP:        ${ip}"
     echo "Port:      $ss_port"
@@ -1939,7 +1952,7 @@ show_surge_config() {
     local host=$(grep -oP 'host = \K.+' /etc/snell/snell-server.conf || echo "")
     
     echo "Getting server IP address..."
-    local ip=$(curl -s ip.sb -4)
+    local ip=$(get_ipv4)
     
     if [ -z "$ip" ]; then
         log_error "Failed to get server IP address!"
@@ -2000,7 +2013,7 @@ show_config() {
     local dns=$(grep -oP 'dns = \K.+' /etc/snell/snell-server.conf)
     local obfs=$(grep -oP 'obfs = \K.+' /etc/snell/snell-server.conf)
     local host=$(grep -oP 'host = \K.+' /etc/snell/snell-server.conf)
-    local ip=$(curl -s ip.sb -4)
+    local ip=$(get_ipv4)
     
     echo "IP:        ${ip}"
     echo "Port:      ${port}"
