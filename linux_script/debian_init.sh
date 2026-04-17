@@ -2,6 +2,7 @@
 
 # Debian 12/13 initialization script
 # Performs environment detection, tool installation, timezone configuration, and kernel tuning
+# Update: 26/04/17
 
 set -euo pipefail
 
