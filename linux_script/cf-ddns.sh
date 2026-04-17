@@ -13,15 +13,15 @@
 # 7. 构造请求体
 # 8. 更新或创建 DNS 记录
 
-# crontab 示例：每 10 分钟执行一次
-# */10 * * * * /bin/bash /path/to/cf-ddns.sh >> /var/log/cf-ddns.log 2>&1
+# crontab 示例：每 15 分钟执行一次
+# */15 * * * * /bin/bash /path/to/cf-ddns.sh >> /var/log/cf-ddns.log 2>&1
 
 set -euo pipefail
 
 # Cloudflare API token
-API_KEY="xxxxxx"
+API_KEY="xxxxxxxx"
 # 目标记录域名
-DOMAIN="xxxxxx"
+DOMAIN="xxxxxxxx"
 # 仅处理 A 记录
 RECORD_TYPE="A"
 # TTL（秒），Cloudflare 支持 120 或 1(自动)
