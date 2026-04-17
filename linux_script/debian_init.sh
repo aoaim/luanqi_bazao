@@ -853,6 +853,13 @@ install_base_packages() {
     print_section "${ICON_PKG} Installing base packages"
     apt-get install $APT_INSTALL_OPTS rsyslog openssl gnupg cron chrony fail2ban python3-systemd logrotate nano vnstat nload htop unzip unattended-upgrades eza duf bat zoxide
 
+    # Debian ships bat as batcat on some releases; expose it through a shell alias.
+    cat > /etc/profile.d/bat-alias.sh <<'EOF'
+alias bat='batcat'
+EOF
+    chmod 644 /etc/profile.d/bat-alias.sh
+    print_success "bat alias configured (bat -> batcat)"
+
     # Ensure rsyslog is enabled and started
     systemctl enable --now rsyslog 2>/dev/null || true
 
@@ -1055,7 +1062,11 @@ show_report() {
     command -v hx >/dev/null && tools+="  helix $(get_ver hx --version)\n"
     command -v cloudflare-speed-cli >/dev/null && tools+="  cloudflare-speed-cli $(get_ver cloudflare-speed-cli --version)\n"
     command -v duf >/dev/null && tools+="  duf $(get_ver duf --version)\n"
-    command -v bat >/dev/null && tools+="  bat $(get_ver bat --version)\n"
+    if command -v bat >/dev/null; then
+        tools+="  bat $(get_ver bat --version)\n"
+    elif command -v batcat >/dev/null; then
+        tools+="  bat $(get_ver batcat --version)\n"
+    fi
     command -v zoxide >/dev/null && tools+="  zoxide $(get_ver zoxide --version)\n"
     command -v nexttrace >/dev/null && tools+="  nexttrace $(get_ver nexttrace --version)\n"
     [ -n "$tools" ] && echo -e "$tools" || echo "  (none)"
