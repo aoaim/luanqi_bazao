@@ -850,7 +850,7 @@ install_cloud_kernel() {
 
 install_base_packages() {
     print_section "${ICON_PKG} Installing base packages"
-    apt-get install $APT_INSTALL_OPTS rsyslog openssl gnupg cron chrony fail2ban python3-systemd logrotate vnstat nload htop unzip unattended-upgrades eza duf bat zoxide
+    apt-get install $APT_INSTALL_OPTS rsyslog openssl gnupg cron chrony fail2ban python3-systemd logrotate nano vnstat nload htop unzip unattended-upgrades eza duf bat zoxide
 
     # Ensure rsyslog is enabled and started
     systemctl enable --now rsyslog 2>/dev/null || true
