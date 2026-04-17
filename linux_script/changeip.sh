@@ -37,9 +37,9 @@ change_ip() {
 	local resolved_ip="$1"
 	local new_ip
 	if new_ip=$(api_call "$CHANGE_PATH" "$resolved_ip"); then
-		echo "changeip result: ${new_ip}"
+		echo "result: ${new_ip}"
 	else
-		echo "changeip failed" >&2
+		echo "error: changeip failed" >&2
 		return 1
 	fi
 }
@@ -48,26 +48,26 @@ main() {
 	local resolved_ip current_ip answer
 
 	if ! resolved_ip=$(resolve_host_ip); then
-		echo "Failed to resolve ${HOST} via dedicated DNS servers: ${DNS_SERVERS[*]}" >&2
+		echo "error: failed to resolve ${HOST} via dedicated DNS servers: ${DNS_SERVERS[*]}" >&2
 		exit 1
 	fi
 
-	echo "Resolved ${HOST} -> ${resolved_ip}"
+	echo "resolved: ${HOST} -> ${resolved_ip}"
 
 	if current_ip=$(api_call "$GET_PATH" "$resolved_ip"); then
-		echo "Current IP: ${current_ip}"
+		echo "ip: ${current_ip}"
 	else
-		echo "Failed to get current IP" >&2
+		echo "error: failed to get current ip" >&2
 		exit 1
 	fi
 
 	if [[ ! -t 0 ]]; then
-		echo "No interactive input detected. Auto changing IP now."
+		echo "non-interactive input detected, auto changing ip now"
 		change_ip "$resolved_ip"
 		exit $?
 	fi
 
-	echo "Change IP? (yes/y to change, no/n to keep, auto-confirm in ${TIMEOUT_SECONDS}s)"
+	echo "change ip? (yes/y to change, no/n to keep, auto-confirm in ${TIMEOUT_SECONDS}s)"
 	if read -r -t "$TIMEOUT_SECONDS" -p "> " answer; then
 		answer=$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')
 		case "$answer" in
@@ -75,15 +75,15 @@ main() {
 				change_ip "$resolved_ip"
 				;;
 			no|n)
-				echo "IP unchanged."
+				echo "unchanged"
 				;;
 			*)
-				echo "Invalid input. IP unchanged."
+				echo "invalid input, unchanged"
 				;;
 		esac
 	else
 		echo
-		echo "No input within ${TIMEOUT_SECONDS}s. Auto changing IP now."
+		echo "no input within ${TIMEOUT_SECONDS}s, auto changing ip now"
 		change_ip "$resolved_ip"
 	fi
 }
