@@ -16,11 +16,11 @@ TEMP_DIR=$(mktemp -d -p /var/tmp)
 
 # Global Architecture Detection
 case "$(uname -m)" in
-    x86_64|amd64) 
+    x86_64|amd64)
         ARCH="x86_64"
         ARCH_DEB="amd64"
         ;;
-    aarch64|arm64) 
+    aarch64|arm64)
         ARCH="aarch64"
         ARCH_DEB="arm64"
         ;;
@@ -52,14 +52,14 @@ DIM='\033[2m'
 RESET='\033[0m'
 
 # Icons
-ICON_PKG="[PKG] "
-ICON_TIME="[TIME] "
-ICON_DONE="[DONE] "
-ICON_TOOL="[TOOL] "
-ICON_OK="[OK] "
-ICON_WARN="[WARN] "
-ICON_ERR="[ERR] "
-ICON_INFO="[INFO] "
+ICON_PKG="[PKG]"
+ICON_TIME="[TIME]"
+ICON_DONE="[DONE]"
+ICON_TOOL="[TOOL]"
+ICON_OK="[OK]"
+ICON_WARN="[WARN]"
+ICON_ERR="[ERR]"
+ICON_INFO="[INFO]"
 
 print_section() {
     echo ""
@@ -70,6 +70,10 @@ print_success() { echo -e "${GREEN}${ICON_OK} $1${RESET}"; }
 print_warning() { echo -e "${YELLOW}${ICON_WARN} $1${RESET}"; }
 print_error()   { echo -e "${RED}${ICON_ERR} $1${RESET}"; }
 print_info()    { echo -e "${CYAN}${ICON_INFO} $1${RESET}"; }
+
+print_subsection() {
+    echo -e "${BOLD}${CYAN}$1${RESET}"
+}
 
 print_kv() {
     local key="$1"
@@ -139,7 +143,7 @@ fetch_ipinfo() {
             break
         fi
     done
-    
+
     # Detect IPv6 status: disabled by sysctl, no address assigned, or working
     IPV6_STATUS=""
     if [ "${IPV6_ADDR:-N/A}" = "N/A" ] || [ -z "$IPV6_ADDR" ]; then
@@ -265,15 +269,6 @@ extract_archive() {
     esac
 }
 
-# Remove apt-installed package if exists (to install newer version from GitHub)
-remove_apt_pkg() {
-    local pkg="$1"
-    if dpkg -l "$pkg" 2>/dev/null | grep -q "^ii"; then
-        print_info "Removing apt-installed $pkg..."
-        apt-get remove -y -qq "$pkg" >/dev/null 2>&1 || true
-    fi
-}
-
 detect_system() {
     MEM_KB=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
     SWAP_KB=$(awk '/SwapTotal/ {print $2}' /proc/meminfo)
@@ -342,6 +337,24 @@ get_github_latest_version() {
     curl "${curl_opts[@]}" -o /dev/null -w %{url_effective} "https://github.com/$1/releases/latest" | grep -oE '[^/]+$'
 }
 
+get_github_api_asset_url() {
+    # $1 = repo (user/repo)
+    # $2 = grep -E pattern for browser_download_url
+    local repo="$1"
+    local pattern="$2"
+    local curl_opts=("-sL" "--connect-timeout" "5" "--max-time" "20" "--retry" "3" "--retry-delay" "1" "--retry-connrefused")
+
+    if [ -n "${IPV4_ADDR:-}" ] && [ "${IPV4_ADDR}" != "N/A" ]; then
+        curl_opts+=("-4")
+    fi
+
+    curl "${curl_opts[@]}" "https://api.github.com/repos/${repo}/releases/latest" 2>/dev/null \
+        | grep -oE '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]+"' \
+        | sed -E 's/^"browser_download_url"[[:space:]]*:[[:space:]]*"([^"]+)"$/\1/' \
+        | grep -E "$pattern" \
+        | head -n1 || true
+}
+
 
 install_cf_speedtest() {
     if [ "$GITHUB_ALLOWED" -eq 0 ]; then
@@ -394,25 +407,6 @@ apt_refresh() {
     apt-get autoremove $APT_INSTALL_OPTS
     apt-get clean
     print_success "System update completed"
-}
-
-install_speedtest() {
-    print_info "Installing Speedtest..."
-    local pkg_path url
-    pkg_path=$(curl -sL "https://packagecloud.io/ookla/speedtest-cli/debian/dists/${DISTRO_CODENAME}/main/binary-${ARCH_DEB}/Packages" 2>/dev/null | grep -A10 "Package: speedtest" | grep "^Filename:" | head -n1 | awk '{print $2}' || true)
-    if [ -z "$pkg_path" ]; then
-        print_error "Unable to get Speedtest package path"
-        return
-    fi
-    url="https://packagecloud.io/ookla/speedtest-cli/debian/${pkg_path}"
-
-    if download_file "$url" "${TEMP_DIR}/speedtest.deb"; then
-        dpkg -i "${TEMP_DIR}/speedtest.deb" >/dev/null 2>&1 || apt-get install -f $APT_INSTALL_OPTS >/dev/null 2>&1
-        print_success "Speedtest installed"
-        rm -f "${TEMP_DIR}/speedtest.deb"
-    else
-        print_error "Failed to download Speedtest"
-    fi
 }
 
 install_helix() {
@@ -471,242 +465,6 @@ EOF
     fi
 }
 
-install_eza() {
-    if [ "$GITHUB_ALLOWED" -eq 0 ]; then
-        print_warning "IPv6-only detected: skipping Eza (GitHub download required)."
-        return
-    fi
-    print_info "Installing Eza..."
-    # Static latest URL
-    # eza_x86_64-unknown-linux-gnu.tar.gz or eza_aarch64-unknown-linux-gnu.tar.gz
-    local url="https://github.com/eza-community/eza/releases/latest/download/eza_${ARCH}-unknown-linux-gnu.tar.gz"
-    
-    if download_file "$url" "${TEMP_DIR}/eza.tar.gz"; then
-        if extract_archive "${TEMP_DIR}/eza.tar.gz" "$TEMP_DIR"; then
-            local binpath
-            binpath=$(find "$TEMP_DIR" -type f -name eza -executable -print -quit 2>/dev/null || true)
-            if [ -n "$binpath" ]; then
-                install -m 755 "$binpath" /usr/local/bin/eza
-                cat > /etc/profile.d/eza-alias.sh <<'EOF'
-alias ls='eza'
-alias ll='eza -lh --icons --git'
-alias la='eza -lah --icons --git'
-alias lt='eza -lh --icons --git --tree'
-alias l='eza -lah --icons --git'
-EOF
-                chmod 644 /etc/profile.d/eza-alias.sh
-                print_success "Eza installed (aliases: ls, ll, la, lt, l)"
-            else
-                print_error "Eza binary not found in archive"
-            fi
-        fi
-        rm -f "${TEMP_DIR}/eza.tar.gz"
-    else
-        print_error "Eza download failed (version latest)"
-    fi
-}
-
-install_duf() {
-    if [ "$GITHUB_ALLOWED" -eq 0 ]; then
-        print_warning "IPv6-only detected: skipping Duf (GitHub download required)."
-        return
-    fi
-    print_info "Installing Duf..."
-
-    local tag="" ver="" url=""
-    
-    tag=$(get_github_latest_version "muesli/duf")
-    if [ -n "$tag" ]; then
-        ver="${tag#v}"
-        url="https://github.com/muesli/duf/releases/download/${tag}/duf_${ver}_linux_${ARCH_DEB}.deb"
-    else
-        print_error "Unable to resolve Duf version"
-        return
-    fi
-    
-    if download_file "$url" "${TEMP_DIR}/duf.deb"; then
-        if dpkg -i "${TEMP_DIR}/duf.deb" >/dev/null 2>&1; then
-            apt-get install -f $APT_INSTALL_OPTS >/dev/null 2>&1 || true
-            print_success "Duf installed (use: duf)"
-        else
-            print_error "Duf installation failed"
-        fi
-        rm -f "${TEMP_DIR}/duf.deb"
-    else
-        print_error "Duf download failed"
-    fi
-}
-
-install_bat() {
-    if [ "$GITHUB_ALLOWED" -eq 0 ]; then
-        print_warning "IPv6-only detected: skipping Bat (GitHub download required)."
-        return
-    fi
-    print_info "Installing Bat..."
-
-    local tag="" ver="" url=""
-    
-    tag=$(get_github_latest_version "sharkdp/bat")
-    if [ -n "$tag" ]; then
-        ver="${tag#v}"
-        url="https://github.com/sharkdp/bat/releases/download/${tag}/bat_${ver}_${ARCH_DEB}.deb"
-    else
-        print_error "Unable to resolve Bat version"
-        return
-    fi
-    
-    if download_file "$url" "${TEMP_DIR}/bat.deb"; then
-        remove_apt_pkg bat
-        if dpkg -i "${TEMP_DIR}/bat.deb" >/dev/null 2>&1; then
-            apt-get install -f $APT_INSTALL_OPTS >/dev/null 2>&1 || true
-            print_success "Bat installed (use: bat)"
-        else
-            print_error "Bat installation failed"
-        fi
-        rm -f "${TEMP_DIR}/bat.deb"
-    else
-        print_error "Bat download failed"
-    fi
-}
-
-install_btop() {
-    if [ "$GITHUB_ALLOWED" -eq 0 ]; then
-        print_warning "IPv6-only detected: skipping Btop (GitHub download required)."
-        return
-    fi
-    print_info "Installing Btop..."
-    # Static latest URL (file naming stable since v1.4.6)
-    local url="https://github.com/aristocratos/btop/releases/latest/download/btop-${ARCH}-unknown-linux-musl.tbz"
-
-    if download_file "$url" "${TEMP_DIR}/btop.tbz"; then
-        remove_apt_pkg btop
-        mkdir -p "${TEMP_DIR}/btop_extract"
-        if extract_archive "${TEMP_DIR}/btop.tbz" "${TEMP_DIR}/btop_extract"; then
-            local binpath
-            binpath=$(find "${TEMP_DIR}/btop_extract" -type f -name btop ! -name "*.sh" -print -quit 2>/dev/null || true)
-            if [ -n "$binpath" ] && [ -f "$binpath" ]; then
-                install -m 755 "$binpath" /usr/local/bin/btop
-                local themedir
-                themedir=$(find "${TEMP_DIR}/btop_extract" -type d -name themes -print -quit 2>/dev/null || true)
-                if [ -n "$themedir" ]; then
-                    mkdir -p /usr/local/share/btop/themes
-                    cp -r "$themedir"/* /usr/local/share/btop/themes/ 2>/dev/null || true
-                fi
-                print_success "Btop installed (use: btop)"
-            else
-                print_error "Btop binary not found"
-            fi
-            rm -rf "${TEMP_DIR}/btop_extract"
-        fi
-        rm -f "${TEMP_DIR}/btop.tbz"
-    else
-        print_error "Btop download failed"
-    fi
-}
-
-install_fd() {
-    if [ "$GITHUB_ALLOWED" -eq 0 ]; then
-        print_warning "IPv6-only detected: skipping Fd (GitHub download required)."
-        return
-    fi
-    print_info "Installing Fd..."
-    
-    local tag="" ver="" url=""
-    
-    tag=$(get_github_latest_version "sharkdp/fd")
-    if [ -n "$tag" ]; then
-        ver="${tag#v}"
-        url="https://github.com/sharkdp/fd/releases/download/${tag}/fd_${ver}_${ARCH_DEB}.deb"
-    else
-        print_error "Unable to resolve Fd version"
-        return
-    fi
-    
-    if download_file "$url" "${TEMP_DIR}/fd.deb"; then
-        remove_apt_pkg fd-find
-        if dpkg -i "${TEMP_DIR}/fd.deb" >/dev/null 2>&1; then
-            apt-get install -f $APT_INSTALL_OPTS >/dev/null 2>&1 || true
-            print_success "Fd installed (use: fd)"
-        else
-            print_error "Fd installation failed"
-        fi
-        rm -f "${TEMP_DIR}/fd.deb"
-    else
-        print_error "Fd download failed"
-    fi
-}
-
-install_zoxide() {
-    if [ "$GITHUB_ALLOWED" -eq 0 ]; then
-        print_warning "IPv6-only detected: skipping Zoxide (GitHub download required)."
-        return
-    fi
-    print_info "Installing Zoxide..."
-    
-    local tag="" ver="" url=""
-    
-    tag=$(get_github_latest_version "ajeetdsouza/zoxide")
-    if [ -n "$tag" ]; then
-        ver="${tag#v}"
-        url="https://github.com/ajeetdsouza/zoxide/releases/download/${tag}/zoxide-${ver}-${ARCH}-unknown-linux-musl.tar.gz"
-    else
-        print_error "Unable to resolve Zoxide version"
-        return
-    fi
-    
-    if download_file "$url" "${TEMP_DIR}/zoxide.tar.gz"; then
-        if tar -xzf "${TEMP_DIR}/zoxide.tar.gz" -C "$TEMP_DIR" 2>/dev/null; then
-            binpath=$(find "$TEMP_DIR" -type f -name zoxide -executable -print -quit 2>/dev/null || true)
-            if [ -n "$binpath" ]; then
-                install -m 755 "$binpath" /usr/local/bin/zoxide
-                cat > /etc/profile.d/zoxide-init.sh <<'EOF'
-# Zoxide init for bash
-if command -v zoxide >/dev/null 2>&1; then
-    eval "$(zoxide init bash)"
-    alias cd='z'
-fi
-EOF
-                chmod 644 /etc/profile.d/zoxide-init.sh
-                print_success "Zoxide installed (alias: cd -> z, use: z <dir>)"
-            else
-                print_error "Zoxide binary not found in archive"
-            fi
-        else
-            print_error "Failed to extract Zoxide archive"
-        fi
-        rm -f "${TEMP_DIR}/zoxide.tar.gz"
-    else
-        print_error "Zoxide download failed"
-    fi
-}
-
-install_gping() {
-    if [ "$GITHUB_ALLOWED" -eq 0 ]; then
-        print_warning "IPv6-only detected: skipping Gping (GitHub download required)."
-        return
-    fi
-    print_info "Installing Gping..."
-    # Static latest URL
-    # gping-Linux-musl-x86_64.tar.gz or aarch64
-    local url="https://github.com/orf/gping/releases/latest/download/gping-Linux-musl-${ARCH}.tar.gz"
-    
-    if download_file "$url" "${TEMP_DIR}/gping.tar.gz"; then
-        if extract_archive "${TEMP_DIR}/gping.tar.gz" "$TEMP_DIR"; then
-            local binpath
-            binpath=$(find "$TEMP_DIR" -type f -name gping -executable -print -quit 2>/dev/null || true)
-            if [ -n "$binpath" ]; then
-                install -m 755 "$binpath" /usr/local/bin/gping
-                print_success "Gping installed (use: gping <host>)"
-            else
-                print_error "Gping binary not found in archive"
-            fi
-        fi
-        rm -f "${TEMP_DIR}/gping.tar.gz"
-    else
-        print_error "Gping download failed"
-    fi
-}
-
 install_nexttrace() {
     if [ "$GITHUB_ALLOWED" -eq 0 ]; then
         print_warning "IPv6-only detected: skipping Nexttrace (GitHub download required)."
@@ -722,7 +480,7 @@ install_nexttrace() {
     fi
 
     local url="https://github.com/nxtrace/NTrace-core/releases/latest/download/nexttrace_linux_${arch_suffix}"
-    
+
     if download_file "$url" "${TEMP_DIR}/nexttrace"; then
         install -m 755 "${TEMP_DIR}/nexttrace" /usr/local/bin/nexttrace
         cat > /etc/profile.d/nexttrace-alias.sh <<'EOF'
@@ -740,12 +498,18 @@ ask_yes_no() {
     local prompt="$1"
     local choice
     while true; do
-        printf "${CYAN}${BOLD}>>> %s (y/n): ${RESET}" "$prompt"
+        printf "${CYAN}${BOLD}>>> %s [default: n] (y/yes, n/no): ${RESET}" "$prompt"
         read choice
         case "$choice" in
-            y|Y|yes|Yes) return 0 ;;
-            n|N|no|No|"") return 1 ;;
-            *) echo "Please enter 'y' or 'n'." ;;
+            y|Y|yes|Yes)
+                print_info "Selected: y"
+                return 0
+                ;;
+            n|N|no|No|"")
+                print_info "Selected: n"
+                return 1
+                ;;
+            *) echo "Please enter y/yes or n/no." ;;
         esac
     done
 }
@@ -756,7 +520,7 @@ install_docker() {
         print_success "Docker already installed"
         return
     fi
-    
+
     if curl -fsSL https://get.docker.com | sh; then
         print_success "Docker installed successfully"
         usermod -aG docker debian 2>/dev/null || usermod -aG docker root 2>/dev/null || true
@@ -767,17 +531,27 @@ install_docker() {
 
 install_tools() {
     print_section "${ICON_TOOL} Tools setup"
-    install_eza
     install_helix
-    install_speedtest
     install_cf_speedtest
-    install_duf
-    install_bat
-    install_btop
-    install_fd
-    install_zoxide
-    install_gping
     install_nexttrace
+}
+
+configure_eza_aliases() {
+    if ! command_exists eza; then
+        print_warning "eza not found, skipping eza aliases"
+        return
+    fi
+
+    cat > /etc/profile.d/eza-alias.sh <<'EOF'
+# Keep system ls behavior unchanged for compatibility in scripts and automation.
+# If you really want interactive ls mapped to eza, uncomment the next line manually.
+# alias ls='eza --icons --group-directories-first --git'
+alias ll='eza -l --icons --group-directories-first --git'
+alias la='eza -al --icons --group-directories-first --git'
+alias lt='eza -T --icons --level=2'
+EOF
+    chmod 644 /etc/profile.d/eza-alias.sh
+    print_success "Eza aliases configured (ll, la, lt; ls kept native)"
 }
 
 configure_chrony() {
@@ -818,7 +592,7 @@ EOF
     print_kv "Current timezone" "$CURRENT_TZ"
     print_kv "Suggested timezone" "${IP_TZ:-Unknown}"
     echo ""
-    
+
     # Timezone: Auto-set to IP_TZ if available and different
     if [ -n "${IP_TZ:-}" ] && [ "$IP_TZ" != "$CURRENT_TZ" ]; then
         print_info "Setting timezone to ${IP_TZ} (detected)..."
@@ -865,7 +639,7 @@ filter_sysctl_file() {
 
 generate_sysctl_content() {
     local mem_mb=$((MEM_KB / 1024))
-    
+
     cat <<SYSCTL
 # ============================================================================
 # Generated by: debian_init.sh
@@ -992,23 +766,23 @@ SYSCTL
 
 apply_network_sysctl() {
     print_section "${ICON_INFO} Network tuning"
-    
+
     local tmpfile
     tmpfile="${TEMP_DIR}/sysctl_network.conf"
-    
+
     generate_sysctl_content > "$tmpfile"
-    
+
     mkdir -p /etc/sysctl.d
     : > "$SYSCTL_NETWORK_FILE"
     filter_sysctl_file "$tmpfile" "$SYSCTL_NETWORK_FILE"
-    
+
     print_success "Network tuning config written to $SYSCTL_NETWORK_FILE"
 }
 
 apply_swappiness_sysctl() {
     local swappiness
     mkdir -p /etc/sysctl.d
-    
+
     # Determine swappiness based on swap type
     # zram is fast (in-memory), so higher swappiness is beneficial
     # Disk swap is slow, so lower swappiness is preferred
@@ -1019,7 +793,7 @@ apply_swappiness_sysctl() {
         swappiness=10
         print_info "No zram: using swappiness=10"
     fi
-    
+
     cat > "$SYSCTL_SWAPPINESS_FILE" <<EOF
 # ============================================================================
 # Generated by: debian_init.sh
@@ -1031,7 +805,7 @@ apply_swappiness_sysctl() {
 # Disk swap (slow): 10
 vm.swappiness = ${swappiness}
 EOF
-    
+
     print_success "Swappiness config written to $SYSCTL_SWAPPINESS_FILE"
 }
 
@@ -1076,8 +850,8 @@ install_cloud_kernel() {
 
 install_base_packages() {
     print_section "${ICON_PKG} Installing base packages"
-    apt-get install $APT_INSTALL_OPTS rsyslog openssl gnupg nano cron chrony fail2ban python3-systemd logrotate vnstat nload htop unzip unattended-upgrades
-    
+    apt-get install $APT_INSTALL_OPTS rsyslog openssl gnupg cron chrony fail2ban python3-systemd logrotate vnstat nload htop unzip unattended-upgrades eza duf bat zoxide
+
     # Ensure rsyslog is enabled and started
     systemctl enable --now rsyslog 2>/dev/null || true
 
@@ -1138,19 +912,19 @@ configure_zram() {
     local size_mb="$1"
     local algo="$2"
     local expected_kb=$((size_mb * 1024))
-    
+
     # Ensure zram-tools is installed
     if ! dpkg -l zram-tools 2>/dev/null | grep -q "^ii"; then
         print_info "Installing zram-tools..."
         apt-get install $APT_INSTALL_OPTS zram-tools
     fi
-    
+
     # Completely stop and destroy existing zram
     systemctl stop zramswap.service 2>/dev/null || true
     swapoff /dev/zram0 2>/dev/null || true
     # Unload zram module to fully destroy the device
     rmmod zram 2>/dev/null || true
-    
+
     # Write configuration BEFORE starting service
     cat > /etc/default/zramswap <<EOF
 # zramswap config managed by init script
@@ -1158,14 +932,14 @@ ALGO=${algo}
 SIZE=${size_mb}
 PRIORITY=100
 EOF
-    
+
     # Load zram module
     modprobe zram 2>/dev/null || true
-    
+
     # Start service (not restart, since we fully stopped it)
     systemctl enable zramswap.service 2>/dev/null || true
     systemctl start zramswap.service 2>/dev/null || true
-    
+
     # Wait for ZRAM to initialize with correct size (up to 5s)
     local retries=5
     while [ $retries -gt 0 ]; do
@@ -1177,18 +951,18 @@ EOF
         sleep 1
         retries=$((retries - 1))
     done
-    
+
     print_success "zram configured: ${size_mb}MB (algo: ${algo})"
 }
 
 auto_enable_zram_swap() {
     local mem_mb config recommended_size recommended_algo
-    
+
     mem_mb=$((MEM_KB / 1024))
     config=$(get_recommended_zram_config "$mem_mb")
     recommended_size=$(echo "$config" | cut -d' ' -f1)
     recommended_algo=$(echo "$config" | cut -d' ' -f2)
-    
+
     # Check if zstd is supported, fallback to lz4 if not
     if [ "$recommended_algo" = "zstd" ]; then
         if ! modprobe zstd >/dev/null 2>&1 && ! grep -q "zstd" /proc/crypto 2>/dev/null; then
@@ -1203,12 +977,12 @@ auto_enable_zram_swap() {
 
 show_report() {
     print_section "${ICON_DONE} Summary"
-    
-    # Network settings
+
+    print_subsection "Network"
     print_kv "BBR" "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo '?')"
     print_kv "Queueing" "$(sysctl -n net.core.default_qdisc 2>/dev/null || echo '?')"
     print_kv "Swappiness" "$(sysctl -n vm.swappiness 2>/dev/null || echo '?')"
-    
+
     # IPv6 status: combine sysctl state with assignment state
     local ipv6_display
     local ipv6_sysctl
@@ -1224,21 +998,21 @@ show_report() {
     fi
     print_kv "IPv6" "$ipv6_display"
     echo ""
-    
-    # Sysctl configs
+
+    print_subsection "Sysctl configs"
     print_info "sysctl configs:"
     [ -f "$SYSCTL_NETWORK_FILE" ] && echo -e "  ${GREEN}*${RESET} $SYSCTL_NETWORK_FILE"
     [ -f "$SYSCTL_SWAPPINESS_FILE" ] && echo -e "  ${GREEN}*${RESET} $SYSCTL_SWAPPINESS_FILE"
     [ -f "$SYSCTL_IPV6_FILE" ] && echo -e "  ${GREEN}*${RESET} $SYSCTL_IPV6_FILE"
     echo ""
-    
-    # Services
+
+    print_subsection "Services"
     print_kv "Chrony" "$(systemctl is-active chrony 2>/dev/null || echo '?')"
     print_kv "Fail2Ban" "$(systemctl is-active fail2ban 2>/dev/null || echo '?')"
     print_kv "ZRAM Swap" "${ZRAM_STATUS:-not detected}"
     print_kv "Timezone" "${TIMEZONE_FINAL:-unknown}"
-    
-    # Auto-update status
+
+    print_subsection "Auto updates"
     local auto_updates=""
     if [ -f /etc/apt/apt.conf.d/50unattended-upgrades ]; then
         if grep -q 'codename=.*-security' /etc/apt/apt.conf.d/50unattended-upgrades 2>/dev/null; then
@@ -1257,47 +1031,43 @@ show_report() {
         print_kv "Auto-updates" "${YELLOW}not configured${RESET}"
     fi
     echo ""
-    
-    # Installed tools with versions
+
+    print_subsection "Tools"
     print_info "Installed tools:"
     get_ver() {
         "$@" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1
     }
-    
-    # Kernel Version
+
+    print_subsection "Kernel"
     local current_kernel
     current_kernel=$(uname -r)
     local latest_kernel
     latest_kernel=$(ls -1vr /boot/vmlinuz* 2>/dev/null | head -n1 | xargs -n1 basename 2>/dev/null | sed 's/vmlinuz-//')
-    
+
     print_kv "Current Kernel" "$current_kernel"
     if [ -n "$latest_kernel" ] && [ "$latest_kernel" != "$current_kernel" ]; then
         print_kv "Latest Kernel" "$latest_kernel (will load on reboot)"
     fi
-    
+
     local tools=""
     command -v eza >/dev/null && tools+="  eza $(get_ver eza --version)\n"
     command -v hx >/dev/null && tools+="  helix $(get_ver hx --version)\n"
-    command -v speedtest >/dev/null && tools+="  speedtest $(get_ver speedtest --version)\n"
     command -v cloudflare-speed-cli >/dev/null && tools+="  cloudflare-speed-cli $(get_ver cloudflare-speed-cli --version)\n"
     command -v duf >/dev/null && tools+="  duf $(get_ver duf --version)\n"
     command -v bat >/dev/null && tools+="  bat $(get_ver bat --version)\n"
-    command -v btop >/dev/null && tools+="  btop $(get_ver btop --version)\n"
-    command -v fd >/dev/null && tools+="  fd $(get_ver fd --version)\n"
     command -v zoxide >/dev/null && tools+="  zoxide $(get_ver zoxide --version)\n"
-    command -v gping >/dev/null && tools+="  gping $(get_ver gping --version)\n"
     command -v nexttrace >/dev/null && tools+="  nexttrace $(get_ver nexttrace --version)\n"
     [ -n "$tools" ] && echo -e "$tools" || echo "  (none)"
     echo ""
-    
+
     print_success "All steps complete. Reboot recommended for full effect."
     echo ""
-    
+
     # Source aliases
     for f in /etc/profile.d/*.sh; do
         [ -r "$f" ] && . "$f" 2>/dev/null || true
     done
-    print_info "If aliases (cf, nt, vi, ls, cd, etc.) don't work, run: ${BOLD}source /etc/profile${RESET} or re-login."
+    print_info "If aliases (cf, nt, vi, ll etc.) don't work, run: ${BOLD}source /etc/profile${RESET} or re-login."
 }
 
 main() {
@@ -1310,15 +1080,16 @@ main() {
     # detect_zram_status is used by show_detection
     detect_zram_status
     show_detection
-    
+
     apt_refresh
     install_tools
     install_base_packages
+    configure_eza_aliases
     configure_chrony
     auto_enable_zram_swap
     apply_swappiness_sysctl
     apply_network_sysctl
-    
+
     if [ -n "${IPV6_ADDR:-}" ] && [ "${IPV6_ADDR}" != "N/A" ]; then
         apply_ipv6_sysctl
     else
@@ -1326,18 +1097,20 @@ main() {
     fi
 
     apply_all_sysctl
-    
+
+    print_section "${ICON_TOOL} Optional components"
+
     # Final Interactive Prompts
-    if ask_yes_no "Install Cloud Kernel? (default: n)"; then
+    if ask_yes_no "Install Cloud Kernel?"; then
         install_cloud_kernel
     fi
 
-    if ask_yes_no "Install Docker? (default: n)"; then
+    if ask_yes_no "Install Docker?"; then
         install_docker
     fi
 
     if [ -n "${IPV6_ADDR:-}" ] && [ "${IPV6_ADDR}" != "N/A" ]; then
-        if ask_yes_no "Disable IPv6? (default: n)"; then
+        if ask_yes_no "Disable IPv6?"; then
             DISABLE_IPV6=1
             print_info "Disabling IPv6..."
             apply_ipv6_sysctl
