@@ -1,35 +1,39 @@
 #!/bin/bash
 
-# Cloudflare DDNS 管理
-# 依赖 curl jq grep
+# Cloudflare DDNS Management
+# Dependencies: curl, jq, grep
 
-# 运行流程：
-# 1. 检查依赖和参数
-# 2. 获取当前公网 IP
-# 3. 解析对应 Zone ID
-# 4. 查询现有 DNS 记录
-# 5. 若 IP 未变化则退出
-# 6. 若 IP 变化则查询 ipinfo
-# 7. 构造请求体
-# 8. 更新或创建 DNS 记录
+# Execution flow:
+# 1. Check dependencies and parameters
+# 2. Get current public IP
+# 3. Resolve corresponding Zone ID
+# 4. Query existing DNS records
+# 5. Exit if IP remains unchanged
+# 6. Query ipinfo if IP changed
+# 7. Construct request body
+# 8. Update or create DNS record
 
-# crontab 示例：每 15 分钟执行一次
+# crontab example: execute every 15 minutes
 # */15 * * * * /bin/bash /path/to/cf-ddns.sh >> /var/log/cf-ddns.log 2>&1
+
+# Ensure execution permission before use: chmod +x cf-ddns.sh
 
 set -euo pipefail
 
 # Cloudflare API token
 API_KEY="xxxxxxxx"
-# 目标记录域名
+# Target domain
 DOMAIN="xxxxxxxx"
-# 仅处理 A 记录
+# Process A records only
 RECORD_TYPE="A"
-# TTL（秒），Cloudflare 支持 120 或 1(自动)
+# TTL (seconds), Cloudflare supports 120 or 1 (auto)
 TTL=120
+# Optional: Comment for the DNS record
+COMMENT=""
 
 CF_API="https://api.cloudflare.com/client/v4"
 
-# curl 通用参数
+# General curl parameters
 CURL_TIMEOUT=8
 CURL_RETRY=2
 CURL_RETRY_DELAY=1
@@ -46,7 +50,7 @@ CF_API_HEADERS=(
 )
 
 get_public_ip() {
-     # 函数：获取公网 IP
+     # Function: Get public IP
      local services=(
           "https://api.ipify.org"
           "https://ifconfig.me/ip"
@@ -60,7 +64,7 @@ get_public_ip() {
 
      for service in "${services[@]}"; do
           raw=$(curl -4fsS "${CURL_COMMON_ARGS[@]}" "$service" 2>/dev/null)
-          # 提取 IPv4，兼容带额外文本的返回
+          # Extract IPv4, compatible with responses containing extra text
           candidate_ip=$(echo "$raw" | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n 1)
           if [[ -n "$candidate_ip" ]]; then
                printf '%s\n%s\n' "$candidate_ip" "$service"
@@ -72,7 +76,7 @@ get_public_ip() {
 }
 
 cf_api() {
-     # 函数：统一调用 Cloudflare API
+     # Function: Unified Cloudflare API call
      local method="$1"
      local endpoint="$2"
      local data="${3:-}"
@@ -90,7 +94,7 @@ cf_api() {
 }
 
 require_command() {
-     # 函数：检查命令是否存在
+     # Function: Check if command exists
      local cmd="$1"
      if ! command -v "$cmd" >/dev/null 2>&1; then
           echo "error: required command not found: $cmd" >&2
@@ -99,25 +103,25 @@ require_command() {
 }
 
 is_cf_success() {
-     # 函数：判断 Cloudflare 响应是否成功
+     # Function: Determine if Cloudflare response is successful
      local response="$1"
      [[ "$(echo "$response" | jq -r '.success // false')" == "true" ]]
 }
 
 cf_errors() {
-     # 函数：提取 Cloudflare errors
+     # Function: Extract Cloudflare errors
      local response="$1"
      echo "$response" | jq -c '.errors // []'
 }
 
 get_ipinfo() {
-     # 函数：查询 IP 的运营商和地理位置
+     # Function: Query IP ISP and geolocation
      local ip="$1"
      curl -fsS "${CURL_COMMON_ARGS[@]}" "https://ipinfo.io/$ip/json"
 }
 
 resolve_zone_id() {
-     # 函数：从域名逐级回退查找 Zone ID
+     # Function: Find Zone ID by backtracking from domain
      local candidate="$1"
      local response
      local zone_id
@@ -141,13 +145,13 @@ require_command curl
 require_command grep
 require_command jq
 
-# 主流程第 1 步：校验 TTL
+# Step 1: Validate TTL
 if [[ ! "$TTL" =~ ^[0-9]+$ ]]; then
      echo "error: TTL must be a number" >&2
      exit 1
 fi
 
-# 主流程第 2 步：获取当前公网 IP
+# Step 2: Get current public IP
 mapfile -t IP_INFO < <(get_public_ip)
 IP="${IP_INFO[0]:-}"
 IP_SOURCE="${IP_INFO[1]:-}"
@@ -157,18 +161,18 @@ if [[ -z "$IP" ]]; then
      exit 1
 fi
 
-# 主流程第 2 步输出：打印 IP 和来源
+# Step 2 Output: Print IP and source
 echo "ip: $IP"
 echo "source: $IP_SOURCE"
 
-# 主流程第 3 步：解析 Zone ID
+# Step 3: Resolve Zone ID
 ZONE_ID=$(resolve_zone_id "$DOMAIN")
 if [[ -z "$ZONE_ID" ]]; then
      echo "error: failed to resolve zone id from DOMAIN=$DOMAIN (check token permissions: Zone:Read + DNS:Edit)" >&2
      exit 1
 fi
 
-# 主流程第 4 步：查询现有 DNS 记录
+# Step 4: Query existing DNS records
 RECORD_JSON=$(cf_api GET "/zones/$ZONE_ID/dns_records?name=$DOMAIN&type=$RECORD_TYPE")
 
 if ! is_cf_success "$RECORD_JSON"; then
@@ -176,17 +180,17 @@ if ! is_cf_success "$RECORD_JSON"; then
      exit 1
 fi
 
-# 如果存在记录，读取其 ID 和当前内容 IP
+# If record exists, read its ID and current content IP
 RECORD_ID=$(echo "$RECORD_JSON" | jq -r '.result[0].id // empty')
 DNS_IP=$(echo "$RECORD_JSON" | jq -r '.result[0].content // empty')
 
-# 主流程第 5 步：IP 未变化则退出
+# Step 5: Exit if IP is unchanged
 if [[ -n "$DNS_IP" && "$IP" == "$DNS_IP" ]]; then
      echo "$(date +'%F %T') unchanged: $IP"
      exit 0
 fi
 
-# 主流程第 6 步：仅在 IP 变化时查询 ipinfo
+# Step 6: Query ipinfo only when IP changes
 IPINFO_JSON=$(get_ipinfo "$IP")
 IPINFO_ORG=$(echo "$IPINFO_JSON" | jq -r '.org // "unknown"')
 IPINFO_CITY=$(echo "$IPINFO_JSON" | jq -r '.city // empty')
@@ -200,16 +204,17 @@ elif [[ -z "$IPINFO_LOCATION" && -n "$IPINFO_COUNTRY" ]]; then
      IPINFO_LOCATION="$IPINFO_COUNTRY"
 fi
 
-# 主流程第 7 步：构造请求体
+# Step 7: Construct request body
 PAYLOAD=$(jq -n \
      --arg type "$RECORD_TYPE" \
      --arg name "$DOMAIN" \
      --arg content "$IP" \
      --argjson ttl "$TTL" \
-     '{type:$type,name:$name,content:$content,ttl:$ttl,proxied:false}')
+     --arg comment "${COMMENT:-}" \
+     '{type:$type,name:$name,content:$content,ttl:$ttl,proxied:false} | if $comment != "" then .comment = $comment else . end')
 
 if [[ -n "$RECORD_ID" ]]; then
-     # 主流程第 8 步：记录存在则更新
+     # Step 8: Update if record exists
      echo "$(date +'%F %T') update: ${DNS_IP:-unknown} -> $IP"
      echo "$(date +'%F %T') ip info: org=$IPINFO_ORG location=$IPINFO_LOCATION"
      RESP=$(cf_api PUT "/zones/$ZONE_ID/dns_records/$RECORD_ID" "$PAYLOAD")
@@ -220,7 +225,7 @@ if [[ -n "$RECORD_ID" ]]; then
           exit 1
      fi
 else
-     # 主流程第 8 步：记录不存在则创建
+     # Step 8: Create if record does not exist
      echo "$(date +'%F %T') create: $RECORD_TYPE $DOMAIN -> $IP"
      echo "$(date +'%F %T') ipinfo: org=$IPINFO_ORG location=$IPINFO_LOCATION"
      RESP=$(cf_api POST "/zones/$ZONE_ID/dns_records" "$PAYLOAD")

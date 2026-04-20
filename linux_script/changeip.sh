@@ -6,6 +6,8 @@
 # CRON_TZ=Asia/Shanghai
 # 20 4 * * 0 /bin/bash /path/to/changeip.sh >> /var/log/changeip.log 2>&1
 
+# Ensure execution permission before use: chmod +x changeip.sh
+
 set -u
 
 HOST="ipapi.tcscloud.net"
