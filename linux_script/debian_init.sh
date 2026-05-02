@@ -555,6 +555,15 @@ EOF
     print_success "Eza aliases configured (ll, la, lt; ls kept native)"
 }
 
+configure_update_alias() {
+    cat > /etc/profile.d/update-alias.sh <<'EOF'
+# System-wide alias to update packages
+alias update='apt update && apt upgrade'
+EOF
+    chmod 644 /etc/profile.d/update-alias.sh
+    print_success "Update alias configured (update -> apt update && apt upgrade)"
+}
+
 configure_chrony() {
     print_section "${ICON_TIME} Time sync & timezone"
     # Choose NTP pool based on IP
@@ -1097,6 +1106,7 @@ main() {
     install_tools
     install_base_packages
     configure_eza_aliases
+    configure_update_alias
     configure_chrony
     auto_enable_zram_swap
     apply_swappiness_sysctl
