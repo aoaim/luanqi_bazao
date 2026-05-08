@@ -1,7 +1,7 @@
 #!/bin/bash
 # 不使用 set -e，以便在交互式菜单中优雅处理错误
 if [ "$EUID" -ne 0 ]; then
-    log_error "Please run this script with root privileges (sudo ./install_snell.sh)"
+    echo "Please run this script with root privileges (sudo ./install_snell.sh)" >&2
     exit 1
 fi
 
@@ -207,6 +207,11 @@ install_dependencies() {
             packages_to_install+=($pkg)
         fi
     done
+
+    # xz-utils is the package name, but the command is 'xz'
+    if ! command -v xz &> /dev/null; then
+        packages_to_install+=(xz-utils)
+    fi
     
     if [ ${#packages_to_install[@]} -gt 0 ]; then
         echo "Installing: ${packages_to_install[*]}"
@@ -252,10 +257,15 @@ download_and_install_snell() {
         systemctl stop snell.service
     fi
     
-    unzip -o snell-server.zip -d /usr/local/bin/
+    if ! unzip -o snell-server.zip -d /usr/local/bin/; then
+        log_error "Failed to extract snell-server.zip"
+        rm -f snell-server.zip
+        return 1
+    fi
+
     chmod +x /usr/local/bin/snell-server
     rm -f snell-server.zip
-    
+
     echo "Snell server v${version} (${arch}) installed successfully."
     return 0
 }
@@ -279,7 +289,7 @@ configure_snell() {
     read -p "Enter the listening port [default: ${default_port}]: " port
     port=${port:-${default_port}}
     
-    default_psk=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24)
+    default_psk=$(generate_password)
     
     read -p "Enter the password (psk) [default: ${default_psk}]: " psk
     psk=${psk:-${default_psk}}
@@ -329,7 +339,7 @@ configure_snell() {
                 stls_port=${stls_port:-${default_stls_port}}
                 
                 # 生成 Shadow-TLS 密码
-                default_stls_password=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24)
+                default_stls_password=$(generate_password)
                 read -p "Enter Shadow-TLS password [default: ${default_stls_password}]: " stls_password
                 stls_password=${stls_password:-${default_stls_password}}
                 
@@ -357,7 +367,7 @@ obfs = http
 host = ${host}
 EOF
         echo "Configuration file with obfs created."
-    elif [[ "$obfs_mode" == "shadowtls" ]]; then
+    else
         # Shadow-TLS 模式：Snell 先配置为 [::]，稍后会自动改为 127.0.0.1
         cat >/etc/snell/snell-server.conf <<EOF
 [snell-server]
@@ -366,16 +376,11 @@ psk = ${psk}
 ipv6 = true
 dns = ${dns_servers}
 EOF
-        echo "Configuration file created for Shadow-TLS mode."
-    else
-        cat >/etc/snell/snell-server.conf <<EOF
-[snell-server]
-listen = [::]:${port}
-psk = ${psk}
-ipv6 = true
-dns = ${dns_servers}
-EOF
-        echo "Configuration file created (no obfuscation)."
+        if [[ "$obfs_mode" == "shadowtls" ]]; then
+            echo "Configuration file created for Shadow-TLS mode."
+        else
+            echo "Configuration file created (no obfuscation)."
+        fi
     fi
     
     echo ""
@@ -936,13 +941,22 @@ download_and_install_ss() {
     
     # 解压并安装
     cd /tmp
-    tar -xf shadowsocks.tar.xz
-    mv ssserver /usr/local/bin/
+    if ! tar -xf shadowsocks.tar.xz; then
+        log_error "Failed to extract the downloaded archive. Is xz-utils installed?"
+        rm -f shadowsocks.tar.xz
+        return 1
+    fi
+
+    if ! mv ssserver /usr/local/bin/; then
+        log_error "Failed to move ssserver binary to /usr/local/bin/"
+        return 1
+    fi
+
     chmod +x /usr/local/bin/ssserver
-    
+
     # 清理
     rm -f shadowsocks.tar.xz sslocal ssmanager ssservice ssurl
-    
+
     echo "Shadowsocks-Rust v${version} installed successfully."
     return 0
 }
@@ -1012,7 +1026,7 @@ configure_ss() {
         ss_stls_port=${ss_stls_port:-${default_ss_stls_port}}
         
         # Shadow-TLS 密码
-        default_ss_stls_password=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24)
+        default_ss_stls_password=$(generate_password)
         read -p "Enter Shadow-TLS password [default: ${default_ss_stls_password}]: " ss_stls_password
         ss_stls_password=${ss_stls_password:-${default_ss_stls_password}}
         
@@ -1351,7 +1365,7 @@ change_ss_shadowtls_password() {
     local current_password=$(echo "$config" | cut -d'|' -f2)
     echo "Current Shadow-TLS password: ${current_password}"
     
-    local default_new_password=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24)
+    local default_new_password=$(generate_password)
     
     read -p "Enter new password [default: ${default_new_password}]: " new_password
     new_password=${new_password:-${default_new_password}}
@@ -1455,7 +1469,7 @@ manage_ss_obfuscation() {
                     
                     # 生成默认参数
                     local default_stls_port=$(generate_safe_port)
-                    local default_stls_password=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24)
+                    local default_stls_password=$(generate_password)
                     
                     read -p "Shadow-TLS port [default: ${default_stls_port}]: " stls_port
                     stls_port=${stls_port:-$default_stls_port}
@@ -1669,7 +1683,7 @@ change_password() {
     local current_psk=$(grep -oP 'psk = \K.+' /etc/snell/snell-server.conf)
     echo "Current PSK: ${current_psk}"
     
-    local default_new_psk=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24)
+    local default_new_psk=$(generate_password)
     
     read -p "Enter new password [default: ${default_new_psk}]: " new_psk
     new_psk=${new_psk:-${default_new_psk}}
@@ -1846,7 +1860,7 @@ switch_obfuscation_mode() {
             
             local snell_port=$(grep -oP 'listen = [^:]+:\K[0-9]+' /etc/snell/snell-server.conf)
             local stls_port=$(generate_safe_port)
-            local stls_password=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24)
+            local stls_password=$(generate_password)
             
             echo ""
             read -p "Shadow-TLS port [default: ${stls_port}]: " input_port
