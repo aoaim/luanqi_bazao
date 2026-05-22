@@ -37,8 +37,20 @@ check_os() {
 # Install Dependencies
 install_deps() {
     echo -e "${GREEN}Installing dependencies...${PLAIN}"
+    local missing=()
+    for cmd in wget tar jq systemctl; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            missing+=("$cmd")
+        fi
+    done
+
+    if [[ ${#missing[@]} -eq 0 ]]; then
+        echo -e "${GREEN}Dependencies already installed.${PLAIN}"
+        return
+    fi
+
     apt-get update
-    apt-get install -y wget tar systemd jq
+    apt-get install -y "${missing[@]}"
 }
 
 # Get Latest Version
@@ -51,19 +63,18 @@ get_latest_version() {
     echo "$latest_version"
 }
 
-# Install Realm
-install_realm() {
-    check_root
-    check_os
-    install_deps
-
-    local version
+# Resolve Latest Version
+get_target_version() {
     if [[ -n "$LATEST_VERSION" ]]; then
-        version="$LATEST_VERSION"
+        echo "$LATEST_VERSION"
     else
-        version=$(get_latest_version)
+        get_latest_version
     fi
-    echo -e "${GREEN}Latest version: ${version}${PLAIN}"
+}
+
+# Download and Install Realm Binary
+download_and_install_realm() {
+    local version="$1"
 
     echo -e "${GREEN}Downloading Realm...${PLAIN}"
     wget -O realm.tar.gz "https://github.com/zhboner/realm/releases/download/${version}/realm-x86_64-unknown-linux-gnu.tar.gz"
@@ -79,11 +90,33 @@ install_realm() {
     chmod +x realm
     mv realm "$REALM_BIN"
     rm -f realm.tar.gz
+}
+
+# Install Realm
+install_realm() {
+    check_root
+    check_os
+    install_deps
+
+    local version
+    version=$(get_target_version)
+    echo -e "${GREEN}Latest version: ${version}${PLAIN}"
+
+    download_and_install_realm "$version"
 
     echo -e "${GREEN}Realm installed successfully to ${REALM_BIN}${PLAIN}"
-    
+
     configure_service
     init_config
+}
+
+# Install or Update Realm
+install_or_update_realm() {
+    if [[ -f "$REALM_BIN" ]]; then
+        update_realm
+    else
+        install_realm
+    fi
 }
 
 # Initial Config
@@ -91,7 +124,7 @@ init_config() {
     if [[ ! -d "$REALM_CONF_DIR" ]]; then
         mkdir -p "$REALM_CONF_DIR"
     fi
-    
+
     if [[ ! -f "$REALM_CONF" ]]; then
         cat > "$REALM_CONF" <<EOF
 [log]
@@ -130,32 +163,33 @@ WantedBy=multi-user.target
 EOF
 
     systemctl daemon-reload
-    systemctl enable realm
-    echo -e "${GREEN}Service enabled and started.${PLAIN}"
+    systemctl enable --now realm
+    if systemctl is-active --quiet realm; then
+        echo -e "${GREEN}Service enabled and started.${PLAIN}"
+    else
+        echo -e "${RED}Service failed to start. Check: systemctl status realm${PLAIN}"
+    fi
 }
 
 # Update Realm
 update_realm() {
     check_root
     check_os
+    install_deps
     local current_version
     if [[ -f "$REALM_BIN" ]]; then
         current_version=$($REALM_BIN --version | awk '{print $2}')
     else
         current_version="None"
     fi
-    
+
     local latest_version
-    if [[ -n "$LATEST_VERSION" ]]; then
-        latest_version="$LATEST_VERSION"
-    else
-        latest_version=$(get_latest_version)
-    fi
-    
+    latest_version=$(get_target_version)
+
     echo -e "${GREEN}Current version: ${current_version}${PLAIN}"
     echo -e "${GREEN}Latest version: ${latest_version}${PLAIN}"
-    
-    
+
+
     # Normalize versions (remove 'v' prefix)
     local current_v_norm="${current_version#v}"
     local latest_v_norm="${latest_version#v}"
@@ -164,7 +198,11 @@ update_realm() {
         echo -e "${GREEN}Realm is already up to date.${PLAIN}"
     else
         echo -e "${YELLOW}New version available. Updating...${PLAIN}"
-        install_realm
+        download_and_install_realm "$latest_version"
+        echo -e "${GREEN}Realm updated successfully to ${REALM_BIN}${PLAIN}"
+        if systemctl is-active --quiet realm; then
+            restart_service
+        fi
     fi
 }
 
@@ -176,7 +214,7 @@ uninstall_realm() {
     systemctl disable realm
     rm -f "$SERVICE_FILE"
     systemctl daemon-reload
-    
+
     rm -f "$REALM_BIN"
     # Optional: remove config dir? User might want to keep it.
     # checking if user wants to remove config
@@ -197,6 +235,9 @@ show_status() { systemctl status realm; }
 
 # Configuration Management
 add_rule() {
+    if [[ ! -f "$REALM_CONF" ]]; then
+        init_config
+    fi
     echo -e "${GREEN}Adding a new forwarding rule...${PLAIN}"
     echo -e "Format: ${YELLOW}LocalPort:RemoteIP:RemotePort${PLAIN} (e.g., 5000:1.2.3.4:443)"
     echo -e "Or press Enter to input step by step."
@@ -258,16 +299,31 @@ get_ip_country() {
     fi
 }
 
+fetch_ip_info() {
+    local ip_url=$1
+    local ip
+    ip=$(wget -qO- -t1 -T2 "$ip_url")
+
+    if [[ -n "$ip" ]]; then
+        local country
+        country=$(wget -qO- -t1 -T2 "http://ip-api.com/json/$ip?fields=country" | jq -r .country)
+        [[ "$country" == "null" || -z "$country" ]] && country="Unknown"
+        echo "$ip|$country"
+    else
+        echo "Not Assigned|"
+    fi
+}
+
 list_rules() {
     echo -e "${GREEN}Current Forwarding Rules:${PLAIN}"
     if [[ ! -f "$REALM_CONF" ]]; then
         echo -e "${RED}Config file not found!${PLAIN}"
         return
     fi
-    
+
     local i=1
     local listening remote_addr remote_port
-    
+
     while read -r line; do
         if [[ "$line" == "LISTEN"* ]]; then
             listening="${line#LISTEN }"
@@ -277,9 +333,9 @@ list_rules() {
              remote_val="${line#REMOTE }"
              remote_addr="${remote_val%:*}"
              remote_port="${remote_val##*:}"
-             
+
              country=$(get_ip_country "$remote_addr")
-             
+
              echo -e "${GREEN}$i.${PLAIN} $listening -> $remote_addr:$remote_port ${YELLOW}$country${PLAIN}"
              ((i++))
         fi
@@ -303,11 +359,11 @@ delete_rule() {
         echo -e "${GREEN}Cancelled.${PLAIN}"
         return
     fi
-    
+
     # Check if rule exists
     local total_rules
     total_rules=$(grep -c "\[\[endpoints\]\]" "$REALM_CONF")
-    
+
     if [[ "$rule_num" -lt 1 || "$rule_num" -gt "$total_rules" ]]; then
         echo -e "${RED}Rule number out of range.${PLAIN}"
         return
@@ -316,7 +372,7 @@ delete_rule() {
 
     # Create a temp file
     local tmp_conf=$(mktemp)
-    
+
     # Use awk to write back all rules EXCEPT the selected one
     awk -v target="$rule_num" '
     BEGIN {count=0; inside=0}
@@ -332,7 +388,7 @@ delete_rule() {
 
     # Move temp file back
     mv "$tmp_conf" "$REALM_CONF"
-    
+
     echo -e "${GREEN}Rule $rule_num deleted.${PLAIN}"
     restart_service
 }
@@ -385,40 +441,38 @@ show_menu() {
     echo -e "IPv4: ${GREEN}${LOCAL_IPV4}${PLAIN} [${YELLOW}${LOCAL_IPV4_COUNTRY}${PLAIN}]"
     echo -e "IPv6: ${GREEN}${LOCAL_IPV6}${PLAIN} [${YELLOW}${LOCAL_IPV6_COUNTRY}${PLAIN}]"
     echo -e "--------------------------------"
-    echo -e "${GREEN}1.${PLAIN} Install Realm"
-    echo -e "${GREEN}2.${PLAIN} Update Realm"
-    echo -e "${GREEN}3.${PLAIN} Uninstall Realm"
-    echo -e "${GREEN}4.${PLAIN} Start/Restart Service"
-    echo -e "${GREEN}5.${PLAIN} Stop Service"
-    echo -e "${GREEN}6.${PLAIN} Add Forwarding Rule"
-    echo -e "${GREEN}7.${PLAIN} Delete Forwarding Rule"
-    echo -e "${GREEN}8.${PLAIN} Show Forwarding Rules"
-    echo -e "${GREEN}9.${PLAIN} Show Raw Config File"
+    echo -e "${GREEN}1.${PLAIN} Install/Update Realm"
+    echo -e "${GREEN}2.${PLAIN} Uninstall Realm"
+    echo -e "${GREEN}3.${PLAIN} Start/Restart Service"
+    echo -e "${GREEN}4.${PLAIN} Stop Service"
+    echo -e "${GREEN}5.${PLAIN} Add Forwarding Rule"
+    echo -e "${GREEN}6.${PLAIN} Delete Forwarding Rule"
+    echo -e "${GREEN}7.${PLAIN} Show Forwarding Rules"
+    echo -e "${GREEN}8.${PLAIN} Show Raw Config File"
     echo -e "--------------------------------"
     echo -e "${GREEN}0.${PLAIN} Exit"
     echo -e ""
     read -p "Please enter your choice [0-9]: " choice
 
     case "$choice" in
-        1) install_realm ;;
-        2) update_realm ;;
-        3) uninstall_realm ;;
-        4) 
+        1) install_or_update_realm ;;
+        2) uninstall_realm ;;
+        3)
             if systemctl is-active --quiet realm; then
                 restart_service
             else
                 start_service
             fi
             ;;
-        5) stop_service ;;
-        6) add_rule ;;
-        7) delete_rule ;;
-        8) list_rules ;;
-        9) show_config ;;
+        4) stop_service ;;
+        5) add_rule ;;
+        6) delete_rule ;;
+        7) list_rules ;;
+        8) show_config ;;
         0) exit 0 ;;
         *) echo -e "${RED}Invalid choice.${PLAIN}" ;;
     esac
-    
+
     echo ""
     read -p "Press Enter to continue..."
     show_menu
@@ -427,7 +481,7 @@ show_menu() {
 # Entry point
 if [[ $# -gt 0 ]]; then
     case "$1" in
-        install) install_realm ;;
+        install) install_or_update_realm ;;
         update) update_realm ;;
         uninstall) uninstall_realm ;;
         start) start_service ;;
@@ -442,23 +496,8 @@ else
     LATEST_VERSION=$(get_latest_version)
 
     # Fetch IP/Location info
-    LOCAL_IPV4=$(wget -qO- -t1 -T2 ipv4.icanhazip.com)
-    if [[ -n "$LOCAL_IPV4" ]]; then
-        LOCAL_IPV4_COUNTRY=$(wget -qO- -t1 -T2 "http://ip-api.com/json/$LOCAL_IPV4?fields=country" | jq -r .country)
-        [[ "$LOCAL_IPV4_COUNTRY" == "null" || -z "$LOCAL_IPV4_COUNTRY" ]] && LOCAL_IPV4_COUNTRY="Unknown"
-    else
-        LOCAL_IPV4="Not Assigned"
-        LOCAL_IPV4_COUNTRY=""
-    fi
-
-    LOCAL_IPV6=$(wget -qO- -t1 -T2 ipv6.icanhazip.com)
-    if [[ -n "$LOCAL_IPV6" ]]; then
-        LOCAL_IPV6_COUNTRY=$(wget -qO- -t1 -T2 "http://ip-api.com/json/$LOCAL_IPV6?fields=country" | jq -r .country)
-        [[ "$LOCAL_IPV6_COUNTRY" == "null" || -z "$LOCAL_IPV6_COUNTRY" ]] && LOCAL_IPV6_COUNTRY="Unknown"
-    else
-        LOCAL_IPV6="Not Assigned"
-        LOCAL_IPV6_COUNTRY=""
-    fi
+    IFS='|' read -r LOCAL_IPV4 LOCAL_IPV4_COUNTRY <<< "$(fetch_ip_info ipv4.icanhazip.com)"
+    IFS='|' read -r LOCAL_IPV6 LOCAL_IPV6_COUNTRY <<< "$(fetch_ip_info ipv6.icanhazip.com)"
 
     show_menu
 fi
