@@ -2,13 +2,12 @@
 ## 包括 Apple API 和在中国大陆无 CDN 的 Apple 服务
 ## 参见 https://github.com/geekdada/surge-list/blob/master/surgio-snippet/apple.tpl
 ## 相关域名作用说明 https://support.apple.com/zh-cn/101555
-## 最后更新 2026-02-18
+## 最后更新 2026-06-05
 ## Surge
 
 #
 # 一些 com.apple.appstored* 会连接的 API（优先级高）
 #
-DOMAIN,guzzoni.apple.com
 DOMAIN,apps.apple.com
 DOMAIN,xp.apple.com
 DOMAIN,bag.itunes.apple.com
@@ -27,26 +26,7 @@ DOMAIN-SUFFIX,itunes-apple.com.akadns.net
 # Apple Intelligence
 #
 DOMAIN,apple-relay.apple.com
-
-#
-# Apple Non-China CDN
-#
-# iTunes
-DOMAIN-SUFFIX,hls.itunes.apple.com
-DOMAIN-SUFFIX,hls-amt.itunes.apple.com
-DOMAIN-SUFFIX,audio-ssl.itunes.apple.com
-DOMAIN-SUFFIX,cdn-apple.com
-DOMAIN,cdn.apple-cloudkit.com
-# Developer
-DOMAIN,devimages-cdn.apple.com
-DOMAIN,devstreaming-cdn.apple.com
-DOMAIN,js-cdn.music.apple.com
-DOMAIN,docs-assets.developer.apple.com
-# Other
-DOMAIN-SUFFIX,apple-dns.net
-# OCSP
-DOMAIN-SUFFIX,ocsp.apple.com
-USER-AGENT,com.apple.trustd*
+DOMAIN,guzzoni.apple.com
 
 #
 # Apple News
