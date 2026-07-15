@@ -28,10 +28,10 @@ esac
 # 基础参数 (- 开头)
 BASE_OPTS="$OS"
 
-# Hostname
+# Hostname (avoid using bash builtin "HOSTNAME")
 echo ""
-read -rp "Set hostname? (enter to skip): " HOSTNAME
-[[ -n "$HOSTNAME" ]] && BASE_OPTS="$BASE_OPTS -hostname $HOSTNAME"
+read -rp "Set hostname? (enter to skip): " NEW_HOSTNAME
+[[ -n "$NEW_HOSTNAME" ]] && BASE_OPTS="$BASE_OPTS -hostname $NEW_HOSTNAME"
 
 # SSH Port
 read -rp "SSH port? (default 22): " PORT
@@ -80,22 +80,15 @@ FULL_CMD="bash InstallNET.sh $BASE_OPTS$EXTRA_OPTS"
 
 echo ""
 echo "OS: $NAME"
-[[ -n "$HOSTNAME" ]] && echo "Hostname: $HOSTNAME"
+[[ -n "$NEW_HOSTNAME" ]] && echo "Hostname: $NEW_HOSTNAME"
 echo "SSH Port: $PORT"
 [[ "$CK" == "y" || "$CK" == "Y" ]] && echo "Cloud kernel: enabled"
 [[ "$BBR" == "y" || "$BBR" == "Y" ]] && echo "BBR: enabled"
-[[ "$SETDNS" == "y" || "$SETDNS" == "Y" ]] && echo "Set DNS: enabled (run resolvconf after install)"
+[[ "$SETDNS" == "y" || "$SETDNS" == "Y" ]] && echo "Set DNS: enabled (auto-applied)"
 [[ "$F2B" == "y" || "$F2B" == "Y" ]] && echo "Fail2ban: enabled"
 echo -e "Password: \033[32m$PASSWORD\033[0m"
 echo ""
 echo "Command: $FULL_CMD"
-
-# DNS 提示（确认前显示）
-if [[ "$SETDNS" == "y" || "$SETDNS" == "Y" ]]; then
-    echo ""
-    echo -e "\033[33m[NOTE] To activate DNS, run after install:\033[0m"
-    echo 'echo "O" | apt install resolvconf -y && reboot'
-fi
 
 echo ""
 read -rp "Confirm reinstall? (yes): " c
