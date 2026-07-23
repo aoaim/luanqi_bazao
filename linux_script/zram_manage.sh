@@ -195,6 +195,14 @@ EOF
         retries=$((retries - 1))
     done
 
+    # Set swappiness high for zram (compressed-in-RAM swap benefits from aggressive use)
+    cat > /etc/sysctl.d/99-zram-swappiness.conf <<EOF
+# ZRAM swap: compressed in RAM, set high swappiness to actively use it
+vm.swappiness = 100
+EOF
+    sysctl --system >/dev/null 2>&1 || true
+    print_info "swappiness set to 100 (zram-optimized)"
+
     if grep -q "^/dev/zram" /proc/swaps 2>/dev/null; then
         # 核对实际 size/algo，避免 swapoff 失败导致旧配置仍在跑却报假成功
         local actual_kb actual_algo
@@ -292,10 +300,10 @@ remove_zram() {
         apt-get remove -y -qq --purge zram-tools 2>/dev/null || true
     fi
     rm -f /etc/default/zramswap
-    if [ -f /etc/sysctl.d/99-swappiness.conf ]; then
-        rm -f /etc/sysctl.d/99-swappiness.conf  # cleanup old swappiness config from init script
+    if [ -f /etc/sysctl.d/99-zram-swappiness.conf ]; then
+        rm -f /etc/sysctl.d/99-zram-swappiness.conf
         sysctl --system >/dev/null 2>&1 || true
-        print_info "swappiness config removed and sysctl reloaded"
+        print_info "zram swappiness config removed (vm.swappiness restored to kernel default 60)"
     fi
 
     print_ok "ZRAM removed"
