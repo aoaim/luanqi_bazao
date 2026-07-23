@@ -162,93 +162,37 @@ PrintResult() {
     printf "  %-24s %b\n" "$name" "$result"
 }
 
-# Extract Google geo region from batchexecute response (1-stream style)
-# Response embeds something like: [["US","S...  after jq .[0][2]
-_google_region_from_batchexecute() {
-    local body="$1"
-    local region_raw
-    region_raw=$(echo "$body" | grep 'K4WWud' | jq '.[0][2] // empty' 2>/dev/null | grep -Eo '\[\[\\"[A-Z]{2}\\",\\"S' | head -1)
-    if [ -n "$region_raw" ]; then
-        # region_raw looks like: [["US","S  -> slice off leading [[" and trailing ","S
-        echo "${region_raw:4:2}"
-        return 0
-    fi
-    # Fallback without jq: match escaped JSON in raw body
-    region_raw=$(echo "$body" | grep -oE '\[\[\\"[A-Z]{2}\\",\\"S' | head -1)
-    if [ -n "$region_raw" ]; then
-        echo "${region_raw:4:2}"
-        return 0
-    fi
-    return 1
-}
-
-# Check Google Search / account location via Bard batchexecute (1-stream)
+# Check Google Search location via Bard batchexecute (1-stream)
 function Test_Google() {
     local tmp=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 \
         'https://bard.google.com/_/BardChatUi/data/batchexecute' \
         -H 'accept-language: en-US' \
         --data-raw 'f.req=[[["K4WWud","[[0],[\"en-US\"]]",null,"generic"]]]' 2>&1)
-    if [[ -z "$tmp" ]] || [[ "$tmp" == "curl"* ]]; then
-        # bard may redirect/block; retry gemini endpoint
-        tmp=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 \
-            'https://gemini.google.com/_/BardChatUi/data/batchexecute' \
-            -H 'accept-language: en-US' \
-            --data-raw 'f.req=[[["K4WWud","[[0],[\"en-US\"]]",null,"generic"]]]' 2>&1)
-    fi
-    if [[ -z "$tmp" ]] || [[ "$tmp" == "curl"* ]]; then
+    if [[ "$tmp" == "curl"* ]]; then
         PrintResult "Google Search:" "${Font_Red}Failed (Network Connection)${Font_Suffix}"
         return
     fi
-
-    local region
-    region=$(_google_region_from_batchexecute "$tmp")
+    local region=$(echo "$tmp" | grep 'K4WWud' | jq '.[0][2]' 2>/dev/null | grep -Eo '\[\[\\"(.*)\\",\\"S' )
     if [ -n "$region" ]; then
-        PrintResult "Google Search:" "${Font_Green}Yes (Region: $region)${Font_Suffix}"
+        PrintResult "Google Search:" "${Font_Green}Yes (Region: ${region:4:-6})${Font_Suffix}"
     else
         PrintResult "Google Search:" "${Font_Red}Failed${Font_Suffix}"
     fi
 }
 
-# Check Google Gemini availability + region
-# Availability: page marker (lmc999); Region: batchexecute (1-stream)
+# Check Google Gemini location via batchexecute (1-stream)
 function Test_Gemini() {
-    local page=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sL --max-time 10 \
-        'https://gemini.google.com' 2>&1)
-    if [[ -z "$page" ]] || [[ "$page" == "curl"* ]]; then
+    local tmp=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 \
+        'https://gemini.google.com/_/BardChatUi/data/batchexecute' \
+        -H 'accept-language: en-US' \
+        --data-raw 'f.req=[[["K4WWud","[[0],[\"en-US\"]]",null,"generic"]]]' 2>&1)
+    if [[ "$tmp" == "curl"* ]]; then
         PrintResult "Google Gemini:" "${Font_Red}Failed (Network Connection)${Font_Suffix}"
         return
     fi
-
-    local available=""
-    if echo "$page" | grep -q '45631641,null,true'; then
-        available="yes"
-    fi
-
-    # Prefer region from page (3-letter) then batchexecute (2-letter)
-    local region
-    region=$(echo "$page" | grep -oE ',2,1,200,"[A-Z]{3}"' | head -1 | sed 's/,2,1,200,"//;s/"//')
-    if [ -z "$region" ]; then
-        local tmp=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 \
-            'https://gemini.google.com/_/BardChatUi/data/batchexecute' \
-            -H 'accept-language: en-US' \
-            --data-raw 'f.req=[[["K4WWud","[[0],[\"en-US\"]]",null,"generic"]]]' 2>&1)
-        if [[ -n "$tmp" ]] && [[ "$tmp" != "curl"* ]]; then
-            region=$(_google_region_from_batchexecute "$tmp")
-        fi
-    fi
-
-    if [ -n "$available" ]; then
-        if [ -n "$region" ]; then
-            PrintResult "Google Gemini:" "${Font_Green}Yes (Region: $region)${Font_Suffix}"
-        else
-            PrintResult "Google Gemini:" "${Font_Green}Yes${Font_Suffix}"
-        fi
-        return
-    fi
-
-    # No availability marker: still report region if we got one (location-only)
+    local region=$(echo "$tmp" | grep 'K4WWud' | jq '.[0][2]' 2>/dev/null | grep -Eo '\[\[\\"(.*)\\",\\"S' )
     if [ -n "$region" ]; then
-        PrintResult "Google Gemini:" "${Font_Yellow}Location Only (Region: $region)${Font_Suffix}"
+        PrintResult "Google Gemini:" "${Font_Green}Yes (Region: ${region:4:-6})${Font_Suffix}"
     else
         PrintResult "Google Gemini:" "${Font_Red}No${Font_Suffix}"
     fi
@@ -555,13 +499,15 @@ function Run_All_Tests() {
 
     # Tally results from collected output
     local total=0 yes=0 no=0 failed=0
+    local GREEN=$'\033[32m'
+    local RED=$'\033[31m'
     for f in "$tmp_dir"/*; do
         [ -s "$f" ] || continue
         total=$((total+1))
         local line=$(cat "$f")
-        if [[ "$line" == *"${Font_Green}"* ]]; then
+        if [[ "$line" == *"${GREEN}"* ]]; then
             yes=$((yes+1))
-        elif [[ "$line" == *"${Font_Red}"* ]]; then
+        elif [[ "$line" == *"${RED}"* ]]; then
             if [[ "$line" == *"Failed"* ]]; then
                 failed=$((failed+1))
             else
