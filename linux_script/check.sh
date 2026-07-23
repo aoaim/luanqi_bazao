@@ -198,16 +198,17 @@ function Test_Gemini() {
     fi
 }
 
-# Check ChatGPT availability and blocked ISP traces
+# Check ChatGPT availability and blocked ISP traces (1-stream)
 function Test_ChatGPT() {
     local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsLI --max-time 10 "https://chatgpt.com" 2>&1)
-    local tmpresult1=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 "https://chatgpt.com" 2>&1)
+    local tmpresult1=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 "https://ios.chat.openai.com" 2>&1)
+    local cf_details=$(echo "$tmpresult1" | jq '.cf_details' 2>/dev/null)
     if [[ "$tmpresult" == "curl"* ]]; then
         PrintResult "ChatGPT:" "${Font_Red}Failed (Network Connection)${Font_Suffix}"
         return
     fi
 
-    local result1=$(echo "$tmpresult" | grep -i '^location:' )
+    local result1=$(echo "$tmpresult" | grep 'location' )
     if [ ! -n "$result1" ]; then
         if [[ "$tmpresult1" == *"blocked_why_headline"* ]]; then
             PrintResult "ChatGPT:" "${Font_Red}No (Blocked)${Font_Suffix}"
@@ -220,27 +221,27 @@ function Test_ChatGPT() {
         PrintResult "ChatGPT:" "${Font_Red}No${Font_Suffix}"
     else
         local region1=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 "https://chatgpt.com/cdn-cgi/trace" 2>&1 | grep "loc=" | awk -F= '{print $2}')
+        if [[ "$cf_details" == *"(1)"* ]]; then
+            PrintResult "ChatGPT:" "${Font_Yellow}Web Only (Disallowed ISP[1])${Font_Suffix}"
+            return
+        fi
+        if [[ "$cf_details" == *"(2)"* ]]; then
+            PrintResult "ChatGPT:" "${Font_Yellow}Web Only (Disallowed ISP[2])${Font_Suffix}"
+            return
+        fi
         PrintResult "ChatGPT:" "${Font_Green}Yes (Region: ${region1})${Font_Suffix}"
     fi
 }
 
-# Check Claude.ai availability by probing HTTP response codes
+# Check Claude.ai availability (1-stream)
 function Test_Claude(){
-    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -s -o /dev/null -L --max-time 10 -w '%{url_effective}|%{http_code}' "https://claude.ai/" 2>&1)
-    if [[ "$tmpresult" == "curl"* ]] || [[ -z "$tmpresult" ]]; then
-        PrintResult "Anthropic Claude:" "${Font_Red}Failed (Network Connection)${Font_Suffix}"
-        return
-    fi
+    local result=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -s -o /dev/null -L --max-time 10 -w '%{url_effective}%{http_code}\n' "https://claude.ai/" 2>&1 | grep -E 'unavailable|000')
 
-    local url_effective=$(echo "$tmpresult" | cut -d'|' -f1)
-    local http_code=$(echo "$tmpresult" | cut -d'|' -f2)
-
-    if [[ "$url_effective" == *unavailable* ]] || [[ "$http_code" == "000" ]] || [[ "$http_code" == "403" ]]; then
+    if [ -n "$result" ]; then
         PrintResult "Anthropic Claude:" "${Font_Red}No${Font_Suffix}"
-        return
+    else
+        PrintResult "Anthropic Claude:" "${Font_Green}Yes${Font_Suffix}"
     fi
-    PrintResult "Anthropic Claude:" "${Font_Green}Yes${Font_Suffix}"
-    return
 }
 
 # Check Netflix availability for full catalog or originals only
