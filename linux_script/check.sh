@@ -141,7 +141,11 @@ checkDependencies
 
 # Fetch required payload templates (cookies) for Disney+ tests
 # NOTE: must run in foreground; backgrounding inside $() always yields empty string
-Media_Cookie=$(curl -s --retry 3 --max-time 10 "https://raw.githubusercontent.com/1-stream/RegionRestrictionCheck/main/cookies")
+# Prefer lmc999 upstream (same as RegionRestrictionCheck); fall back to 1-stream mirror
+Media_Cookie=$(curl -s --retry 3 --max-time 10 "https://raw.githubusercontent.com/lmc999/RegionRestrictionCheck/main/cookies")
+if [ -z "$Media_Cookie" ]; then
+    Media_Cookie=$(curl -s --retry 3 --max-time 10 "https://raw.githubusercontent.com/1-stream/RegionRestrictionCheck/main/cookies")
+fi
 if [ -z "$Media_Cookie" ]; then
     echo -e "${Font_Yellow}Warning: Failed to fetch Disney+ cookie template; Disney+ test may fail.${Font_Suffix}"
 fi
@@ -158,15 +162,46 @@ PrintResult() {
     printf "  %-24s %b\n" "$name" "$result"
 }
 
-# Check Google Search location via Gemini batchexecute endpoint
+# Extract Google geo region from batchexecute response (1-stream style)
+# Response embeds something like: [["US","S...  after jq .[0][2]
+_google_region_from_batchexecute() {
+    local body="$1"
+    local region_raw
+    region_raw=$(echo "$body" | grep 'K4WWud' | jq -r '.[0][2] // empty' 2>/dev/null | grep -Eo '\[\[\\"[A-Z]{2}\\",\\"S' | head -1)
+    if [ -n "$region_raw" ]; then
+        # region_raw looks like: [["US","S  -> slice off leading [[" and trailing ","S
+        echo "${region_raw:4:2}"
+        return 0
+    fi
+    # Fallback without jq: match escaped JSON in raw body
+    region_raw=$(echo "$body" | grep -oE '\[\[\\"[A-Z]{2}\\",\\"S' | head -1)
+    if [ -n "$region_raw" ]; then
+        echo "${region_raw:4:2}"
+        return 0
+    fi
+    return 1
+}
+
+# Check Google Search / account location via Bard batchexecute (1-stream)
 function Test_Google() {
-    local tmp=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 'https://gemini.google.com/_/BardChatUi/data/batchexecute' -H 'accept-language: en-US' --data-raw 'f.req=[[["K4WWud","[[0],[\"en-US\"]]",null,"generic"]]]' 2>&1)
-    if [[ "$tmp" == "curl"* ]]; then
+    local tmp=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 \
+        'https://bard.google.com/_/BardChatUi/data/batchexecute' \
+        -H 'accept-language: en-US' \
+        --data-raw 'f.req=[[["K4WWud","[[0],[\"en-US\"]]",null,"generic"]]]' 2>&1)
+    if [[ -z "$tmp" ]] || [[ "$tmp" == "curl"* ]]; then
+        # bard may redirect/block; retry gemini endpoint
+        tmp=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 \
+            'https://gemini.google.com/_/BardChatUi/data/batchexecute' \
+            -H 'accept-language: en-US' \
+            --data-raw 'f.req=[[["K4WWud","[[0],[\"en-US\"]]",null,"generic"]]]' 2>&1)
+    fi
+    if [[ -z "$tmp" ]] || [[ "$tmp" == "curl"* ]]; then
         PrintResult "Google Search:" "${Font_Red}Failed (Network Connection)${Font_Suffix}"
         return
     fi
-    # Extract region code robustly: find [[\"XX\",\"S pattern
-    local region=$(echo "$tmp" | grep -o '\[\[\\"[A-Z][A-Z]\\",\\"S' | head -1 | sed 's/\[\[\\"//; s/\\".*//')
+
+    local region
+    region=$(_google_region_from_batchexecute "$tmp")
     if [ -n "$region" ]; then
         PrintResult "Google Search:" "${Font_Green}Yes (Region: $region)${Font_Suffix}"
     else
@@ -174,18 +209,48 @@ function Test_Google() {
     fi
 }
 
-# Check Google Gemini location via Gemini endpoint
+# Check Google Gemini availability + region
+# Availability: page marker (lmc999); Region: batchexecute (1-stream)
 function Test_Gemini() {
-    local tmp=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 'https://gemini.google.com/_/BardChatUi/data/batchexecute' -H 'accept-language: en-US' --data-raw 'f.req=[[["K4WWud","[[0],[\"en-US\"]]",null,"generic"]]]' 2>&1)
-    if [[ "$tmp" == "curl"* ]]; then
+    local page=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sL --max-time 10 \
+        'https://gemini.google.com' 2>&1)
+    if [[ -z "$page" ]] || [[ "$page" == "curl"* ]]; then
         PrintResult "Google Gemini:" "${Font_Red}Failed (Network Connection)${Font_Suffix}"
         return
     fi
-    local region=$(echo "$tmp" | grep -o '\[\[\\"[A-Z][A-Z]\\",\\"S' | head -1 | sed 's/\[\[\\"//; s/\\".*//')
+
+    local available=""
+    if echo "$page" | grep -q '45631641,null,true'; then
+        available="yes"
+    fi
+
+    # Prefer region from page (3-letter) then batchexecute (2-letter)
+    local region
+    region=$(echo "$page" | grep -oE ',2,1,200,"[A-Z]{3}"' | head -1 | sed 's/,2,1,200,"//;s/"//')
+    if [ -z "$region" ]; then
+        local tmp=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 \
+            'https://gemini.google.com/_/BardChatUi/data/batchexecute' \
+            -H 'accept-language: en-US' \
+            --data-raw 'f.req=[[["K4WWud","[[0],[\"en-US\"]]",null,"generic"]]]' 2>&1)
+        if [[ -n "$tmp" ]] && [[ "$tmp" != "curl"* ]]; then
+            region=$(_google_region_from_batchexecute "$tmp")
+        fi
+    fi
+
+    if [ -n "$available" ]; then
+        if [ -n "$region" ]; then
+            PrintResult "Google Gemini:" "${Font_Green}Yes (Region: $region)${Font_Suffix}"
+        else
+            PrintResult "Google Gemini:" "${Font_Green}Yes${Font_Suffix}"
+        fi
+        return
+    fi
+
+    # No availability marker: still report region if we got one (location-only)
     if [ -n "$region" ]; then
-        PrintResult "Google Gemini:" "${Font_Green}Yes (Region: $region)${Font_Suffix}"
+        PrintResult "Google Gemini:" "${Font_Yellow}Location Only (Region: $region)${Font_Suffix}"
     else
-        PrintResult "Google Gemini:" "${Font_Red}Failed${Font_Suffix}"
+        PrintResult "Google Gemini:" "${Font_Red}No${Font_Suffix}"
     fi
 }
 
@@ -236,24 +301,32 @@ function Test_Claude(){
 
 # Check Netflix availability for full catalog or originals only
 function Test_Netflix() {
-    local tmpresult1=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 --tlsv1.3 "https://www.netflix.com/title/81280792" 2>&1)
-    local tmpresult2=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 --tlsv1.3 "https://www.netflix.com/title/70143836" 2>&1)
-    if [[ "$tmpresult1" == "curl"* ]] || [[ "$tmpresult2" == "curl"* ]]; then
+    # 81280792 = LEGO Ninjago (non-original); 70143836 = Breaking Bad (licensed)
+    local tmpresult1=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sL --max-time 10 "https://www.netflix.com/title/81280792" 2>&1)
+    local tmpresult2=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sL --max-time 10 "https://www.netflix.com/title/70143836" 2>&1)
+    if [[ -z "$tmpresult1" ]] || [[ -z "$tmpresult2" ]] || [[ "$tmpresult1" == "curl"* ]] || [[ "$tmpresult2" == "curl"* ]]; then
         PrintResult "Netflix:" "${Font_Red}Failed (Network Connection)${Font_Suffix}"
         return
     fi
 
+    # "Oh no!" appears when the title is unavailable in the current region
     local result1=$(echo "${tmpresult1}" | grep 'Oh no!')
     local result2=$(echo "${tmpresult2}" | grep 'Oh no!')
 
+    # Both titles blocked => originals only (or fully blocked catalog)
     if [ -n "${result1}" ] && [ -n "${result2}" ]; then
         PrintResult "Netflix:" "${Font_Yellow}Originals Only${Font_Suffix}"
         return
     fi
 
+    # At least one title playable => unlocked; extract region from page JSON
     if [ -z "${result1}" ] || [ -z "${result2}" ]; then
         local region1=$(echo "$tmpresult1" | sed -n 's/.*"id":"\([^"]*\)".*"countryName":"[^"]*".*/\1/p' | head -n1)
-        PrintResult "Netflix:" "${Font_Green}Yes (Region: ${region1})${Font_Suffix}"
+        if [ -n "$region1" ]; then
+            PrintResult "Netflix:" "${Font_Green}Yes (Region: ${region1})${Font_Suffix}"
+        else
+            PrintResult "Netflix:" "${Font_Green}Yes${Font_Suffix}"
+        fi
         return
     fi
 
@@ -264,8 +337,14 @@ function Test_Netflix() {
 function Test_DisneyPlus() {
     # 1. Fetch pre-assertion payload
     local PreAssertion=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -s --max-time 10 -X POST "https://disney.api.edge.bamgrid.com/devices" -H "authorization: Bearer ZGlzbmV5JmJyb3dzZXImMS4wLjA.Cu56AgSfBTDag5NiRA81oLHkDZfu5L3CKadnefEAY84" -H "content-type: application/json; charset=UTF-8" -d '{"deviceFamily":"browser","applicationRuntime":"chrome","deviceProfile":"windows","attributes":{}}' 2>&1)
-    if [[ "$PreAssertion" == "curl"* ]]; then
+    if [[ -z "$PreAssertion" ]] || [[ "$PreAssertion" == "curl"* ]]; then
         PrintResult "Disney+:" "${Font_Red}Failed (Network Connection[1])${Font_Suffix}"
+        return
+    fi
+
+    local is403=$(echo "$PreAssertion" | grep -i '403 ERROR')
+    if [ -n "$is403" ]; then
+        PrintResult "Disney+:" "${Font_Red}No (Banned)${Font_Suffix}"
         return
     fi
 
@@ -282,13 +361,13 @@ function Test_DisneyPlus() {
     local PreDisneyCookie=$(echo "$Media_Cookie" | sed -n '1p')
     local disneycookie=$(echo "$PreDisneyCookie" | sed "s/DISNEYASSERTION/${assertion}/g")
     local TokenContent=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -s --max-time 10 -X POST "https://disney.api.edge.bamgrid.com/token" -H "authorization: Bearer ZGlzbmV5JmJyb3dzZXImMS4wLjA.Cu56AgSfBTDag5NiRA81oLHkDZfu5L3CKadnefEAY84" -d "$disneycookie" 2>&1)
-    if [[ "$TokenContent" == "curl"* ]]; then
+    if [[ -z "$TokenContent" ]] || [[ "$TokenContent" == "curl"* ]]; then
         PrintResult "Disney+:" "${Font_Red}Failed (Network Connection[2])${Font_Suffix}"
         return
     fi
 
-    local isBanned=$(echo "$TokenContent" | grep 'forbidden-location')
-    local is403=$(echo "$TokenContent" | grep '403 ERROR')
+    local isBanned=$(echo "$TokenContent" | grep -i 'forbidden-location')
+    is403=$(echo "$TokenContent" | grep -i '403 ERROR')
 
     if [ -n "$isBanned" ] || [ -n "$is403" ]; then
         PrintResult "Disney+:" "${Font_Red}No (Banned)${Font_Suffix}"
@@ -298,9 +377,14 @@ function Test_DisneyPlus() {
     # 3. Use refresh token to query region details
     local fakecontent=$(echo "$Media_Cookie" | sed -n '8p')
     local refreshToken=$(echo "$TokenContent" | grep -woP '"refresh_token"\s{0,}:\s{0,}"\K[^"]+')
-    local disneycontent=$(echo $fakecontent | sed "s/ILOVEDISNEY/${refreshToken}/g")
-    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -X POST -sSL --max-time 10 "https://disney.api.edge.bamgrid.com/graph/v1/device/graphql" -H "authorization: Bearer ZGlzbmV5JmJyb3dzZXImMS4wLjA.Cu56AgSfBTDag5NiRA81oLHkDZfu5L3CKadnefEAY84" -d "$disneycontent" 2>&1)
-    if [[ "$tmpresult" == "curl"* ]]; then
+    if [ -z "$refreshToken" ]; then
+        PrintResult "Disney+:" "${Font_Red}Failed (No Refresh Token)${Font_Suffix}"
+        return
+    fi
+    local disneycontent=$(echo "$fakecontent" | sed "s/ILOVEDISNEY/${refreshToken}/g")
+    # NOTE: GraphQL auth header intentionally has no "Bearer " prefix (matches upstream)
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -X POST -sSL --max-time 10 "https://disney.api.edge.bamgrid.com/graph/v1/device/graphql" -H "authorization: ZGlzbmV5JmJyb3dzZXImMS4wLjA.Cu56AgSfBTDag5NiRA81oLHkDZfu5L3CKadnefEAY84" -d "$disneycontent" 2>&1)
+    if [[ -z "$tmpresult" ]] || [[ "$tmpresult" == "curl"* ]]; then
         PrintResult "Disney+:" "${Font_Red}Failed (Network Connection[3])${Font_Suffix}"
         return
     fi
@@ -311,30 +395,32 @@ function Test_DisneyPlus() {
         PrintResult "Disney+:" "${Font_Red}Failed (Network Connection[4])${Font_Suffix}"
         return
     fi
-    local previewcheck=$(echo "$previewchecktmp" | grep preview)
-    local isUnavailable=$(echo "$previewcheck" | grep 'unavailable')
+    local isUnavailable=$(echo "$previewchecktmp" | grep -E 'preview|unavailable')
     local region=$(echo "$tmpresult" | grep -woP '"countryCode"\s{0,}:\s{0,}"\K[^"]+')
     local inSupportedLocation=$(echo "$tmpresult" | grep -woP '"inSupportedLocation"\s{0,}:\s{0,}\K(false|true)')
 
+    if [ -z "$region" ]; then
+        PrintResult "Disney+:" "${Font_Red}No${Font_Suffix}"
+        return
+    fi
     if [[ "$region" == "JP" ]]; then
         PrintResult "Disney+:" "${Font_Green}Yes (Region: JP)${Font_Suffix}"
         return
-    elif [ -n "$region" ] && [[ "$inSupportedLocation" == "false" ]] && [ -z "$isUnavailable" ]; then
-        PrintResult "Disney+:" "${Font_Yellow}Available For [Disney+ $region] Soon${Font_Suffix}"
-        return
-    elif [ -n "$region" ] && [ -n "$isUnavailable" ]; then
-        PrintResult "Disney+:" "${Font_Red}No (Unavailable)${Font_Suffix}"
-        return
-    elif [ -n "$region" ] && [[ "$inSupportedLocation" == "true" ]]; then
-        PrintResult "Disney+:" "${Font_Green}Yes (Region: $region)${Font_Suffix}"
-        return
-    elif [ -z "$region" ]; then
+    fi
+    if [ -n "$isUnavailable" ]; then
         PrintResult "Disney+:" "${Font_Red}No${Font_Suffix}"
         return
-    else
-        PrintResult "Disney+:" "${Font_Red}Failed (inSupportedLocation=${inSupportedLocation}, region=${region})${Font_Suffix}"
+    fi
+    if [[ "$inSupportedLocation" == "false" ]]; then
+        PrintResult "Disney+:" "${Font_Yellow}Available For [Disney+ $region] Soon${Font_Suffix}"
         return
     fi
+    if [[ "$inSupportedLocation" == "true" ]]; then
+        PrintResult "Disney+:" "${Font_Green}Yes (Region: $region)${Font_Suffix}"
+        return
+    fi
+
+    PrintResult "Disney+:" "${Font_Red}Failed (${inSupportedLocation}_${region})${Font_Suffix}"
 }
 
 # Check BBC iPlayer availability by fetching its geolocation API
