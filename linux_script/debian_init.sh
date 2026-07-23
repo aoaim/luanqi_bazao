@@ -512,6 +512,19 @@ ask_yes_no() {
     done
 }
 
+show_docker_status() {
+    print_info "Checking Docker status..."
+    if command_exists docker; then
+        local docker_ver
+        docker_ver=$(docker --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 || echo "?")
+        print_kv "Docker" "${GREEN}already installed${RESET} (v${docker_ver})"
+        return 1
+    else
+        print_kv "Docker" "${YELLOW}not installed${RESET}"
+        return 0
+    fi
+}
+
 install_docker() {
     print_info "Installing Docker..."
     if command_exists docker; then
@@ -1028,6 +1041,27 @@ EOF
     fi
 }
 
+show_ipv6_status() {
+    print_info "Checking IPv6 status..."
+    local ipv6_local
+    local ipv6_sysctl
+    ipv6_sysctl=$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null || echo "0")
+    local has_addr
+    has_addr=$(ip -6 addr show scope global 2>/dev/null | grep -c "inet6" || true)
+    has_addr=$(echo "$has_addr" | tr -d '[:space:]')
+    has_addr=${has_addr:-0}
+
+    if [ "$ipv6_sysctl" = "1" ]; then
+        print_kv "IPv6" "${RED}disabled by sysctl${RESET}"
+    elif [ -n "${IPV6_ADDR:-}" ] && [ "${IPV6_ADDR}" != "N/A" ]; then
+        print_kv "IPv6" "${GREEN}working${RESET} (${IPV6_ADDR})"
+    elif [ "$has_addr" -gt 0 ] 2>/dev/null; then
+        print_kv "IPv6" "${YELLOW}address assigned but external unreachable${RESET}"
+    else
+        print_kv "IPv6" "${YELLOW}not assigned by provider${RESET}"
+    fi
+}
+
 show_kernel_info() {
     print_info "Checking kernel status..."
 
@@ -1263,10 +1297,15 @@ main() {
         fi
     fi
 
-    if ask_yes_no "Install Docker?"; then
-        install_docker
+    # Show docker status first, then ask
+    if show_docker_status; then
+        if ask_yes_no "Install Docker?"; then
+            install_docker
+        fi
     fi
 
+    # Show IPv6 status first, then ask
+    show_ipv6_status
     if [ -n "${IPV6_ADDR:-}" ] && [ "${IPV6_ADDR}" != "N/A" ]; then
         if ask_yes_no "Disable IPv6?"; then
             DISABLE_IPV6=1
