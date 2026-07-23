@@ -242,17 +242,21 @@ function Test_Netflix() {
         PrintResult "Netflix:" "${Font_Red}Failed (Network Connection)${Font_Suffix}"
         return
     fi
-    local result1=$( echo "$tmpresult1" | grep "og:video" )
-    local result2=$( echo "$tmpresult2" | grep "og:video" )
-    local region1=$(printf '%s\n' "$(echo "$tmpresult1" | grep 'netflix.reactContext' | awk -F= '{print $2}' | awk -F\; '{print $1}')" | tr -d '\000-\037' | jq -r '.models.geo.data.requestCountry.id // .models.geo.data.countryCode // .models.serverModel.data.requestCountry.data.id // empty' 2>/dev/null | tr -d '"' )
 
-    if [ -n "$result1" ] || [ -n "$result2" ]; then
-        PrintResult "Netflix:" "${Font_Green}Yes (Region: ${region1})${Font_Suffix}"
-        return
-    else
-        PrintResult "Netflix:" "${Font_Yellow}Originals Only (Region: ${region1})${Font_Suffix}"
+    local result1=$(echo "${tmpresult1}" | grep 'Oh no!')
+    local result2=$(echo "${tmpresult2}" | grep 'Oh no!')
+
+    if [ -n "${result1}" ] && [ -n "${result2}" ]; then
+        PrintResult "Netflix:" "${Font_Yellow}Originals Only${Font_Suffix}"
         return
     fi
+
+    if [ -z "${result1}" ] || [ -z "${result2}" ]; then
+        local region1=$(echo "$tmpresult1" | sed -n 's/.*"id":"\([^"]*\)".*"countryName":"[^"]*".*/\1/p' | head -n1)
+        PrintResult "Netflix:" "${Font_Green}Yes (Region: ${region1})${Font_Suffix}"
+        return
+    fi
+
     PrintResult "Netflix:" "${Font_Red}Failed${Font_Suffix}"
 }
 
@@ -266,8 +270,8 @@ function Test_DisneyPlus() {
     fi
 
     # 2. Extract assertion and fetch token using the cookie template
-    local assertion=$(echo "$PreAssertion" | jq -r '.assertion' 2>/dev/null)
-    if [ -z "$assertion" ] || [ "$assertion" = "null" ]; then
+    local assertion=$(echo "$PreAssertion" | grep -woP '"assertion"\s{0,}:\s{0,}"\K[^"]+')
+    if [ -z "$assertion" ]; then
         PrintResult "Disney+:" "${Font_Red}Failed (No Assertion)${Font_Suffix}"
         return
     fi
@@ -293,7 +297,7 @@ function Test_DisneyPlus() {
 
     # 3. Use refresh token to query region details
     local fakecontent=$(echo "$Media_Cookie" | sed -n '8p')
-    local refreshToken=$(echo "$TokenContent" | jq -r '.refresh_token' 2>/dev/null)
+    local refreshToken=$(echo "$TokenContent" | grep -woP '"refresh_token"\s{0,}:\s{0,}"\K[^"]+')
     local disneycontent=$(echo $fakecontent | sed "s/ILOVEDISNEY/${refreshToken}/g")
     local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -X POST -sSL --max-time 10 "https://disney.api.edge.bamgrid.com/graph/v1/device/graphql" -H "authorization: Bearer ZGlzbmV5JmJyb3dzZXImMS4wLjA.Cu56AgSfBTDag5NiRA81oLHkDZfu5L3CKadnefEAY84" -d "$disneycontent" 2>&1)
     if [[ "$tmpresult" == "curl"* ]]; then
@@ -302,15 +306,15 @@ function Test_DisneyPlus() {
     fi
 
     # 4. Preview check to distinguish between available and unavailable/coming-soon regions
-    local previewchecktmp=$(curl $curlArgs -${1} -s -o /dev/null -L --max-time 10 -w '%{url_effective}\n' "https://www.disneyplus.com")
+    local previewchecktmp=$(curl $curlArgs -${1} -s -o /dev/null -L --max-time 10 -w '%{url_effective}\n' "https://disneyplus.com")
     if [[ "$previewchecktmp" == "curl"* ]]; then
         PrintResult "Disney+:" "${Font_Red}Failed (Network Connection[4])${Font_Suffix}"
         return
     fi
     local previewcheck=$(echo "$previewchecktmp" | grep preview)
     local isUnavailable=$(echo "$previewcheck" | grep 'unavailable')
-    local region=$(echo "$tmpresult" | jq -r '.countryCode' 2>/dev/null)
-    local inSupportedLocation=$(echo "$tmpresult" | jq -r '.inSupportedLocation' 2>/dev/null)
+    local region=$(echo "$tmpresult" | grep -woP '"countryCode"\s{0,}:\s{0,}"\K[^"]+')
+    local inSupportedLocation=$(echo "$tmpresult" | grep -woP '"inSupportedLocation"\s{0,}:\s{0,}\K(false|true)')
 
     if [[ "$region" == "JP" ]]; then
         PrintResult "Disney+:" "${Font_Green}Yes (Region: JP)${Font_Suffix}"
@@ -324,11 +328,11 @@ function Test_DisneyPlus() {
     elif [ -n "$region" ] && [[ "$inSupportedLocation" == "true" ]]; then
         PrintResult "Disney+:" "${Font_Green}Yes (Region: $region)${Font_Suffix}"
         return
-    elif [ -z "$region" ] || [[ "$region" == "null" ]]; then
-        PrintResult "Disney+:" "${Font_Red}No (Unknown)${Font_Suffix}"
+    elif [ -z "$region" ]; then
+        PrintResult "Disney+:" "${Font_Red}No${Font_Suffix}"
         return
     else
-        PrintResult "Disney+:" "${Font_Red}Failed${Font_Suffix}"
+        PrintResult "Disney+:" "${Font_Red}Failed (inSupportedLocation=${inSupportedLocation}, region=${region})${Font_Suffix}"
         return
     fi
 }
