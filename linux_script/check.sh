@@ -244,7 +244,7 @@ function Test_Netflix() {
     fi
     local result1=$( echo "$tmpresult1" | grep "og:video" )
     local result2=$( echo "$tmpresult2" | grep "og:video" )
-    local region1=$( echo -e $(echo "$tmpresult1" | grep 'netflix.reactContext' | awk -F= '{print $2}' | awk -F\; '{print $1}') | tr -d '\000-\037' | jq -r '.models.geo.data.requestCountry.id' 2>/dev/null | tr -d '"' )
+    local region1=$(printf '%s\n' "$(echo "$tmpresult1" | grep 'netflix.reactContext' | awk -F= '{print $2}' | awk -F\; '{print $1}')" | tr -d '\000-\037' | jq -r '.models.geo.data.requestCountry.id // .models.geo.data.countryCode // .models.serverModel.data.requestCountry.data.id // empty' 2>/dev/null | tr -d '"' )
 
     if [ -n "$result1" ] || [ -n "$result2" ]; then
         PrintResult "Netflix:" "${Font_Green}Yes (Region: ${region1})${Font_Suffix}"
