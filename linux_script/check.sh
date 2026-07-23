@@ -1,8 +1,8 @@
 #!/bin/bash
 # =========================================================
 # Customized Region Restriction Check Script
-# This script checks the availability of various regional 
-# streaming and AI services. 
+# This script checks the availability of various regional
+# streaming and AI services.
 # Supported OS: Debian 13+
 # =========================================================
 
@@ -96,7 +96,7 @@ checkOS() {
         echo -e "${Font_Red}Error: Could not determine OS. Only Debian 13+ is supported.${Font_Suffix}"
         exit 1
     fi
-    
+
     local os_id=$(grep -w '^ID' /etc/os-release | cut -d '=' -f 2 | tr -d '"')
     local os_version=$(grep -w '^VERSION_ID' /etc/os-release | cut -d '=' -f 2 | tr -d '"')
 
@@ -105,7 +105,7 @@ checkOS() {
         exit 1
     fi
 
-    if [[ "$os_version" -lt 13 ]]; then
+    if ! awk -v v="$os_version" 'BEGIN{exit !(v+0>=13)}'; then
         echo -e "${Font_Red}Error: Unsupported Debian version ($os_version). Only Debian 13+ is supported.${Font_Suffix}"
         exit 1
     fi
@@ -123,11 +123,15 @@ checkDependencies() {
     fi
 
     if [ ${#missing_deps[@]} -gt 0 ]; then
+        if [ "$(id -u)" -ne 0 ]; then
+            echo -e "${Font_Red}Error: Missing dependencies (${missing_deps[*]}). Re-run as root, or install manually: apt install ${missing_deps[*]}${Font_Suffix}"
+            exit 1
+        fi
         echo -e "${Font_Yellow}Installing missing dependencies: ${missing_deps[*]}...${Font_Suffix}"
         apt update >/dev/null 2>&1
         apt install -y "${missing_deps[@]}" >/dev/null 2>&1
         if [ $? -ne 0 ]; then
-            echo -e "${Font_Red}Failed to install dependencies. Please ensure you are running as root or run 'apt install curl jq' manually.${Font_Suffix}"
+            echo -e "${Font_Red}Failed to install dependencies. Please run 'apt install ${missing_deps[*]}' manually.${Font_Suffix}"
             exit 1
         fi
         echo -e "${Font_Green}Dependencies installed successfully.${Font_Suffix}"
@@ -135,8 +139,12 @@ checkDependencies() {
 }
 checkDependencies
 
-# Fetch required payload templates (cookies) for Disney+ tests in the background
-Media_Cookie=$(curl -s --retry 3 --max-time 10 "https://raw.githubusercontent.com/1-stream/RegionRestrictionCheck/main/cookies" &)
+# Fetch required payload templates (cookies) for Disney+ tests
+# NOTE: must run in foreground; backgrounding inside $() always yields empty string
+Media_Cookie=$(curl -s --retry 3 --max-time 10 "https://raw.githubusercontent.com/1-stream/RegionRestrictionCheck/main/cookies")
+if [ -z "$Media_Cookie" ]; then
+    echo -e "${Font_Yellow}Warning: Failed to fetch Disney+ cookie template; Disney+ test may fail.${Font_Suffix}"
+fi
 
 # Print a section header
 ShowRegion() {
@@ -150,39 +158,47 @@ PrintResult() {
     printf "  %-24s %b\n" "$name" "$result"
 }
 
-# Check Google Search location via Bard UI endpoint
+# Check Google Search location via Gemini batchexecute endpoint
 function Test_Google() {
-    local tmp=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 'https://bard.google.com/_/BardChatUi/data/batchexecute'   -H 'accept-language: en-US'   --data-raw 'f.req=[[["K4WWud","[[0],[\"en-US\"]]",null,"generic"]]]' 2>&1)
+    local tmp=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 'https://gemini.google.com/_/BardChatUi/data/batchexecute' -H 'accept-language: en-US' --data-raw 'f.req=[[["K4WWud","[[0],[\"en-US\"]]",null,"generic"]]]' 2>&1)
     if [[ "$tmp" == "curl"* ]]; then
         PrintResult "Google Search:" "${Font_Red}Failed (Network Connection)${Font_Suffix}"
         return
     fi
-    local region=$(echo "$tmp" | grep K4WWud | jq .[0][2] | grep -Eo '\[\[\\"(.*)\\",\\"S' )
-    PrintResult "Google Search:" "${Font_Green}${region:4:-6}${Font_Suffix}"
+    # Extract region code robustly: find [[\"XX\",\"S pattern
+    local region=$(echo "$tmp" | grep -o '\[\[\\"[A-Z][A-Z]\\",\\"S' | head -1 | sed 's/\[\[\\"//; s/\\".*//')
+    if [ -n "$region" ]; then
+        PrintResult "Google Search:" "${Font_Green}Yes (Region: $region)${Font_Suffix}"
+    else
+        PrintResult "Google Search:" "${Font_Red}Failed${Font_Suffix}"
+    fi
 }
 
 # Check Google Gemini location via Gemini endpoint
 function Test_Gemini() {
-    local tmp=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 'https://gemini.google.com/_/BardChatUi/data/batchexecute'   -H 'accept-language: en-US'   --data-raw 'f.req=[[["K4WWud","[[0],[\"en-US\"]]",null,"generic"]]]' 2>&1)
+    local tmp=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 'https://gemini.google.com/_/BardChatUi/data/batchexecute' -H 'accept-language: en-US' --data-raw 'f.req=[[["K4WWud","[[0],[\"en-US\"]]",null,"generic"]]]' 2>&1)
     if [[ "$tmp" == "curl"* ]]; then
         PrintResult "Google Gemini:" "${Font_Red}Failed (Network Connection)${Font_Suffix}"
         return
     fi
-    local region=$(echo "$tmp" | grep K4WWud | jq .[0][2] | grep -Eo '\[\[\\"(.*)\\",\\"S' )
-    PrintResult "Google Gemini:" "${Font_Green}${region:4:-6}${Font_Suffix}"
+    local region=$(echo "$tmp" | grep -o '\[\[\\"[A-Z][A-Z]\\",\\"S' | head -1 | sed 's/\[\[\\"//; s/\\".*//')
+    if [ -n "$region" ]; then
+        PrintResult "Google Gemini:" "${Font_Green}Yes (Region: $region)${Font_Suffix}"
+    else
+        PrintResult "Google Gemini:" "${Font_Red}Failed${Font_Suffix}"
+    fi
 }
 
 # Check ChatGPT availability and blocked ISP traces
 function Test_ChatGPT() {
     local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsLI --max-time 10 "https://chatgpt.com" 2>&1)
-    local tmpresult1=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 "https://ios.chat.openai.com" 2>&1)
-    local cf_details=$(echo "$tmpresult1" | jq .cf_details 2>/dev/null)
+    local tmpresult1=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 "https://chatgpt.com" 2>&1)
     if [[ "$tmpresult" == "curl"* ]]; then
         PrintResult "ChatGPT:" "${Font_Red}Failed (Network Connection)${Font_Suffix}"
         return
     fi
 
-    local result1=$(echo "$tmpresult" | grep 'location' )
+    local result1=$(echo "$tmpresult" | grep -i '^location:' )
     if [ ! -n "$result1" ]; then
         if [[ "$tmpresult1" == *"blocked_why_headline"* ]]; then
             PrintResult "ChatGPT:" "${Font_Red}No (Blocked)${Font_Suffix}"
@@ -192,42 +208,29 @@ function Test_ChatGPT() {
             PrintResult "ChatGPT:" "${Font_Red}No (Unsupported Region)${Font_Suffix}"
             return
         fi
-        if [[ "$cf_details" == *"(1)"* ]]; then
-            PrintResult "ChatGPT:" "${Font_Red}No (Disallowed ISP[1])${Font_Suffix}"
-            return
-        fi
-        if [[ "$cf_details" == *"(2)"* ]]; then
-            PrintResult "ChatGPT:" "${Font_Red}No (Disallowed ISP[2])${Font_Suffix}"
-            return
-        fi
-    	PrintResult "ChatGPT:" "${Font_Red}No${Font_Suffix}"
+        PrintResult "ChatGPT:" "${Font_Red}No${Font_Suffix}"
     else
-    	local region1=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 "https://chatgpt.com/cdn-cgi/trace" 2>&1 | grep "loc=" | awk -F= '{print $2}')
-        if [[ "$cf_details" == *"(1)"* ]]; then
-            PrintResult "ChatGPT:" "${Font_Yellow}Web Only (Disallowed ISP[1])${Font_Suffix}"
-            return
-        fi
-        if [[ "$cf_details" == *"(2)"* ]]; then
-            PrintResult "ChatGPT:" "${Font_Yellow}Web Only (Disallowed ISP[2])${Font_Suffix}"
-            return
-        fi
+        local region1=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 "https://chatgpt.com/cdn-cgi/trace" 2>&1 | grep "loc=" | awk -F= '{print $2}')
         PrintResult "ChatGPT:" "${Font_Green}Yes (Region: ${region1})${Font_Suffix}"
     fi
 }
 
 # Check Claude.ai availability by probing HTTP response codes
 function Test_Claude(){
-    local result=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -s -o /dev/null -L --max-time 10 -w '%{url_effective}%{http_code}\n' "https://claude.ai/" 2>&1 | grep -E 'unavailable|000')
-
-    if [ -n "$result" ]; then
-        PrintResult "Claude.ai:" "${Font_Red}No${Font_Suffix}"
-        return
-    else
-        PrintResult "Claude.ai:" "${Font_Green}Yes${Font_Suffix}"
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -s -o /dev/null -L --max-time 10 -w '%{url_effective}|%{http_code}' "https://claude.ai/" 2>&1)
+    if [[ "$tmpresult" == "curl"* ]] || [[ -z "$tmpresult" ]]; then
+        PrintResult "Anthropic Claude:" "${Font_Red}Failed (Network Connection)${Font_Suffix}"
         return
     fi
 
-    PrintResult "Claude.ai:" "${Font_Red}Failed (Network Connection)${Font_Suffix}"
+    local url_effective=$(echo "$tmpresult" | cut -d'|' -f1)
+    local http_code=$(echo "$tmpresult" | cut -d'|' -f2)
+
+    if [[ "$url_effective" == *unavailable* ]] || [[ "$http_code" == "000" ]] || [[ "$http_code" == "403" ]]; then
+        PrintResult "Anthropic Claude:" "${Font_Red}No${Font_Suffix}"
+        return
+    fi
+    PrintResult "Anthropic Claude:" "${Font_Green}Yes${Font_Suffix}"
     return
 }
 
@@ -241,7 +244,7 @@ function Test_Netflix() {
     fi
     local result1=$( echo "$tmpresult1" | grep "og:video" )
     local result2=$( echo "$tmpresult2" | grep "og:video" )
-    local region1=$( echo -e $(echo "$tmpresult1" | grep 'netflix.reactContext' | awk -F= '{print $2}' | awk -F\; '{print $1}') | tr -d '[:cntrl:]' | sed 's/\^[^$]*\$//g' | jq -r '.models.geo.data.requestCountry.id' | tr -d '"' )
+    local region1=$( echo -e $(echo "$tmpresult1" | grep 'netflix.reactContext' | awk -F= '{print $2}' | awk -F\; '{print $1}') | tr -d '\000-\037' | jq -r '.models.geo.data.requestCountry.id' 2>/dev/null | tr -d '"' )
 
     if [ -n "$result1" ] || [ -n "$result2" ]; then
         PrintResult "Netflix:" "${Font_Green}Yes (Region: ${region1})${Font_Suffix}"
@@ -264,14 +267,22 @@ function Test_DisneyPlus() {
 
     # 2. Extract assertion and fetch token using the cookie template
     local assertion=$(echo "$PreAssertion" | jq -r '.assertion' 2>/dev/null)
+    if [ -z "$assertion" ] || [ "$assertion" = "null" ]; then
+        PrintResult "Disney+:" "${Font_Red}Failed (No Assertion)${Font_Suffix}"
+        return
+    fi
+    if [ -z "$Media_Cookie" ]; then
+        PrintResult "Disney+:" "${Font_Red}Failed (No Cookie Template)${Font_Suffix}"
+        return
+    fi
     local PreDisneyCookie=$(echo "$Media_Cookie" | sed -n '1p')
-    local disneycookie=$(echo $PreDisneyCookie | sed "s/DISNEYASSERTION/${assertion}/g")
+    local disneycookie=$(echo "$PreDisneyCookie" | sed "s/DISNEYASSERTION/${assertion}/g")
     local TokenContent=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -s --max-time 10 -X POST "https://disney.api.edge.bamgrid.com/token" -H "authorization: Bearer ZGlzbmV5JmJyb3dzZXImMS4wLjA.Cu56AgSfBTDag5NiRA81oLHkDZfu5L3CKadnefEAY84" -d "$disneycookie" 2>&1)
     if [[ "$TokenContent" == "curl"* ]]; then
         PrintResult "Disney+:" "${Font_Red}Failed (Network Connection[2])${Font_Suffix}"
         return
     fi
-    
+
     local isBanned=$(echo "$TokenContent" | grep 'forbidden-location')
     local is403=$(echo "$TokenContent" | grep '403 ERROR')
 
@@ -284,12 +295,12 @@ function Test_DisneyPlus() {
     local fakecontent=$(echo "$Media_Cookie" | sed -n '8p')
     local refreshToken=$(echo "$TokenContent" | jq -r '.refresh_token' 2>/dev/null)
     local disneycontent=$(echo $fakecontent | sed "s/ILOVEDISNEY/${refreshToken}/g")
-    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -X POST -sSL --max-time 10 "https://disney.api.edge.bamgrid.com/graph/v1/device/graphql" -H "authorization: ZGlzbmV5JmJyb3dzZXImMS4wLjA.Cu56AgSfBTDag5NiRA81oLHkDZfu5L3CKadnefEAY84" -d "$disneycontent" 2>&1)
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -X POST -sSL --max-time 10 "https://disney.api.edge.bamgrid.com/graph/v1/device/graphql" -H "authorization: Bearer ZGlzbmV5JmJyb3dzZXImMS4wLjA.Cu56AgSfBTDag5NiRA81oLHkDZfu5L3CKadnefEAY84" -d "$disneycontent" 2>&1)
     if [[ "$tmpresult" == "curl"* ]]; then
         PrintResult "Disney+:" "${Font_Red}Failed (Network Connection[3])${Font_Suffix}"
         return
     fi
-    
+
     # 4. Preview check to distinguish between available and unavailable/coming-soon regions
     local previewchecktmp=$(curl $curlArgs -${1} -s -o /dev/null -L --max-time 10 -w '%{url_effective}\n' "https://www.disneyplus.com")
     if [[ "$previewchecktmp" == "curl"* ]]; then
@@ -325,59 +336,50 @@ function Test_DisneyPlus() {
 # Check BBC iPlayer availability by fetching its geolocation API
 function Test_BBC() {
     local tmpresult=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} -fsL --max-time 10 "https://open.live.bbc.co.uk/mediaselector/6/select/version/2.0/mediaset/pc/vpid/bbc_one_london/format/json/jsfunc/JS_callbacks0" 2>&1)
-    if [ "${tmpresult}" = "000" ] || [[ "${tmpresult}" == "curl"* ]]; then
+    # curl -f returns empty body on HTTP errors; treat empty/curl-error as network failure
+    if [[ -z "$tmpresult" ]] || [[ "${tmpresult}" == "curl"* ]]; then
         PrintResult "BBC iPlayer:" "${Font_Red}Failed (Network Connection)${Font_Suffix}"
         return
     fi
 
-    if [ -n "$tmpresult" ]; then
-        result=$(echo $tmpresult | grep 'geolocation')
-        if [ -n "$result" ]; then
-            PrintResult "BBC iPlayer:" "${Font_Red}No${Font_Suffix}"
-        else
-            PrintResult "BBC iPlayer:" "${Font_Green}Yes${Font_Suffix}"
-        fi
+    local result=$(echo "$tmpresult" | grep 'geolocation')
+    if [ -n "$result" ]; then
+        PrintResult "BBC iPlayer:" "${Font_Red}No${Font_Suffix}"
     else
-        PrintResult "BBC iPlayer:" "${Font_Red}Failed${Font_Suffix}"
+        PrintResult "BBC iPlayer:" "${Font_Green}Yes${Font_Suffix}"
     fi
 }
 
 # Check YouTube Premium availability by parsing main page elements
 function Test_YouTube_Premium() {
-    local tmpresult=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} --max-time 10 -sSL -H "Accept-Language: en" -b "YSC=BiCUU3-5Gdk; CONSENT=YES+cb.20220301-11-p0.en+FX+700; GPS=1; VISITOR_INFO1_LIVE=4VwPMkB7W5A; PREF=tz=Asia.Shanghai; _gcl_au=1.1.1809531354.1646633279" "https://www.youtube.com/premium" 2>&1)
-    
+    local tmpresult=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} --max-time 10 -sSL -H "Accept-Language: en" "https://www.youtube.com/premium" 2>&1)
+
     if [[ "$tmpresult" == "curl"* ]]; then
         PrintResult "YouTube Premium:" "${Font_Red}Failed (Network Connection)${Font_Suffix}"
         return
     fi
 
-    local isCN=$(echo $tmpresult | grep 'www.google.cn')
+    local isCN=$(echo "$tmpresult" | grep 'www.google.cn')
     if [ -n "$isCN" ]; then
-        PrintResult "YouTube Premium:" "${Font_Red}No${Font_Suffix} ${Font_Green} (Region: CN)${Font_Suffix}"
+        PrintResult "YouTube Premium:" "${Font_Red}No (Region: CN)${Font_Suffix}"
         return
     fi
 
-    local isAvailable=$(echo $tmpresult | grep 'Premium is not available in your country')
+    local isAvailable=$(echo "$tmpresult" | grep 'Premium is not available in your country')
+    local region=$(echo "$tmpresult" | grep "countryCode" | head -1 | cut -d '"' -f 4)
     if [ -z "$isAvailable" ]; then
-        local region=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} --max-time 10 -sSL -H "Accept-Language: en" "https://www.youtube.com/premium" | grep "countryCode" | head -1 | cut -d '"' -f 4)
         if [ -n "$region" ]; then
             PrintResult "YouTube Premium:" "${Font_Green}Yes (Region: $region)${Font_Suffix}"
-            return
         else
             PrintResult "YouTube Premium:" "${Font_Green}Yes${Font_Suffix}"
-            return
         fi
     else
-        local region=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} --max-time 10 -sSL -H "Accept-Language: en" "https://www.youtube.com/premium" | grep "countryCode" | head -1 | cut -d '"' -f 4)
         if [ -n "$region" ]; then
-            PrintResult "YouTube Premium:" "${Font_Red}No  (Region: $region)${Font_Suffix}"
-            return
+            PrintResult "YouTube Premium:" "${Font_Red}No (Region: $region)${Font_Suffix}"
         else
             PrintResult "YouTube Premium:" "${Font_Red}No${Font_Suffix}"
-            return
         fi
     fi
-    PrintResult "YouTube Premium:" "${Font_Red}Failed${Font_Suffix}"
 }
 
 # Check YouTube CDN node to determine proxy network quality and actual route
@@ -394,7 +396,7 @@ function Test_YouTube_CDN() {
     local cdn_node=$(echo $router | cut -d "-" -f 2 | tr 'a-z' 'A-Z')
 
     if [ -n "$location" ] && [ -n "$cdn_node" ]; then
-        PrintResult "YouTube CDN:" "${Font_Green}$location ($cdn_node)${Font_Suffix}"
+        PrintResult "YouTube CDN:" "${Font_Green}Yes ($location / $cdn_node)${Font_Suffix}"
         return
     fi
     PrintResult "YouTube CDN:" "${Font_Red}Failed${Font_Suffix}"
@@ -409,10 +411,10 @@ function Test_Spotify() {
         return
     fi
 
-    local country=$(echo $tmpresult | grep -Eo 'geoCountry.*","geoCountryMarket"')
+    local country=$(echo "$tmpresult" | grep -oE '"geoCountry":"[A-Z]{2}"' | head -1 | cut -d'"' -f4)
 
     if [ -n "$country" ]; then
-        PrintResult "Spotify:" "${Font_Green}${country:13:-20}${Font_Suffix}"
+        PrintResult "Spotify:" "${Font_Green}Yes (Region: $country)${Font_Suffix}"
         return
     fi
     PrintResult "Spotify:" "${Font_Red}Failed${Font_Suffix}"
@@ -429,14 +431,14 @@ function Test_Steam() {
     fi
 }
 
-# Main executor: Runs all tests concurrently but outputs sequentially
+# Main executor: Runs all tests concurrently but outputs sequentially with grouping
 function Run_All_Tests() {
     local IPV=$1
     echo -e "${Font_SkyBlue}> Network Test - IPv${IPV}${Font_Suffix}"
-    
+
     # Create a temporary directory to store output of each background task
     local tmp_dir=$(mktemp -d)
-    
+
     # Start all tests concurrently, redirecting output to numbered files
     Test_Google ${IPV} > "$tmp_dir/01" &
     Test_Gemini ${IPV} > "$tmp_dir/02" &
@@ -449,23 +451,48 @@ function Run_All_Tests() {
     Test_YouTube_CDN ${IPV} > "$tmp_dir/09" &
     Test_Spotify ${IPV} > "$tmp_dir/10" &
     Test_Steam ${IPV} > "$tmp_dir/11" &
-    
+
     # Wait for all background tasks to complete
     wait
-    
-    # Output the files in alphabetical order (01, 02...) and cleanup
-    cat "$tmp_dir"/* 2>/dev/null
+
+    # Output grouped by category
+    ShowRegion "AI Services"
+    cat "$tmp_dir/01" "$tmp_dir/02" "$tmp_dir/03" "$tmp_dir/04" 2>/dev/null
+    ShowRegion "Streaming Media"
+    cat "$tmp_dir/05" "$tmp_dir/06" "$tmp_dir/07" "$tmp_dir/08" "$tmp_dir/09" 2>/dev/null
+    ShowRegion "Other Services"
+    cat "$tmp_dir/10" "$tmp_dir/11" 2>/dev/null
+
+    # Tally results from collected output
+    local total=0 yes=0 no=0 failed=0
+    for f in "$tmp_dir"/*; do
+        [ -s "$f" ] || continue
+        total=$((total+1))
+        local line=$(cat "$f")
+        if [[ "$line" == *"${Font_Green}"* ]]; then
+            yes=$((yes+1))
+        elif [[ "$line" == *"${Font_Red}"* ]]; then
+            if [[ "$line" == *"Failed"* ]]; then
+                failed=$((failed+1))
+            else
+                no=$((no+1))
+            fi
+        fi
+    done
+    echo -e "${Font_Purple}  Summary: ${yes} available, ${no} unavailable, ${failed} failed (of ${total})${Font_Suffix}"
+
     rm -rf "$tmp_dir"
-    
     echo ""
 }
 
-echo -e "\n${Font_Purple}[ Minimal Service Unlock Test ]${Font_Suffix}\n"
+echo -e "\n${Font_Purple}[ Minimal Service Unlock Test ]${Font_Suffix}"
+echo -e "${Font_Purple}Legend:${Font_Suffix} ${Font_Green}Green=Available${Font_Suffix} | ${Font_Yellow}Yellow=Partial${Font_Suffix} | ${Font_Red}Red=Unavailable/Failed${Font_Suffix}\n"
 
 # Start IPv4 Tests
 if [[ "$NetworkType" == "4" ]] || [[ -z "$NetworkType" ]]; then
     local_ipv4=$(curl $curlArgs -4 -s --max-time 10 cloudflare.com/cdn-cgi/trace | grep ip | awk -F= '{print $2}')
     if [ -n "$local_ipv4" ]; then
+        echo -e "${Font_SkyBlue}IPv4 Address: ${Font_Green}${local_ipv4}${Font_Suffix}"
         Run_All_Tests 4
     else
         echo -e "\n${Font_Red}No IPv4 Network Detected.${Font_Suffix}"
@@ -476,6 +503,7 @@ fi
 if [[ "$NetworkType" == "6" ]] || [[ -z "$NetworkType" ]]; then
     local_ipv6=$(curl $curlArgs -6 -s --max-time 10 cloudflare.com/cdn-cgi/trace | grep ip | awk -F= '{print $2}')
     if [ -n "$local_ipv6" ]; then
+        echo -e "${Font_SkyBlue}IPv6 Address: ${Font_Green}${local_ipv6}${Font_Suffix}"
         Run_All_Tests 6
     else
         echo -e "\n${Font_Red}No IPv6 Network Detected.${Font_Suffix}"

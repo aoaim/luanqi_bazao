@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Debian 12/13 initialization script
+# Debian 13+ initialization script
 # Performs environment detection, tool installation, timezone configuration, and kernel tuning
 # Update: 26/04/17
 
@@ -96,12 +96,16 @@ require_debian() {
             print_error "Debian only. Detected: ${PRETTY_NAME:-unknown}"
             exit 1
         fi
-        DEBIAN_VERSION=$(cut -d. -f1 /etc/debian_version)
-        if [ "$DEBIAN_VERSION" != "12" ] && [ "$DEBIAN_VERSION" != "13" ]; then
-            print_error "Supported versions: Debian 12/13. Current: $DEBIAN_VERSION"
+        # Prefer VERSION_ID from os-release (numeric on stable Debian).
+        # On testing/sid it may be empty; fall back to /etc/debian_version.
+        DEBIAN_VERSION="${VERSION_ID:-0}"
+        if [ -z "$DEBIAN_VERSION" ] || [ "$DEBIAN_VERSION" = "0" ]; then
+            DEBIAN_VERSION=$(cut -d. -f1 /etc/debian_version 2>/dev/null || echo 0)
+        fi
+        if ! [[ "$DEBIAN_VERSION" =~ ^[0-9]+$ ]] || [ "$DEBIAN_VERSION" -lt 13 ]; then
+            print_error "Supported versions: Debian 13+. Current: ${VERSION:-${PRETTY_NAME:-unknown}}"
             exit 1
         fi
-        DISTRO_CODENAME="${VERSION_CODENAME:-$(lsb_release -cs 2>/dev/null || echo trixie)}"
     else
         print_error "Cannot read /etc/os-release. Aborting."
         exit 1
@@ -128,11 +132,16 @@ fetch_ipinfo() {
     IP_ORG=$(echo "$raw" | grep -oP '"org":\s*"\K[^"]+' || true)
     IP_TZ=$(echo "$raw" | grep -oP '"timezone":\s*"\K[^"]+' || true)
     IPV4_ADDR="N/A"
-    for api in "ip.sb" "api.ipify.org" "ifconfig.me" "ipinfo.io/ip"; do
-        tmp_ip=$(curl -fsSL --max-time 5 -4 "$api" 2>/dev/null || true)
-        if [ -n "$tmp_ip" ]; then
-            IPV4_ADDR="$tmp_ip"
-            break
+    for attempt in 1 2; do
+        for api in "ip.sb" "api.ipify.org" "ifconfig.me" "ipinfo.io/ip"; do
+            tmp_ip=$(curl -fsSL --max-time 5 -4 "$api" 2>/dev/null || true)
+            if [ -n "$tmp_ip" ]; then
+                IPV4_ADDR="$tmp_ip"
+                break 2
+            fi
+        done
+        if [ "$attempt" -lt 2 ] && { [ -z "$IPV4_ADDR" ] || [ "$IPV4_ADDR" = "N/A" ]; }; then
+            sleep 3
         fi
     done
 
@@ -275,8 +284,9 @@ detect_system() {
     SWAP_KB=$(awk '/SwapTotal/ {print $2}' /proc/meminfo)
     DISK_ROOT=$(df -h / | awk 'NR==2{print $3 " / " $2 " (" $5 " used)"}')
     DISK_ROOT_USED=$(df -P / | awk 'NR==2{print $5}')
-    if [ "$DISK_ROOT_USED" = "100%" ]; then
-        print_error "Root partition is full! Free up space before running this script."
+    DISK_ROOT_USED_NUM=${DISK_ROOT_USED%\%}
+    if [ "${DISK_ROOT_USED_NUM:-0}" -ge 95 ]; then
+        print_error "Root partition nearly full (${DISK_ROOT_USED}). Free up space before running this script."
         exit 1
     fi
     BBR_STATUS=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "unknown")
@@ -284,20 +294,6 @@ detect_system() {
     SWAP_STR="Not enabled"
     if [ "${SWAP_KB:-0}" -gt 0 ]; then
         SWAP_STR="$(awk '/SwapTotal/ {printf "%.1f MB", $2/1024}' /proc/meminfo)"
-    fi
-}
-
-detect_zram_status() {
-    ZRAM_STATUS="Not active"
-    if grep -q "^/dev/zram" /proc/swaps 2>/dev/null; then
-        local size_kb prio
-        size_kb=$(awk '$1 ~ /zram/ {s+=$3} END {print s+0}' /proc/swaps)
-        prio=$(awk '$1 ~ /zram/ {print $5; exit}' /proc/swaps)
-        if [ "${size_kb:-0}" -gt 0 ]; then
-            ZRAM_STATUS=$(awk -v s="$size_kb" -v p="$prio" 'BEGIN {printf "Active (%.1f MB, prio %s)", s/1024, p}')
-        else
-            ZRAM_STATUS="Active (size unknown, prio ${prio:-?})"
-        fi
     fi
 }
 
@@ -323,7 +319,6 @@ show_detection() {
     print_kv "CPU" "$cpu_info (${cpu_cores} Cores)"
     print_kv "Memory" "$(echo "$MEM_KB" | awk '{printf "%.1f MB", $1/1024}')"
     print_kv "Swap" "$SWAP_STR"
-    print_kv "ZRAM Swap" "${ZRAM_STATUS:-not detected}"
     print_kv "Disk (/)" "$DISK_ROOT"
     print_kv "BBR / Qdisc" "$BBR_STATUS / $QDISC_STATUS"
 }
@@ -335,7 +330,10 @@ get_github_latest_version() {
     if [ -n "${IPV4_ADDR:-}" ] && [ "${IPV4_ADDR}" != "N/A" ]; then
         curl_opts+=("-4")
     fi
-    curl "${curl_opts[@]}" -o /dev/null -w %{url_effective} "https://github.com/$1/releases/latest" | grep -oE '[^/]+$'
+    # Follow the redirect and extract the tag from the effective URL
+    # (e.g. .../releases/tag/v1.0.0 -> v1.0.0). Returns empty on failure.
+    curl "${curl_opts[@]}" -o /dev/null -w '%{url_effective}' "https://github.com/$1/releases/latest" 2>/dev/null \
+        | grep -oE 'tag/[^/]+$' | sed 's#tag/##' || true
 }
 
 get_github_api_asset_url() {
@@ -405,8 +403,8 @@ apt_refresh() {
     print_section "${ICON_PKG} System update"
     apt-get update -qq || true
     apt-get upgrade $APT_INSTALL_OPTS || true
-    apt-get autoremove $APT_INSTALL_OPTS
-    apt-get clean
+    apt-get autoremove $APT_INSTALL_OPTS || true
+    apt-get clean || true
     print_success "System update completed"
 }
 
@@ -421,7 +419,7 @@ install_helix() {
 
     tag=$(get_github_latest_version "helix-editor/helix")
     if [ -n "$tag" ]; then
-        ver=$(echo "$tag" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?')
+        ver=$(echo "$tag" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' || true)
         [ -n "$ver" ] && url="https://github.com/helix-editor/helix/releases/download/${tag}/helix-${ver}-${ARCH}-linux.tar.xz"
     fi
 
@@ -500,7 +498,7 @@ ask_yes_no() {
     local choice
     while true; do
         printf "${CYAN}${BOLD}>>> %s [default: n] (y/yes, n/no): ${RESET}" "$prompt"
-        read choice
+        read -r choice
         case "$choice" in
             y|Y|yes|Yes)
                 print_info "Selected: y"
@@ -524,7 +522,11 @@ install_docker() {
 
     if curl -fsSL https://get.docker.com | sh; then
         print_success "Docker installed successfully"
-        usermod -aG docker debian 2>/dev/null || usermod -aG docker root 2>/dev/null || true
+        local docker_user="${SUDO_USER:-${USER:-}}"
+        if [ -n "$docker_user" ] && [ "$docker_user" != "root" ]; then
+            usermod -aG docker "$docker_user" 2>/dev/null || true
+            print_info "Added '$docker_user' to docker group (re-login to take effect)"
+        fi
     else
         print_error "Failed to install Docker"
     fi
@@ -535,6 +537,215 @@ install_tools() {
     install_helix
     install_cf_speedtest
     install_nexttrace
+    generate_update_tools_script
+}
+
+generate_update_tools_script() {
+    cat > /usr/local/bin/update-tools <<'SCRIPT_EOF'
+#!/bin/bash
+# Generated by debian_init.sh - updates GitHub-sourced tools (Helix, Nexttrace, CF Speedtest)
+# Runs independently; invoked by the system-wide "update" alias.
+set -euo pipefail
+
+export DEBIAN_FRONTEND=noninteractive
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+DIM='\033[2m'
+RESET='\033[0m'
+
+TEMP_DIR=$(mktemp -d -p /var/tmp)
+trap 'rm -rf "$TEMP_DIR"' EXIT
+
+# Architecture detection (self-contained)
+case "$(uname -m)" in
+    x86_64|amd64)  SYS_ARCH="x86_64"; ARCH_SUFFIX="amd64" ;;
+    aarch64|arm64) SYS_ARCH="aarch64"; ARCH_SUFFIX="arm64" ;;
+    *) echo "Unsupported architecture"; exit 1 ;;
+esac
+
+# ---- helpers ----
+cmd_ok() { command -v "$1" >/dev/null 2>&1; }
+get_ver() { "$@" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 || true; }
+
+download_file() {
+    curl -fsSL --connect-timeout 10 --max-time 300 --retry 3 --retry-delay 2 \
+        "$1" -o "$2" 2>/dev/null && [ -s "$2" ] && return 0
+    rm -f "$2"
+    return 1
+}
+
+ensure_xz()   { cmd_ok xz   || apt-get install -qq -y xz-utils >/dev/null 2>&1 || true; }
+ensure_bzip2(){ cmd_ok bzip2|| apt-get install -qq -y bzip2 >/dev/null 2>&1 || true; }
+ensure_unzip(){ cmd_ok unzip|| apt-get install -qq -y unzip >/dev/null 2>&1 || true; }
+
+extract_archive() {
+    case "$1" in
+        *.tar.xz|*.txz)       ensure_xz    && tar -xJf "$1" -C "$2" ;;
+        *.tar.gz|*.tgz)       tar -xzf "$1" -C "$2" ;;
+        *.tar.bz2|*.tbz|*.tbz2) ensure_bzip2 && tar -xjf "$1" -C "$2" ;;
+        *.zip)                ensure_unzip && unzip -q -o "$1" -d "$2" ;;
+        *) return 1 ;;
+    esac
+}
+
+github_latest_tag() {
+    curl -sL --connect-timeout 5 --max-time 15 --retry 3 --retry-delay 1 \
+        -o /dev/null -w '%{url_effective}' \
+        "https://github.com/$1/releases/latest" 2>/dev/null \
+        | grep -oE 'tag/[^/]+$' | sed 's#tag/##' || true
+}
+
+github_asset_url() {
+    curl -sL --connect-timeout 5 --max-time 20 --retry 3 --retry-delay 1 \
+        "https://api.github.com/repos/$1/releases/latest" 2>/dev/null \
+        | grep -oE '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]+"' \
+        | sed -E 's/.*"([^"]+)"$/\1/' | grep -E "$2" | head -n1 || true
+}
+
+# ---- update functions ----
+
+update_helix() {
+    echo -e "${CYAN}[HELIX]${RESET} Checking..."
+    local local_ver latest_tag latest_ver url
+    if cmd_ok hx; then
+        local_ver=$(get_ver hx --version)
+        echo -e "  ${DIM}Installed:${RESET} ${local_ver:-?}"
+    else
+        echo -e "  ${YELLOW}Not installed, skipping${RESET}"
+        return
+    fi
+
+    latest_tag=$(github_latest_tag "helix-editor/helix")
+    latest_ver=$(echo "$latest_tag" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' || true)
+    if [ -z "$latest_tag" ] || [ -z "$latest_ver" ]; then
+        echo -e "  ${YELLOW}Failed to check latest version${RESET}"
+        return
+    fi
+
+    if [ "$local_ver" = "$latest_ver" ]; then
+        echo -e "  ${GREEN}Already up to date (${latest_ver})${RESET}"
+        return
+    fi
+
+    echo -e "  ${BOLD}Updating: ${local_ver:-?} → ${latest_ver}${RESET}"
+    url="https://github.com/helix-editor/helix/releases/download/${latest_tag}/helix-${latest_ver}-${SYS_ARCH}-linux.tar.xz"
+    if [ -z "$url" ] || ! download_file "$url" "${TEMP_DIR}/helix.tar.xz"; then
+        url=$(github_asset_url "helix-editor/helix" "helix-.*-${SYS_ARCH}-linux\\.tar\\.xz\$")
+        [ -z "$url" ] && { echo -e "  ${RED}No download URL found${RESET}"; return; }
+        download_file "$url" "${TEMP_DIR}/helix.tar.xz" || { echo -e "  ${RED}Download failed${RESET}"; return; }
+    fi
+
+    extract_archive "${TEMP_DIR}/helix.tar.xz" "$TEMP_DIR" || { echo -e "  ${RED}Extract failed${RESET}"; return; }
+    local helix_dir
+    helix_dir=$(find "$TEMP_DIR" -maxdepth 1 -type d -name "helix-*" -print -quit)
+    if [ -n "$helix_dir" ] && [ -f "${helix_dir}/hx" ]; then
+        install -m 755 "${helix_dir}/hx" /usr/local/bin/hx
+        [ -d "${helix_dir}/runtime" ] && rm -rf /usr/local/lib/helix/runtime && mkdir -p /usr/local/lib/helix && cp -r "${helix_dir}/runtime" /usr/local/lib/helix/
+        echo -e "  ${GREEN}Updated to ${latest_ver}${RESET}"
+    else
+        echo -e "  ${RED}Binary not found in archive${RESET}"
+    fi
+}
+
+update_nexttrace() {
+    echo -e "${CYAN}[NEXTTRACE]${RESET} Checking..."
+    local local_ver latest_tag url
+    if cmd_ok nexttrace; then
+        local_ver=$(get_ver nexttrace --version)
+        echo -e "  ${DIM}Installed:${RESET} ${local_ver:-?}"
+    else
+        echo -e "  ${YELLOW}Not installed, skipping${RESET}"
+        return
+    fi
+
+    latest_tag=$(github_latest_tag "nxtrace/NTrace-core")
+    if [ -z "$latest_tag" ]; then
+        echo -e "  ${YELLOW}Failed to check latest version${RESET}"
+        return
+    fi
+
+    # Compare version strings; skip if same
+    local latest_ver
+    latest_ver=$(echo "$latest_tag" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' || true)
+    if [ -n "$latest_ver" ] && [ "$local_ver" = "$latest_ver" ]; then
+        echo -e "  ${GREEN}Already up to date (${latest_ver})${RESET}"
+        return
+    fi
+
+    echo -e "  ${BOLD}Updating to ${latest_tag}${RESET}"
+    url="https://github.com/nxtrace/NTrace-core/releases/latest/download/nexttrace_linux_${ARCH_SUFFIX}"
+    if download_file "$url" "${TEMP_DIR}/nexttrace"; then
+        install -m 755 "${TEMP_DIR}/nexttrace" /usr/local/bin/nexttrace
+        echo -e "  ${GREEN}Updated${RESET}"
+    else
+        echo -e "  ${RED}Download failed${RESET}"
+    fi
+}
+
+update_cf_speedtest() {
+    echo -e "${CYAN}[CF-SPEED]${RESET} Checking..."
+    local local_ver latest_tag latest_ver url
+    if cmd_ok cloudflare-speed-cli; then
+        local_ver=$(get_ver cloudflare-speed-cli --version)
+        echo -e "  ${DIM}Installed:${RESET} ${local_ver:-?}"
+    else
+        echo -e "  ${YELLOW}Not installed, skipping${RESET}"
+        return
+    fi
+
+    latest_tag=$(github_latest_tag "kavehtehrani/cloudflare-speed-cli")
+    if [ -z "$latest_tag" ]; then
+        echo -e "  ${YELLOW}Failed to check latest version${RESET}"
+        return
+    fi
+    # Release tags are prefixed with 'v' (e.g. v0.6.2); strip it for comparison.
+    latest_ver=$(echo "$latest_tag" | sed -E 's/^v//' | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' || true)
+
+    if [ -n "$latest_ver" ] && [ "$local_ver" = "$latest_ver" ]; then
+        echo -e "  ${GREEN}Already up to date (${latest_ver})${RESET}"
+        return
+    fi
+
+    echo -e "  ${BOLD}Updating: ${local_ver:-?} → ${latest_ver:-latest}${RESET}"
+    url="https://github.com/kavehtehrani/cloudflare-speed-cli/releases/latest/download/cloudflare-speed-cli-${SYS_ARCH}-unknown-linux-musl.tar.xz"
+    if download_file "$url" "${TEMP_DIR}/cfspeed.tar.xz"; then
+        extract_archive "${TEMP_DIR}/cfspeed.tar.xz" "$TEMP_DIR" || { echo -e "  ${RED}Extract failed${RESET}"; return; }
+        local binpath
+        binpath=$(find "$TEMP_DIR" -type f -name "cloudflare-speed-cli*" -executable -print -quit 2>/dev/null || true)
+        [ -z "$binpath" ] && binpath=$(find "$TEMP_DIR" -type f -name "cloudflare-speed-cli*" -print -quit 2>/dev/null || true)
+        if [ -n "$binpath" ]; then
+            install -m 755 "$binpath" /usr/local/bin/cloudflare-speed-cli
+            echo -e "  ${GREEN}Updated to ${latest_ver:-latest}${RESET}"
+        else
+            echo -e "  ${RED}Binary not found in archive${RESET}"
+        fi
+    else
+        echo -e "  ${YELLOW}Download failed (may already be latest)${RESET}"
+    fi
+}
+
+# ---- main ----
+echo ""
+echo -e "${BOLD}${CYAN}▶ GitHub Tools Update${RESET}"
+echo ""
+
+update_helix
+echo ""
+update_nexttrace
+echo ""
+update_cf_speedtest
+
+echo ""
+echo -e "${GREEN}Done.${RESET}"
+
+rm -rf "$TEMP_DIR"
+SCRIPT_EOF
+    chmod 755 /usr/local/bin/update-tools
+    print_success "update-tools script generated (/usr/local/bin/update-tools)"
 }
 
 configure_eza_aliases() {
@@ -557,11 +768,11 @@ EOF
 
 configure_update_alias() {
     cat > /etc/profile.d/update-alias.sh <<'EOF'
-# System-wide alias to update packages
-alias update='apt update && apt upgrade'
+# System-wide alias: apt update + upgrade + GitHub tools refresh
+alias update='apt update && apt upgrade && update-tools'
 EOF
     chmod 644 /etc/profile.d/update-alias.sh
-    print_success "Update alias configured (update -> apt update && apt upgrade)"
+    print_success "Update alias configured (update -> apt update && apt upgrade && update-tools)"
 }
 
 configure_chrony() {
@@ -584,6 +795,7 @@ configure_chrony() {
     esac
     CHRONY_CONF="/etc/chrony/chrony.conf"
     mkdir -p /etc/chrony
+    [ -f "$CHRONY_CONF" ] && cp -n "$CHRONY_CONF" "${CHRONY_CONF}.bak" || true
     cat > "$CHRONY_CONF" <<EOF
 server 0.${region_prefix}pool.ntp.org iburst
 server 1.${region_prefix}pool.ntp.org iburst
@@ -790,19 +1002,7 @@ apply_network_sysctl() {
 }
 
 apply_swappiness_sysctl() {
-    local swappiness
     mkdir -p /etc/sysctl.d
-
-    # Determine swappiness based on swap type
-    # zram is fast (in-memory), so higher swappiness is beneficial
-    # Disk swap is slow, so lower swappiness is preferred
-    if grep -q "^/dev/zram" /proc/swaps 2>/dev/null; then
-        swappiness=60
-        print_info "${BOLD}zram detected: using swappiness=60${RESET}"
-    else
-        swappiness=10
-        print_info "No zram: using swappiness=10"
-    fi
 
     cat > "$SYSCTL_SWAPPINESS_FILE" <<EOF
 # ============================================================================
@@ -810,10 +1010,8 @@ apply_swappiness_sysctl() {
 # Do not edit manually - changes may be overwritten
 # ============================================================================
 
-# Swappiness - auto-configured based on swap type
-# zram (fast, in-memory): 60
-# Disk swap (slow): 10
-vm.swappiness = ${swappiness}
+# Low swappiness: prefer keeping data in RAM, only swap when necessary
+vm.swappiness = 10
 EOF
 
     print_success "Swappiness config written to $SYSCTL_SWAPPINESS_FILE"
@@ -848,6 +1046,32 @@ EOF
 }
 
 install_cloud_kernel() {
+    print_info "Checking kernel status..."
+
+    # Cloud Kernel is tailored for virtualized environments and omits many
+    # hardware drivers; warn before installing on bare metal.
+    local virt
+    virt=$(systemd-detect-virt 2>/dev/null || echo "unknown")
+    if [ "$virt" = "none" ] || [ "$virt" = "unknown" ]; then
+        print_warning "Detected bare-metal/unknown environment ($virt). Cloud Kernel omits many hardware drivers and may break networking/storage on physical machines."
+    fi
+
+    local current_kernel latest_kernel
+    current_kernel=$(uname -r)
+    latest_kernel=$(ls -1vr /boot/vmlinuz* 2>/dev/null | head -n1 | xargs -n1 basename 2>/dev/null | sed 's/vmlinuz-//')
+
+    print_kv "Current Kernel" "$current_kernel"
+    if [ -n "$latest_kernel" ] && [ "$latest_kernel" != "$current_kernel" ]; then
+        print_kv "Latest Installed" "$latest_kernel (will load on reboot)"
+    fi
+
+    # Check if cloud kernel package is already installed
+    if dpkg -l "linux-image-cloud-${ARCH_DEB}" 2>/dev/null | grep -q "^ii"; then
+        print_success "Cloud Kernel already installed"
+        return
+    fi
+
+    echo ""
     print_info "Installing Cloud Kernel..."
     if apt-get install $APT_INSTALL_OPTS "linux-image-cloud-${ARCH_DEB}"; then
         print_success "Cloud Kernel installed"
@@ -860,11 +1084,12 @@ install_cloud_kernel() {
 
 install_base_packages() {
     print_section "${ICON_PKG} Installing base packages"
-    apt-get install $APT_INSTALL_OPTS rsyslog openssl gnupg cron chrony fail2ban python3-systemd logrotate nano vnstat nload htop unzip unattended-upgrades eza duf bat zoxide
+    apt-get install -y -o=Dpkg::Use-Pty=0 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold rsyslog openssl gnupg cron chrony fail2ban python3-systemd logrotate nano vnstat nload htop unzip unattended-upgrades eza duf bat zoxide || print_warning "Some base packages failed to install"
 
     # Debian ships bat as batcat on some releases; expose it through a shell alias.
     cat > /etc/profile.d/bat-alias.sh <<'EOF'
-alias bat='batcat'
+# Only alias bat to batcat when the real `bat` binary is not installed.
+command -v bat >/dev/null 2>&1 || alias bat='batcat'
 EOF
     chmod 644 /etc/profile.d/bat-alias.sh
     print_success "bat alias configured (bat -> batcat)"
@@ -872,7 +1097,8 @@ EOF
     # Ensure rsyslog is enabled and started
     systemctl enable --now rsyslog 2>/dev/null || true
 
-    # Configure Fail2Ban for Debian 12 (systemd backend)
+    # Configure Fail2Ban (systemd backend)
+    [ -f /etc/fail2ban/jail.local ] && cp -n /etc/fail2ban/jail.local /etc/fail2ban/jail.local.bak || true
     cat > /etc/fail2ban/jail.local <<EOF
 [DEFAULT]
 bantime = 1h
@@ -887,7 +1113,8 @@ port = ssh
 EOF
     systemctl enable --now fail2ban 2>/dev/null || true
 
-    # Configure unattended-upgrades for security and stable updates
+    # Configure unattended-upgrades for security updates only
+    [ -f /etc/apt/apt.conf.d/50unattended-upgrades ] && cp -n /etc/apt/apt.conf.d/50unattended-upgrades /etc/apt/apt.conf.d/50unattended-upgrades.bak || true
     cat > /etc/apt/apt.conf.d/50unattended-upgrades <<'EOF'
 Unattended-Upgrade::Origins-Pattern {
     "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
@@ -909,87 +1136,22 @@ EOF
 }
 
 apply_all_sysctl() {
-    sysctl --system >/dev/null 2>&1 || true
+    # Ensure BBR module is available before applying congestion control settings.
+    modprobe tcp_bbr 2>/dev/null || true
+    echo "tcp_bbr" > /etc/modules-load.d/tcp_bbr.conf 2>/dev/null || true
+
+    local err
+    err=$(sysctl --system 2>&1 >/dev/null || true)
+    if [ -n "$err" ]; then
+        print_warning "sysctl reported issues (may be harmless on this kernel):"
+        echo "$err" | sed 's/^/    /'
+    fi
     BBR_APPLIED=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "unknown")
     QDISC_APPLIED=$(sysctl -n net.core.default_qdisc 2>/dev/null || echo "unknown")
     print_success "sysctl applied (BBR: $BBR_APPLIED, qdisc: $QDISC_APPLIED)"
-}
-
-get_recommended_zram_config() {
-    # Returns: "size_mb algorithm"
-    local mem_mb=$1
-    if [ "$mem_mb" -lt 800 ]; then
-        echo "1024 zstd"   # < 800MB RAM: Try zstd (fallback to lz4 in auto_enable)
-    else
-        echo "2048 lz4"    # >= 800MB RAM: Fixed 2GB ZRAM (lz4 default)
+    if [ "$BBR_APPLIED" != "bbr" ]; then
+        print_warning "BBR not active (got: $BBR_APPLIED). Kernel may lack tcp_bbr module."
     fi
-}
-
-configure_zram() {
-    local size_mb="$1"
-    local algo="$2"
-    local expected_kb=$((size_mb * 1024))
-
-    # Ensure zram-tools is installed
-    if ! dpkg -l zram-tools 2>/dev/null | grep -q "^ii"; then
-        print_info "Installing zram-tools..."
-        apt-get install $APT_INSTALL_OPTS zram-tools
-    fi
-
-    # Completely stop and destroy existing zram
-    systemctl stop zramswap.service 2>/dev/null || true
-    swapoff /dev/zram0 2>/dev/null || true
-    # Unload zram module to fully destroy the device
-    rmmod zram 2>/dev/null || true
-
-    # Write configuration BEFORE starting service
-    cat > /etc/default/zramswap <<EOF
-# zramswap config managed by init script
-ALGO=${algo}
-SIZE=${size_mb}
-PRIORITY=100
-EOF
-
-    # Load zram module
-    modprobe zram 2>/dev/null || true
-
-    # Start service (not restart, since we fully stopped it)
-    systemctl enable zramswap.service 2>/dev/null || true
-    systemctl start zramswap.service 2>/dev/null || true
-
-    # Wait for ZRAM to initialize with correct size (up to 5s)
-    local retries=5
-    while [ $retries -gt 0 ]; do
-        local current_kb
-        current_kb=$(awk '$1 ~ /zram/ {print $3; exit}' /proc/swaps 2>/dev/null || echo 0)
-        if [ "${current_kb:-0}" -gt $((expected_kb * 9 / 10)) ]; then
-            break
-        fi
-        sleep 1
-        retries=$((retries - 1))
-    done
-
-    print_success "zram configured: ${size_mb}MB (algo: ${algo})"
-}
-
-auto_enable_zram_swap() {
-    local mem_mb config recommended_size recommended_algo
-
-    mem_mb=$((MEM_KB / 1024))
-    config=$(get_recommended_zram_config "$mem_mb")
-    recommended_size=$(echo "$config" | cut -d' ' -f1)
-    recommended_algo=$(echo "$config" | cut -d' ' -f2)
-
-    # Check if zstd is supported, fallback to lz4 if not
-    if [ "$recommended_algo" = "zstd" ]; then
-        if ! modprobe zstd >/dev/null 2>&1 && ! grep -q "zstd" /proc/crypto 2>/dev/null; then
-             print_warning "zstd not supported by kernel, falling back to lz4."
-             recommended_algo="lz4"
-        fi
-    fi
-
-    print_info "Configuring zram swap (${recommended_size}MB, algo: ${recommended_algo})..."
-    configure_zram "$recommended_size" "$recommended_algo"
 }
 
 show_report() {
@@ -1026,24 +1188,16 @@ show_report() {
     print_subsection "Services"
     print_kv "Chrony" "$(systemctl is-active chrony 2>/dev/null || echo '?')"
     print_kv "Fail2Ban" "$(systemctl is-active fail2ban 2>/dev/null || echo '?')"
-    print_kv "ZRAM Swap" "${ZRAM_STATUS:-not detected}"
     print_kv "Timezone" "${TIMEZONE_FINAL:-unknown}"
 
     print_subsection "Auto updates"
     local auto_updates=""
-    if [ -f /etc/apt/apt.conf.d/50unattended-upgrades ]; then
-        if grep -q 'codename=.*-security' /etc/apt/apt.conf.d/50unattended-upgrades 2>/dev/null; then
-            auto_updates+="security, "
-        fi
-        if grep -qE '"origin=Debian,codename=\$\{distro_codename\},label=Debian"' /etc/apt/apt.conf.d/50unattended-upgrades 2>/dev/null; then
-            auto_updates+="stable, "
-        fi
-        if grep -q 'codename=.*-updates' /etc/apt/apt.conf.d/50unattended-upgrades 2>/dev/null; then
-            auto_updates+="updates, "
-        fi
+    if [ -f /etc/apt/apt.conf.d/50unattended-upgrades ] && \
+       grep -q 'codename=.*-security' /etc/apt/apt.conf.d/50unattended-upgrades 2>/dev/null; then
+        auto_updates="security"
     fi
     if [ -n "$auto_updates" ]; then
-        print_kv "Auto-updates" "${GREEN}${auto_updates%, }${RESET}"
+        print_kv "Auto-updates" "${GREEN}${auto_updates}${RESET}"
     else
         print_kv "Auto-updates" "${YELLOW}not configured${RESET}"
     fi
@@ -1052,7 +1206,7 @@ show_report() {
     print_subsection "Tools"
     print_info "Installed tools:"
     get_ver() {
-        "$@" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1
+        "$@" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 || true
     }
 
     print_subsection "Kernel"
@@ -1098,8 +1252,6 @@ main() {
     ensure_basic_tools
     fetch_ipinfo
     detect_system
-    # detect_zram_status is used by show_detection
-    detect_zram_status
     show_detection
 
     apt_refresh
@@ -1108,7 +1260,6 @@ main() {
     configure_eza_aliases
     configure_update_alias
     configure_chrony
-    auto_enable_zram_swap
     apply_swappiness_sysctl
     apply_network_sysctl
 
@@ -1140,7 +1291,6 @@ main() {
         fi
     fi
 
-    detect_zram_status
     show_report
 }
 
