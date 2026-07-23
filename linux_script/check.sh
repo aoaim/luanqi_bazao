@@ -167,7 +167,7 @@ PrintResult() {
 _google_region_from_batchexecute() {
     local body="$1"
     local region_raw
-    region_raw=$(echo "$body" | grep 'K4WWud' | jq -r '.[0][2] // empty' 2>/dev/null | grep -Eo '\[\[\\"[A-Z]{2}\\",\\"S' | head -1)
+    region_raw=$(echo "$body" | grep 'K4WWud' | jq '.[0][2] // empty' 2>/dev/null | grep -Eo '\[\[\\"[A-Z]{2}\\",\\"S' | head -1)
     if [ -n "$region_raw" ]; then
         # region_raw looks like: [["US","S  -> slice off leading [[" and trailing ","S
         echo "${region_raw:4:2}"
