@@ -55,21 +55,21 @@ check_system() {
         print_error "Unable to detect system version"
         exit 1
     fi
-    
+
     source /etc/os-release
-    
+
     if [[ "$ID" != "debian" ]]; then
         print_error "This script only supports Debian"
         print_info "Current system: $PRETTY_NAME"
         exit 1
     fi
-    
+
     if [[ "$VERSION_ID" != "12" && "$VERSION_ID" != "13" ]]; then
         print_error "This script only supports Debian 12 and Debian 13"
         print_info "Current version: Debian $VERSION_ID"
         exit 1
     fi
-    
+
     print_success "System check passed: $PRETTY_NAME"
 }
 
@@ -96,21 +96,21 @@ check_docker() {
     if ! command -v docker &> /dev/null; then
         print_warning "Docker is not installed"
         read -p "Install Docker now? (y/N): " install_docker
-        
+
         if [[ "$install_docker" =~ ^[Yy]$ ]]; then
             print_info "Updating package list..."
             apt update
-            
+
             print_info "Installing Docker..."
             print_info "Using official install script: https://get.docker.com/"
-            
+
             if wget -qO- https://get.docker.com/ | sh; then
                 print_success "Docker installed successfully"
-                
+
                 # 启动 Docker 服务
                 systemctl start docker
                 systemctl enable docker
-                
+
                 # 显示 Docker 版本
                 docker --version
             else
@@ -133,11 +133,11 @@ get_ip_country() {
         echo ""
         return
     fi
-    
+
     # 使用 ip-api.com 查询国家代码
     local country
     country=$(curl -s --max-time 3 "http://ip-api.com/line/${ip}?fields=countryCode" 2>/dev/null)
-    
+
     # 验证返回值是否为有效国家代码（2字母）
     if [[ "$country" =~ ^[A-Z]{2}$ ]]; then
         echo "$country"
@@ -150,19 +150,19 @@ get_ip_country() {
 get_public_ip() {
     local ipv4=""
     local ipv6=""
-    
+
     # 尝试多个服务获取 IPv4
     ipv4=$(curl -4 -s --max-time 3 https://api.ipify.org || \
            curl -4 -s --max-time 3 https://ip.sb || \
            curl -4 -s --max-time 3 https://ifconfig.me || \
            echo "")
-    
+
     # 尝试获取 IPv6
     ipv6=$(curl -6 -s --max-time 3 https://api6.ipify.org 2>/dev/null || \
            curl -6 -s --max-time 3 https://ip.sb 2>/dev/null || \
            curl -6 -s --max-time 3 https://ifconfig.me 2>/dev/null || \
            echo "")
-    
+
     echo "$ipv4|$ipv6"
 }
 
@@ -197,13 +197,13 @@ detect_firewall_type() {
             return
         fi
     fi
-    
+
     # 检查 nftables 是否可用
     if command -v nft &>/dev/null && nft list tables &>/dev/null; then
         echo "nftables"
         return
     fi
-    
+
     # 回退到 iptables
     echo "iptables"
 }
@@ -214,13 +214,13 @@ configure_firewall_open_port() {
     local port="$1"
     local has_ipv6="$2"
     local firewall_info_file="$3"
-    
+
     local firewall_type
     firewall_type=$(detect_firewall_type)
-    
+
     print_info "Detected firewall type: $firewall_type"
     echo "FIREWALL_TYPE=$firewall_type" >> "$firewall_info_file"
-    
+
     case "$firewall_type" in
         ufw)
             # 使用 UFW 开放端口
@@ -242,7 +242,7 @@ configure_firewall_open_port() {
             # 使用 nftables 开放端口
             local nft_rules_file="/etc/nftables.d/wireguard.nft"
             mkdir -p /etc/nftables.d
-            
+
             # 检查 wireguard 表是否已存在
             if nft list table inet wireguard &>/dev/null; then
                 print_info "WireGuard nftables rules already exist, skipping"
@@ -260,12 +260,12 @@ table inet wireguard {
     }
 }
 NFT_EOF
-                
+
                 # 应用规则
                 if nft -f "$nft_rules_file" 2>/dev/null; then
                     print_success "Opened UDP port $port (nftables)"
                     echo "NFT_RULE_ADDED=true" >> "$firewall_info_file"
-                    
+
                     # 确保 nftables 服务开机自启并包含我们的规则
                     if [ -f /etc/nftables.conf ]; then
                         if ! grep -q 'include "/etc/nftables.d/\*.nft"' /etc/nftables.conf 2>/dev/null; then
@@ -294,9 +294,9 @@ configure_firewall_iptables() {
     local port="$1"
     local has_ipv6="$2"
     local firewall_info_file="$3"
-    
+
     echo "IPTABLES_USED=true" >> "$firewall_info_file"
-    
+
     if ! iptables -C INPUT -p udp --dport "$port" -j ACCEPT 2>/dev/null; then
         iptables -A INPUT -p udp --dport "$port" -j ACCEPT
         print_success "Opened UDP port $port (iptables IPv4)"
@@ -304,7 +304,7 @@ configure_firewall_iptables() {
     else
         echo "IPTABLES_V4_ADDED=false" >> "$firewall_info_file"
     fi
-    
+
     if [ "$has_ipv6" = "true" ]; then
         if ! ip6tables -C INPUT -p udp --dport "$port" -j ACCEPT 2>/dev/null; then
             ip6tables -A INPUT -p udp --dport "$port" -j ACCEPT
@@ -319,17 +319,17 @@ configure_firewall_iptables() {
 # 清理防火墙规则（卸载时调用）
 cleanup_firewall_rules() {
     local firewall_info_file="$1"
-    
+
     if [ ! -f "$firewall_info_file" ]; then
         print_warning "Firewall info file not found, skipping cleanup"
         return
     fi
-    
+
     # 读取安装时记录的信息
     source "$firewall_info_file"
     local wg_port=${PORT:-51820}
     local firewall_type=${FIREWALL_TYPE:-""}
-    
+
     case "$firewall_type" in
         ufw)
             if [ "${UFW_RULE_ADDED:-false}" = "true" ]; then
@@ -350,7 +350,7 @@ cleanup_firewall_rules() {
                 fi
                 # 删除规则文件
                 rm -f /etc/nftables.d/wireguard.nft 2>/dev/null
-                
+
                 # 如果 nftables.d 目录为空，删除目录和 include 配置
                 if [ -d /etc/nftables.d ] && [ -z "$(ls -A /etc/nftables.d 2>/dev/null)" ]; then
                     rmdir /etc/nftables.d 2>/dev/null
@@ -391,43 +391,43 @@ cleanup_firewall_rules() {
 # 如果没有安装返回空
 detect_wireguard_containers() {
     local result=""
-    
+
     # 检查 Docker 是否可用
     if ! command -v docker &>/dev/null; then
         echo ""
         return
     fi
-    
+
     # 扫描所有使用 wireguard 镜像的容器（包括已停止的）
     while IFS= read -r line; do
         [ -z "$line" ] && continue
-        
+
         local container_id=$(echo "$line" | awk '{print $1}')
         local container_name=$(echo "$line" | awk '{print $NF}')
         local image=$(echo "$line" | awk '{print $2}')
-        
+
         # 检查镜像是否为 WireGuard 相关
         if [[ "$image" == *wireguard* ]] || [[ "$container_name" == *wireguard* ]]; then
             # 尝试获取容器的挂载路径来确定安装目录
             local install_path=""
             local mount_info
             mount_info=$(docker inspect "$container_id" --format '{{range .Mounts}}{{if eq .Destination "/config"}}{{.Source}}{{end}}{{end}}' 2>/dev/null)
-            
+
             if [ -n "$mount_info" ]; then
                 # 从挂载路径推断安装目录（去掉 /config 后缀）
                 install_path=$(dirname "$mount_info")
             fi
-            
+
             # 判断是否为标准安装路径
             local is_standard="false"
             if [ "$install_path" = "$INSTALL_DIR" ]; then
                 is_standard="true"
             fi
-            
+
             result="${result}${container_name}|${container_id}|${image}|${install_path}|${is_standard}"$'\n'
         fi
     done < <(docker ps -a --format "{{.ID}} {{.Image}} {{.Names}}" 2>/dev/null)
-    
+
     echo "$result"
 }
 
@@ -436,7 +436,7 @@ detect_wireguard_containers() {
 get_nonstandard_wireguard_installs() {
     local containers
     containers=$(detect_wireguard_containers)
-    
+
     local nonstandard=""
     while IFS= read -r line; do
         [ -z "$line" ] && continue
@@ -445,7 +445,7 @@ get_nonstandard_wireguard_installs() {
             nonstandard="${nonstandard}${line}"$'\n'
         fi
     done <<< "$containers"
-    
+
     echo "$nonstandard"
 }
 
@@ -453,22 +453,22 @@ get_nonstandard_wireguard_installs() {
 # 仅提供卸载功能，不提供管理功能
 cleanup_nonstandard_wireguard() {
     check_root
-    
+
     local nonstandard
     nonstandard=$(get_nonstandard_wireguard_installs)
-    
+
     if [ -z "$nonstandard" ]; then
         print_info "No non-standard WireGuard installations detected"
         return 0
     fi
-    
+
     print_separator
     print_warning "Non-standard WireGuard Installation Detected"
     print_separator
     echo ""
     print_info "The following WireGuard installations are not managed by this script:"
     echo ""
-    
+
     local count=0
     local containers_info=()
     while IFS= read -r line; do
@@ -478,7 +478,7 @@ cleanup_nonstandard_wireguard() {
         local container_id=$(echo "$line" | cut -d'|' -f2)
         local image=$(echo "$line" | cut -d'|' -f3)
         local install_path=$(echo "$line" | cut -d'|' -f4)
-        
+
         containers_info+=("$line")
         echo "  ${count}) Container: ${container_name}"
         echo "     Image: ${image}"
@@ -486,29 +486,29 @@ cleanup_nonstandard_wireguard() {
         [ -n "$install_path" ] && echo "     Path: ${install_path}"
         echo ""
     done <<< "$nonstandard"
-    
+
     print_separator
     echo ""
     print_warning "These installations can only be cleaned up (uninstalled)."
     print_info "Management features are only available for standard installations."
     echo ""
-    
+
     read -p "Clean up all non-standard installations? (y/N): " confirm
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         print_info "Cleanup cancelled"
         return 0
     fi
-    
+
     # 逐个清理
     for info in "${containers_info[@]}"; do
         local container_name=$(echo "$info" | cut -d'|' -f1)
         local container_id=$(echo "$info" | cut -d'|' -f2)
         local install_path=$(echo "$info" | cut -d'|' -f4)
-        
+
         print_info "Stopping and removing container: ${container_name}..."
         docker stop "$container_id" 2>/dev/null || true
         docker rm "$container_id" 2>/dev/null || true
-        
+
         # 如果有安装路径，询问是否删除
         if [ -n "$install_path" ] && [ -d "$install_path" ]; then
             read -p "Delete installation directory ${install_path}? (y/N): " del_dir
@@ -517,13 +517,13 @@ cleanup_nonstandard_wireguard() {
                 print_success "Removed directory: ${install_path}"
             fi
         fi
-        
+
         print_success "Cleaned up: ${container_name}"
     done
-    
+
     print_separator
     print_success "Non-standard WireGuard installations cleaned up"
-    
+
     # 询问是否清理镜像
     echo ""
     read -p "Also remove WireGuard Docker image? (y/N): " remove_image
@@ -630,21 +630,21 @@ inject_primary_route_rules() {
 # 返回: 0=支持IPv6, 1=不支持IPv6
 check_config_has_ipv6() {
     local config_file="$1"
-    
+
     if [ ! -f "$config_file" ]; then
         return 1
     fi
-    
+
     # 检查 AllowedIPs 中是否包含 ::/0（表示服务端支持 IPv6）
     if grep -qE 'AllowedIPs[[:space:]]*=.*::/0' "$config_file"; then
         return 0
     fi
-    
+
     # 也检查 Address 中是否包含 IPv6 地址
     if grep -qE 'Address[[:space:]]*=.*:' "$config_file"; then
         return 0
     fi
-    
+
     return 1
 }
 
@@ -653,25 +653,25 @@ check_config_has_ipv6() {
 disable_client_ipv6() {
     local backup_file="/etc/wireguard/.ipv6_sysctl_backup"
     local sysctl_conf="/etc/sysctl.d/99-wireguard-noipv6.conf"
-    
+
     # 定义 sysctl 配置内容
     local sysctl_content="# WireGuard 客户端 IPv6 禁用配置
 # 由 WireGuard 安装脚本自动生成
 # 原因：服务端不支持 IPv6，禁用以防止 IPv6 流量泄漏
 net.ipv6.conf.all.disable_ipv6=1
 net.ipv6.conf.default.disable_ipv6=1"
-    
+
     # 如果已经存在禁用配置，直接重新应用设置（防止重启后失效）
     if [ -f "$backup_file" ] || [ -f "$sysctl_conf" ]; then
         # 确保 sysctl 配置存在
         [ ! -f "$sysctl_conf" ] && echo "$sysctl_content" > "$sysctl_conf"
-        
+
         # 确保备份文件存在
         if [ ! -f "$backup_file" ]; then
             echo "IPV6_DISABLED_BY_WG=true" > "$backup_file"
             echo "DISABLED_AT=$(date +%Y%m%d_%H%M%S)" >> "$backup_file"
         fi
-        
+
         # 重新应用禁用设置（同时加载配置文件确保持久化）
         sysctl -p "$sysctl_conf" > /dev/null 2>&1 || {
             sysctl -w net.ipv6.conf.all.disable_ipv6=1 > /dev/null 2>&1
@@ -680,26 +680,26 @@ net.ipv6.conf.default.disable_ipv6=1"
         print_success "IPv6 disable settings reapplied"
         return 0
     fi
-    
+
     # 首次禁用：检查客户端本机是否有 IPv6
     if ! ip -6 addr show scope global 2>/dev/null | grep -q "inet6"; then
         print_info "Client has no IPv6, no need to disable"
         return 0
     fi
-    
+
     # 备份当前 IPv6 设置状态（仅记录是否被我们禁用过）
     echo "IPV6_DISABLED_BY_WG=true" > "$backup_file"
     echo "DISABLED_AT=$(date +%Y%m%d_%H%M%S)" >> "$backup_file"
-    
+
     # 创建 sysctl 配置禁用 IPv6
     echo "$sysctl_content" > "$sysctl_conf"
-    
+
     # 立即应用（加载配置文件以确保持久化生效）
     sysctl -p "$sysctl_conf" > /dev/null 2>&1 || {
         sysctl -w net.ipv6.conf.all.disable_ipv6=1 > /dev/null 2>&1
         sysctl -w net.ipv6.conf.default.disable_ipv6=1 > /dev/null 2>&1
     }
-    
+
     print_success "Client IPv6 disabled (leak prevention)"
     print_info "Reason: Server does not support IPv6, disabling client IPv6 to prevent traffic leakage"
 }
@@ -709,29 +709,29 @@ net.ipv6.conf.default.disable_ipv6=1"
 restore_client_ipv6() {
     local backup_file="/etc/wireguard/.ipv6_sysctl_backup"
     local sysctl_conf="/etc/sysctl.d/99-wireguard-noipv6.conf"
-    
+
     # 检查是否是我们禁用的 IPv6
     if [ ! -f "$backup_file" ]; then
         return 0
     fi
-    
+
     if ! grep -q "IPV6_DISABLED_BY_WG=true" "$backup_file" 2>/dev/null; then
         return 0
     fi
-    
+
     # 删除 sysctl 配置
     if [ -f "$sysctl_conf" ]; then
         rm -f "$sysctl_conf"
         print_info "IPv6 disable configuration removed"
     fi
-    
+
     # 恢复 IPv6
     sysctl -w net.ipv6.conf.all.disable_ipv6=0 > /dev/null 2>&1
     sysctl -w net.ipv6.conf.default.disable_ipv6=0 > /dev/null 2>&1
-    
+
     # 删除备份文件
     rm -f "$backup_file"
-    
+
     print_success "Client IPv6 settings restored"
 }
 
@@ -743,16 +743,16 @@ install_server() {
     print_separator
     print_info "Installing WireGuard server..."
     print_separator
-    
+
     # 检查权限
     check_root
-    
+
     # 检查系统版本
     check_system
-    
+
     # 检查 Docker
     check_docker
-    
+
     # 检查目录是否存在
     if [ -d "$INSTALL_DIR" ]; then
         print_error "Directory $INSTALL_DIR already exists!"
@@ -765,14 +765,14 @@ install_server() {
         echo "  2. Or choose a different installation directory"
         exit 1
     fi
-    
+
     # 获取服务器信息
     print_info "Detecting server configuration..."
-    
+
     local ip_info=$(get_public_ip)
     local server_ipv4=$(echo "$ip_info" | cut -d'|' -f1)
     local server_ipv6=$(echo "$ip_info" | cut -d'|' -f2)
-    
+
     if [ -z "$server_ipv4" ]; then
         print_error "Unable to get server public IPv4 address"
         read -p "Please enter server public IP manually: " server_ipv4
@@ -781,11 +781,11 @@ install_server() {
             exit 1
         fi
     fi
-    
+
     local timezone=$(get_timezone)
     local has_ipv6=false
     local subnet_v6=""
-    
+
     # 获取默认出口网卡名称
     local default_iface
     default_iface=$(ip -4 route show default | awk '/default/ {print $5}' | head -n1)
@@ -795,7 +795,7 @@ install_server() {
     else
         print_info "Detected default interface: $default_iface"
     fi
-    
+
     if check_ipv6_support && [ -n "$server_ipv6" ]; then
         has_ipv6=true
         print_success "IPv6 support detected"
@@ -805,13 +805,13 @@ install_server() {
         print_warning "No IPv6 support detected, configuring IPv4 only"
         print_info "IPv4 address: $server_ipv4"
     fi
-    
+
     print_info "Timezone: $timezone"
-    
+
     # 询问配置参数
     echo ""
     print_info "Configuration parameters (press Enter for defaults):"
-    
+
     # 端口验证（1-65535）
     while true; do
         read -p "WireGuard port [default: $DEFAULT_PORT]: " server_port
@@ -822,7 +822,7 @@ install_server() {
             print_error "Invalid port number (must be 1-65535)"
         fi
     done
-    
+
     # Peer 数量验证（仅允许 1-3）
     while true; do
         read -p "Number of clients (1-3) [default: $DEFAULT_PEERS]: " peers
@@ -833,10 +833,10 @@ install_server() {
             print_error "Number of clients must be between 1 and 3"
         fi
     done
-    
+
     read -p "DNS server [default: $DEFAULT_DNS]: " dns
     dns=${dns:-$DEFAULT_DNS}
-    
+
     # 内网子网验证（IPv4 格式）
     while true; do
         read -p "Internal subnet [default: $DEFAULT_SUBNET]: " subnet
@@ -857,12 +857,12 @@ install_server() {
         fi
         print_error "Invalid subnet format (e.g., 10.13.13.0)"
     done
-    
+
     if [ "$has_ipv6" = true ]; then
         read -p "Internal IPv6 subnet [default: $DEFAULT_SUBNET_V6]: " subnet_v6
         subnet_v6=${subnet_v6:-$DEFAULT_SUBNET_V6}
     fi
-    
+
     # MTU 配置
     while true; do
         read -p "MTU value [default: $DEFAULT_MTU]: " mtu
@@ -873,23 +873,23 @@ install_server() {
             print_error "Invalid MTU value (must be 1280-1500)"
         fi
     done
-    
+
     # 配置 AllowedIPs
     local allowed_ips="0.0.0.0/0"
     if [ "$has_ipv6" = true ]; then
         allowed_ips="0.0.0.0/0, ::/0"
     fi
-    
+
     local compose_ipv6_env=""
     if [ "$has_ipv6" = true ]; then
         compose_ipv6_env="      - INTERNAL_SUBNET_V6=$subnet_v6"
     fi
-    
+
     # 创建安装目录
     print_info "Creating installation directory: $INSTALL_DIR"
     mkdir -p "$INSTALL_DIR"
     cd "$INSTALL_DIR"
-    
+
     # 创建 docker-compose.yaml
     print_info "Generating docker-compose.yaml..."
     cat > "$COMPOSE_FILE" <<EOF
@@ -919,51 +919,64 @@ $compose_ipv6_env
 EOF
 
     print_success "docker-compose.yaml created successfully"
-    
+
     # 配置内核参数（IP 转发）
     print_info "Configuring kernel parameters..."
-    
+
     # 创建或更新 sysctl 配置
     cat > /etc/sysctl.d/99-wireguard.conf <<SYSCTL_EOF
 # WireGuard 需要的内核参数
 net.ipv4.ip_forward=1
 net.ipv4.conf.all.src_valid_mark=1
 SYSCTL_EOF
-    
+
     if [ "$has_ipv6" = true ]; then
         cat >> /etc/sysctl.d/99-wireguard.conf <<SYSCTL_EOF
 net.ipv6.conf.all.forwarding=1
 net.ipv6.conf.default.forwarding=1
+net.ipv6.conf.all.accept_ra=2
+net.ipv6.conf.default.accept_ra=2
 SYSCTL_EOF
+        # 已存在的网卡（如 eth0）不会继承 all/default 的 accept_ra；
+        # 开启转发后内核会丢弃 RA 且不再发送 RS，必须按接口名显式写入
+        # accept_ra=2，否则重启后 SLAAC IPv6 地址丢失
+        local v6_nics v6_nic
+        v6_nics=$({
+            ip -6 route show default 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); break } }'
+            ip -6 -o addr show scope global 2>/dev/null | awk '{print $2}'
+        } | awk '!seen[$0]++ && NF')
+        for v6_nic in $v6_nics; do
+            echo "net.ipv6.conf.${v6_nic}.accept_ra=2" >> /etc/sysctl.d/99-wireguard.conf
+        done
     fi
-    
+
     # 应用 sysctl 配置
     sysctl -p /etc/sysctl.d/99-wireguard.conf > /dev/null 2>&1
     print_success "Kernel parameters applied"
-    
+
     # 配置防火墙规则（自动检测 UFW/nftables/iptables）
     print_info "Configuring firewall rules..."
-    
+
     # 记录添加的规则信息（用于卸载时清理）
     local firewall_info_file="$INSTALL_DIR/.firewall_info"
     echo "PORT=$server_port" > "$firewall_info_file"
     echo "IPV6=$has_ipv6" >> "$firewall_info_file"
-    
+
     # 调用统一的防火墙配置函数
     configure_firewall_open_port "$server_port" "$has_ipv6" "$firewall_info_file"
     print_success "Firewall rules configured"
 
-    
+
     # 启动容器
     print_separator
     print_info "Starting WireGuard container..."
-    
+
     docker compose up -d
-    
+
     # 等待容器启动
     print_info "Waiting for container to initialise (this may take a few seconds)..."
     sleep 5
-    
+
     # 检查容器状态
     if docker ps | grep -q wireguard; then
         print_success "WireGuard container started successfully!"
@@ -971,7 +984,7 @@ SYSCTL_EOF
         print_error "WireGuard container failed to start, check logs: docker logs wireguard"
         exit 1
     fi
-    
+
     # 等待配置文件生成
     print_info "Waiting for configuration files to generate..."
     local max_wait=30
@@ -980,15 +993,15 @@ SYSCTL_EOF
         sleep 1
         waited=$((waited + 1))
     done
-    
+
     if [ ! -f "$INSTALL_DIR/config/peer1/peer1.conf" ]; then
         print_error "Configuration file generation timed out, check logs: docker logs wireguard"
         exit 1
     fi
-    
+
     # 修复服务端配置文件中的网卡名称（适用于所有情况，包括纯 IPv4）
     local server_conf="$INSTALL_DIR/config/wg_confs/wg0.conf"
-    
+
     # 等待服务端配置文件生成
     local conf_wait=10
     local conf_waited=0
@@ -996,91 +1009,91 @@ SYSCTL_EOF
         sleep 1
         conf_waited=$((conf_waited + 1))
     done
-    
+
     if [ -f "$server_conf" ]; then
         # 修复 iptables 规则中的网卡名称（将 eth+ 替换为实际网卡）
         # 这对于纯 IPv4 和双栈服务器都是必需的
         if grep -q "eth+" "$server_conf"; then
             sed -i "s|eth+|${default_iface}|g" "$server_conf"
             print_success "Server interface configuration fixed: eth+ -> $default_iface"
-            
+
             # 重启容器以应用新配置
             print_info "Restarting WireGuard container to apply interface configuration..."
             docker compose restart
             sleep 2
         fi
     fi
-    
+
     # 如果支持 IPv6，修复配置文件添加 ip6tables 规则和 IPv6 地址
     if [ "$has_ipv6" = true ]; then
         print_info "Fixing IPv6 configuration..."
         # 从子网地址提取前缀（如 fd13:13:13::/64 -> fd13:13:13）
         local ipv6_prefix=$(echo "$subnet_v6" | sed -E 's|::/[0-9]+$||; s|::$||')
-        
+
         if [ -f "$server_conf" ]; then
             # 备份原配置
             cp "$server_conf" "${server_conf}.backup"
-            
+
             # 修复服务端配置：添加 IPv6 地址到 Address
             sed -i "s|^Address = \(.*\)$|Address = \1, ${ipv6_prefix}::1/64|" "$server_conf"
-            
+
             # 添加 ip6tables 规则（在现有 PostUp 后添加）
             if ! grep -q "ip6tables" "$server_conf"; then
                 sed -i "/^PostUp = iptables/a PostUp = ip6tables -A FORWARD -i %i -j ACCEPT; ip6tables -A FORWARD -o %i -j ACCEPT; ip6tables -t nat -A POSTROUTING -o ${default_iface} -j MASQUERADE" "$server_conf"
                 sed -i "/^PostDown = iptables/a PostDown = ip6tables -D FORWARD -i %i -j ACCEPT; ip6tables -D FORWARD -o %i -j ACCEPT; ip6tables -t nat -D POSTROUTING -o ${default_iface} -j MASQUERADE" "$server_conf"
             fi
-            
+
             # 修复 Peer 的 AllowedIPs：添加 IPv6 地址
             # 提取 IPv4 子网前缀（如 10.13.13.0 -> 10.13.13）
             local ipv4_prefix=$(echo "$subnet" | sed 's/\.[0-9]*$//')
-            
+
             local peer_num=1
             while [ $peer_num -le $peers ]; do
                 local peer_ipv4="${ipv4_prefix}.$((peer_num + 1))"
                 local peer_ipv6="${ipv6_prefix}::$((peer_num + 1))/128"
-                
+
                 # 在服务端配置中为每个 peer 添加 IPv6 AllowedIPs
                 if grep -q "AllowedIPs = .*${peer_ipv4}/32" "$server_conf"; then
                     sed -i "s|AllowedIPs = ${peer_ipv4}/32$|AllowedIPs = ${peer_ipv4}/32, ${peer_ipv6}|" "$server_conf"
                 fi
-                
+
                 peer_num=$((peer_num + 1))
             done
-            
+
             print_success "Server IPv6 configuration fixed"
         fi
-        
+
         # 修复所有客户端配置文件
         for peer_num in $(seq 1 $peers); do
             local peer_conf="$INSTALL_DIR/config/peer${peer_num}/peer${peer_num}.conf"
             if [ -f "$peer_conf" ]; then
                 # 备份
                 cp "$peer_conf" "${peer_conf}.backup"
-                
+
                 # 添加 IPv6 地址到客户端 Address
                 local peer_ipv6="${ipv6_prefix}::$((peer_num + 1))/64"
                 sed -i "s|^Address = \(.*\)$|Address = \1, ${peer_ipv6}|" "$peer_conf"
-                
+
                 print_success "Client peer${peer_num} IPv6 configuration fixed"
             fi
         done
-        
+
         # 重启容器以应用新配置
         print_info "Restarting WireGuard container to apply IPv6 configuration..."
         docker compose restart
-        
+
         sleep 3
-        
+
         if docker ps | grep -q wireguard; then
             print_success "WireGuard container restarted successfully, IPv6 enabled"
         else
             print_error "Container restart failed, please check logs"
         fi
     fi
-    
+
     # 添加 MTU 配置到服务端和客户端
     print_info "Configuring MTU settings (MTU=$mtu)..."
-    
+
     # 在服务端配置中添加 MTU
     if [ -f "$server_conf" ]; then
         if ! grep -q "^MTU = " "$server_conf"; then
@@ -1089,7 +1102,7 @@ SYSCTL_EOF
             print_success "Server MTU configured: $mtu"
         fi
     fi
-    
+
     # 在所有客户端配置中添加 MTU 和 PersistentKeepalive
     for peer_num in $(seq 1 $peers); do
         local peer_conf="$INSTALL_DIR/config/peer${peer_num}/peer${peer_num}.conf"
@@ -1098,28 +1111,28 @@ SYSCTL_EOF
             if ! grep -q "^MTU = " "$peer_conf"; then
                 sed -i "/^\[Interface\]/a MTU = $mtu" "$peer_conf"
             fi
-            
+
             # 添加 PersistentKeepalive 到 [Peer] 段
             if ! grep -q "^PersistentKeepalive = " "$peer_conf"; then
                 sed -i "/^\[Peer\]/a PersistentKeepalive = $DEFAULT_KEEPALIVE" "$peer_conf"
             fi
-            
+
             print_success "Client peer${peer_num} MTU and PersistentKeepalive configured"
         fi
     done
-    
+
     # 重启容器以应用 MTU 配置
     print_info "Restarting WireGuard container to apply MTU configuration..."
     docker compose restart
     sleep 2
-    
-    
+
+
     # 显示服务端配置信息
     print_separator
     print_success "WireGuard server installation complete!"
     print_separator
     echo ""
-    
+
     print_info "Configuration details:"
     echo "  Server address: $server_ipv4:$server_port"
     if [ "$has_ipv6" = true ]; then
@@ -1132,12 +1145,12 @@ SYSCTL_EOF
     fi
     echo "  MTU: $mtu"
     echo ""
-    
+
     print_info "Configuration file locations:"
     echo "  Server: $INSTALL_DIR/config/wg_confs/wg0.conf"
     echo "  Clients: $INSTALL_DIR/config/peer1/, peer2/, ..."
     echo ""
-    
+
     print_info "Management commands:"
     echo "  View client config: run script and select option 3"
     echo "  Restart/stop/start: docker compose -f $COMPOSE_FILE restart|stop|start"
@@ -1150,14 +1163,14 @@ show_server_config() {
         print_error "WireGuard server is not installed"
         exit 1
     fi
-    
+
     local server_config="$INSTALL_DIR/config/wg_confs/wg0.conf"
-    
+
     print_separator
     print_info "WireGuard Server Configuration"
     print_separator
     echo ""
-    
+
     # 显示服务端配置
     if [ -f "$server_config" ]; then
         cat "$server_config"
@@ -1167,7 +1180,7 @@ show_server_config() {
         print_warning "Server configuration file does not exist: $server_config"
         print_info "Please check if the service is running properly"
     fi
-    
+
     print_separator
 }
 
@@ -1177,18 +1190,18 @@ show_client_config() {
         print_error "WireGuard server is not installed"
         exit 1
     fi
-    
+
     local config_dir="$INSTALL_DIR/config"
-    
+
     print_separator
     print_info "WireGuard Client Configuration List"
     print_separator
     echo ""
-    
+
     # 查找所有 peer 目录
     local peer_count=0
     local peer_dirs=()
-    
+
     if [ -d "$config_dir" ]; then
         # 查找所有 peer 目录（peer1, peer2, peer3...）
         while IFS= read -r -d '' peer_dir; do
@@ -1196,19 +1209,19 @@ show_client_config() {
             peer_count=$((peer_count + 1))
         done < <(find "$config_dir" -maxdepth 1 -type d -name "peer*" -print0 | sort -z)
     fi
-    
+
     if [ $peer_count -eq 0 ]; then
         print_warning "No client configurations found"
         print_info "Please check if the service is running properly"
     else
         print_success "Found $peer_count client configuration(s)"
         echo ""
-        
+
         # 显示所有 peer 的配置
         for peer_dir in "${peer_dirs[@]}"; do
             local peer_name=$(basename "$peer_dir")
             local peer_config="$peer_dir/$peer_name.conf"
-            
+
             if [ -f "$peer_config" ]; then
                 print_info "=== $peer_name ==="
                 print_separator
@@ -1220,7 +1233,7 @@ show_client_config() {
             fi
         done
     fi
-    
+
     print_separator
 }
 
@@ -1230,11 +1243,11 @@ show_server_status() {
         print_error "WireGuard server is not installed"
         exit 1
     fi
-    
+
     print_separator
     print_info "WireGuard Service Status:"
     print_separator
-    
+
     if docker ps | grep -q wireguard; then
         print_success "Service is running"
         echo ""
@@ -1254,22 +1267,22 @@ uninstall_server() {
         print_error "WireGuard server is not installed"
         exit 1
     fi
-    
+
     check_root
-    
+
     print_warning "About to uninstall WireGuard server"
     read -p "Confirm uninstall? This will delete all configuration files (y/N): " confirm
-    
+
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         print_info "Uninstall cancelled"
         exit 0
     fi
-    
+
     # 停止并删除容器
     print_info "Stopping and removing container..."
     cd "$INSTALL_DIR"
     docker compose down
-    
+
     # 清除内核参数配置
     if [ -f /etc/sysctl.d/99-wireguard.conf ]; then
         print_info "Removing kernel parameter configuration..."
@@ -1278,30 +1291,30 @@ uninstall_server() {
         sysctl --system > /dev/null 2>&1
         print_success "Kernel parameter configuration removed"
     fi
-    
+
     # 清除防火墙规则
     print_info "Removing firewall rules..."
     local firewall_info_file="$INSTALL_DIR/.firewall_info"
     cleanup_firewall_rules "$firewall_info_file"
-    
+
     # 删除安装目录
     print_info "Removing installation directory..."
     cd /
     rm -rf "$INSTALL_DIR"
-    
+
     print_success "WireGuard server uninstalled"
-    
+
     # 询问是否删除 Docker 镜像
     echo ""
     read -p "Also remove WireGuard Docker image? (y/N): " remove_image
-    
+
     if [[ "$remove_image" =~ ^[Yy]$ ]]; then
         print_info "Looking for WireGuard image..."
-        
+
         if docker images | grep -q "linuxserver/wireguard"; then
             print_info "Removing WireGuard image..."
             docker rmi $(docker images linuxserver/wireguard -q) 2>/dev/null
-            
+
             if [ $? -eq 0 ]; then
                 print_success "WireGuard image removed"
             else
@@ -1323,13 +1336,13 @@ install_client() {
     print_separator
     print_info "Installing WireGuard client..."
     print_separator
-    
+
     # 检查权限
     check_root
-    
+
     # 检查系统版本
     check_system
-    
+
     # 检查是否已安装
     if command -v wg &> /dev/null; then
         print_warning "WireGuard is already installed"
@@ -1344,11 +1357,11 @@ install_client() {
         # 更新软件包列表
         print_info "Updating package list..."
         apt update
-        
+
         # 安装 WireGuard 和 resolvconf
         print_info "Installing WireGuard and resolvconf..."
         apt install wireguard resolvconf -y
-        
+
         if command -v wg &> /dev/null; then
             print_success "WireGuard installed successfully"
             wg --version
@@ -1357,15 +1370,15 @@ install_client() {
             exit 1
         fi
     fi
-    
+
     echo ""
     print_separator
     print_info "Configuring WireGuard Client"
     print_separator
-    
+
     # 配置文件路径
     local config_file="/etc/wireguard/wg0.conf"
-    
+
     # 检查配置文件是否已存在
     if [ -f "$config_file" ]; then
         print_warning "Configuration file $config_file already exists"
@@ -1378,7 +1391,7 @@ install_client() {
             return
         fi
     fi
-    
+
     echo ""
     print_info "Please enter WireGuard configuration (obtained from server)"
     print_info "Configuration example:"
@@ -1398,15 +1411,15 @@ install_client() {
     echo "# PersistentKeepalive = 25 (will be auto-added if missing)"
     echo ""
     print_separator
-    
+
     print_info "Paste the WireGuard configuration directly"
     print_warning "After pasting, type EOF on a new line and press Enter"
     echo ""
-    
+
     # 创建临时文件存储原始输入，并设置 trap 确保清理
     local temp_file=$(mktemp)
     trap "rm -f '$temp_file'" EXIT
-    
+
     while IFS= read -r line; do
         if [ "$line" = "EOF" ]; then
             break
@@ -1418,21 +1431,21 @@ install_client() {
     filter_wireguard_config "$temp_file" "$config_file"
     rm -f "$temp_file"
     trap - EXIT  # 恢复 trap
-    
+
     # 检查配置文件是否有内容
     if [ ! -s "$config_file" ]; then
         print_error "Configuration file is empty, please reconfigure"
         rm -f "$config_file"
         exit 1
     fi
-    
+
     # 注入主机保留路由规则，确保 SSH 不经 WireGuard
     inject_primary_route_rules "$config_file"
-    
+
     # 设置权限
     chmod 600 "$config_file"
     print_success "Configuration file saved to $config_file"
-    
+
     # 检测服务端是否支持 IPv6，如果不支持则禁用客户端 IPv6 防止泄漏
     echo ""
     print_info "Checking server IPv6 support..."
@@ -1442,10 +1455,10 @@ install_client() {
         print_warning "Server does not support IPv6"
         disable_client_ipv6
     fi
-    
+
     # 确保配置文件包含 MTU 和 PersistentKeepalive
     print_info "Checking MTU and PersistentKeepalive settings..."
-    
+
     # 如果配置中没有 MTU，添加默认值
     if ! grep -q "^MTU = " "$config_file"; then
         sed -i "/^\[Interface\]/a MTU = $DEFAULT_MTU" "$config_file"
@@ -1453,7 +1466,7 @@ install_client() {
     else
         print_info "MTU already configured"
     fi
-    
+
     # 如果配置中没有 PersistentKeepalive，添加到 [Peer] 段
     if ! grep -q "^PersistentKeepalive = " "$config_file"; then
         sed -i "/^\[Peer\]/a PersistentKeepalive = $DEFAULT_KEEPALIVE" "$config_file"
@@ -1461,21 +1474,21 @@ install_client() {
     else
         print_info "PersistentKeepalive already configured"
     fi
-    
+
     # 显示配置内容
     echo ""
     print_info "Current configuration:"
     print_separator
     cat "$config_file"
     print_separator
-    
+
     # 询问是否立即启动
     echo ""
     read -p "Start WireGuard now? (Y/n): " start_now
-    
+
     if [[ ! "$start_now" =~ ^[Nn]$ ]]; then
         restart_wireguard_client
-        
+
         # 自动检测最佳 MTU
         echo ""
         print_info "Detecting optimal MTU for your connection..."
@@ -1493,15 +1506,15 @@ install_client() {
 # 重启 WireGuard 客户端
 restart_wireguard_client() {
     print_info "Restarting WireGuard..."
-    
+
     local config_file="/etc/wireguard/wg0.conf"
-    
+
     # 如果已经运行，先停止
     if wg show wg0 &> /dev/null; then
         print_info "WireGuard is already running, stopping first..."
         wg-quick down wg0
     fi
-    
+
     # 每次启动前检查并应用 IPv6 设置（防止重启后 sysctl 失效）
     if [ -f "$config_file" ]; then
         if ! check_config_has_ipv6 "$config_file"; then
@@ -1514,7 +1527,7 @@ restart_wireguard_client() {
             fi
         fi
     fi
-    
+
     # 启动
     if wg-quick up wg0; then
         print_success "WireGuard started successfully!"
@@ -1532,7 +1545,7 @@ restart_wireguard_client() {
         print_error "WireGuard failed to start, please check configuration"
         exit 1
     fi
-    
+
     # 询问是否设置开机自启
     echo ""
     read -p "Enable start on boot? (y/N): " enable_autostart
@@ -1548,24 +1561,24 @@ show_client_status() {
         print_error "WireGuard is not installed"
         exit 1
     fi
-    
+
     print_separator
     print_info "WireGuard Client Status:"
     print_separator
-    
+
     if wg show wg0 &> /dev/null; then
         print_success "WireGuard is running"
         echo ""
         wg show wg0
         echo ""
-        
+
         # 检查服务状态
         if systemctl is-enabled wg-quick@wg0 &> /dev/null; then
             print_info "Start on boot: Enabled"
         else
             print_info "Start on boot: Disabled"
         fi
-        
+
         # 显示 MTU 配置
         print_info "MTU: $(get_client_current_mtu)"
     else
@@ -1577,12 +1590,12 @@ show_client_status() {
 # 停止 WireGuard 客户端
 stop_wireguard_client() {
     check_root
-    
+
     if ! wg show wg0 &> /dev/null; then
         print_warning "WireGuard is not running"
         return
     fi
-    
+
     print_info "Stopping WireGuard..."
     if wg-quick down wg0; then
         print_success "WireGuard stopped"
@@ -1595,40 +1608,40 @@ stop_wireguard_client() {
 # 重新配置 WireGuard 客户端
 reconfigure_client() {
     check_root
-    
+
     if ! command -v wg &> /dev/null; then
         print_error "WireGuard is not installed, please install the client first"
         return
     fi
-    
+
     print_separator
     print_info "Reconfiguring WireGuard Client"
     print_separator
-    
+
     local config_file="/etc/wireguard/wg0.conf"
-    
+
     # 如果正在运行，先停止
     if wg show wg0 &> /dev/null; then
         print_info "Stopping current WireGuard connection..."
         wg-quick down wg0
     fi
-    
+
     # 备份现有配置
     if [ -f "$config_file" ]; then
         local backup_file="${config_file}.backup.$(date +%Y%m%d_%H%M%S)"
         cp "$config_file" "$backup_file"
         print_success "Backed up existing configuration to $backup_file"
     fi
-    
+
     echo ""
     print_info "Please enter new WireGuard configuration (obtained from server)"
     print_warning "After pasting, type EOF on a new line and press Enter"
     echo ""
-    
+
     # 创建临时文件存储原始输入，并设置 trap 确保清理
     local temp_file=$(mktemp)
     trap "rm -f '$temp_file'" EXIT
-    
+
     while IFS= read -r line; do
         if [ "$line" = "EOF" ]; then
             break
@@ -1640,7 +1653,7 @@ reconfigure_client() {
     filter_wireguard_config "$temp_file" "$config_file"
     rm -f "$temp_file"
     trap - EXIT  # 恢复 trap
-    
+
     # 检查配置文件是否有内容
     if [ ! -s "$config_file" ]; then
         print_error "Configuration file is empty, please reconfigure"
@@ -1651,13 +1664,13 @@ reconfigure_client() {
         fi
         return
     fi
-    
+
     # 注入主机保留路由规则
     inject_primary_route_rules "$config_file"
-    
+
     chmod 600 "$config_file"
     print_success "Configuration file updated"
-    
+
     # 检测服务端是否支持 IPv6，如果不支持则禁用客户端 IPv6 防止泄漏
     echo ""
     print_info "Checking server IPv6 support..."
@@ -1669,21 +1682,21 @@ reconfigure_client() {
         print_warning "Server does not support IPv6"
         disable_client_ipv6
     fi
-    
+
     # 显示配置内容
     echo ""
     print_info "New configuration:"
     print_separator
     cat "$config_file"
     print_separator
-    
+
     # 询问是否立即启动
     echo ""
     read -p "Start WireGuard now? (Y/n): " start_now
-    
+
     if [[ ! "$start_now" =~ ^[Nn]$ ]]; then
         restart_wireguard_client
-        
+
         # 自动检测最佳 MTU
         echo ""
         print_info "Detecting optimal MTU for your connection..."
@@ -1695,39 +1708,39 @@ reconfigure_client() {
 # 卸载 WireGuard 客户端
 uninstall_client() {
     check_root
-    
+
     print_warning "About to uninstall WireGuard client"
     read -p "Confirm uninstall? This will delete configuration files (y/N): " confirm
-    
+
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         print_info "Uninstall cancelled"
         return
     fi
-    
+
     # 停止服务
     if wg show wg0 &> /dev/null; then
         print_info "Stopping WireGuard..."
         wg-quick down wg0
     fi
-    
+
     # 禁用开机自启
     if systemctl is-enabled wg-quick@wg0 &> /dev/null; then
         systemctl disable wg-quick@wg0
     fi
-    
+
     # 恢复 IPv6 设置（如果之前被禁用过）
     print_info "Checking IPv6 settings..."
     restore_client_ipv6
-    
+
     # 卸载软件包
     print_info "Uninstalling WireGuard..."
     apt remove --purge wireguard -y
     apt autoremove -y
     hash -r 2>/dev/null || true
-    
+
     # 删除配置目录
     rm -rf /etc/wireguard
-    
+
     print_success "WireGuard client uninstalled"
 }
 
@@ -1739,12 +1752,12 @@ uninstall_client() {
 get_server_internal_ip() {
     local config_file="/etc/wireguard/wg0.conf"
     local server_ip=""
-    
+
     if [ -f "$config_file" ]; then
         # 从 AllowedIPs 中提取服务端 IP（取网段的 .1 地址）
         local allowed_ips
         allowed_ips=$(grep -E "^AllowedIPs" "$config_file" | head -n1 | sed 's/AllowedIPs = //')
-        
+
         # 如果是全流量代理模式，尝试从 Address 推断服务端 IP
         if [[ "$allowed_ips" == *"0.0.0.0/0"* ]]; then
             local client_addr
@@ -1755,12 +1768,12 @@ get_server_internal_ip() {
             fi
         fi
     fi
-    
+
     # 如果无法获取，使用默认值
     if [ -z "$server_ip" ]; then
         server_ip=$(echo "$DEFAULT_SUBNET" | sed 's/\.0$/.1/')
     fi
-    
+
     echo "$server_ip"
 }
 
@@ -1768,11 +1781,11 @@ get_server_internal_ip() {
 get_client_current_mtu() {
     local config_file="/etc/wireguard/wg0.conf"
     local current_mtu=""
-    
+
     if [ -f "$config_file" ]; then
         current_mtu=$(grep -E "^MTU = " "$config_file" | head -n1 | sed 's/MTU = //')
     fi
-    
+
     if [ -n "$current_mtu" ]; then
         echo "$current_mtu"
     else
@@ -1786,27 +1799,27 @@ detect_optimal_mtu() {
     print_info "Optimal MTU Detection"
     print_separator
     echo ""
-    
+
     # 检查客户端是否已安装并运行
     if ! command -v wg &> /dev/null; then
         print_error "WireGuard client is not installed"
         return 1
     fi
-    
+
     if ! wg show wg0 &> /dev/null 2>&1; then
         print_error "WireGuard client is not running"
         print_info "Please start the client first: wg-quick up wg0"
         return 1
     fi
-    
+
     # 获取服务端内网 IP
     local target
     target=$(get_server_internal_ip)
-    
+
     print_info "Target server IP: $target"
     print_info "Current client MTU: $(get_client_current_mtu)"
     echo ""
-    
+
     # 先测试能否连接到服务端
     print_info "Testing connectivity to server..."
     if ! ping -c 1 -W 2 "$target" > /dev/null 2>&1; then
@@ -1816,21 +1829,21 @@ detect_optimal_mtu() {
     fi
     print_success "Server is reachable"
     echo ""
-    
+
     local MIN=1200   # 探测下限
     local MAX=1472   # 探测上限 (1500 MTU - 28 bytes header)
     local BEST_PAYLOAD=0
-    
+
     print_separator
     print_info "Detecting optimal MTU for target $target..."
     print_info "Payload range: $MIN - $MAX"
     print_separator
     echo ""
-    
+
     # 二分查找算法
     while [ $MIN -le $MAX ]; do
         local CURRENT=$(( ($MIN + $MAX) / 2 ))
-        
+
         # -c 1: 发送一次
         # -M do: 禁止分片 (Linux 专用参数)
         # -s: 包大小 (Payload)
@@ -1844,30 +1857,30 @@ detect_optimal_mtu() {
             MAX=$((CURRENT - 1))
         fi
     done
-    
+
     echo ""
     print_separator
-    
+
     if [ $BEST_PAYLOAD -eq 0 ]; then
         print_error "Failed: All packets were dropped or fragmented"
         print_info "Try adjusting the MIN value or check firewall settings"
         return 1
     fi
-    
+
     # 计算最佳 MTU = Payload + 28 (IP Header 20 + ICMP Header 8)
     local OPTIMAL_MTU=$((BEST_PAYLOAD + 28))
-    
+
     print_success "Detection complete!"
     echo ""
     echo -e "  Max non-fragmented Payload: ${YELLOW}$BEST_PAYLOAD${NC} bytes"
     echo -e "  Recommended MTU value:      ${GREEN}$OPTIMAL_MTU${NC}"
     echo ""
-    
+
     # 获取当前客户端 MTU
     local config_file="/etc/wireguard/wg0.conf"
     local current_mtu
     current_mtu=$(grep -E "^MTU = " "$config_file" 2>/dev/null | head -n1 | sed 's/MTU = //')
-    
+
     if [ -n "$current_mtu" ]; then
         if [ "$current_mtu" -eq "$OPTIMAL_MTU" ]; then
             print_success "Current MTU ($current_mtu) matches the optimal value"
@@ -1901,7 +1914,7 @@ detect_optimal_mtu() {
             print_success "WireGuard client restarted"
         fi
     fi
-    
+
     print_separator
 }
 
@@ -1911,55 +1924,55 @@ modify_server_mtu() {
     print_info "Modify Server MTU"
     print_separator
     echo ""
-    
+
     if [ ! -d "$INSTALL_DIR" ]; then
         print_error "WireGuard server is not installed"
         return 1
     fi
-    
+
     local server_conf="$INSTALL_DIR/config/wg_confs/wg0.conf"
-    
+
     if [ ! -f "$server_conf" ]; then
         print_error "Server configuration file not found"
         return 1
     fi
-    
+
     # 获取当前 MTU
     local current_mtu
     current_mtu=$(grep -E "^MTU = " "$server_conf" 2>/dev/null | head -n1 | sed 's/MTU = //')
-    
+
     if [ -n "$current_mtu" ]; then
         print_info "Current server MTU: $current_mtu"
     else
         print_info "Current server MTU: Not configured"
     fi
     echo ""
-    
+
     # 询问新的 MTU 值
     while true; do
         read -p "Enter new MTU value (1280-1500) [current: ${current_mtu:-not set}]: " new_mtu
-        
+
         if [ -z "$new_mtu" ]; then
             print_info "No change made"
             return 0
         fi
-        
+
         if [[ "$new_mtu" =~ ^[0-9]+$ ]] && [ "$new_mtu" -ge 1280 ] && [ "$new_mtu" -le 1500 ]; then
             break
         else
             print_error "Invalid MTU value (must be 1280-1500)"
         fi
     done
-    
+
     # 更新服务端配置
     if [ -n "$current_mtu" ]; then
         sed -i "s/^MTU = .*/MTU = $new_mtu/" "$server_conf"
     else
         sed -i "/^\[Interface\]/a MTU = $new_mtu" "$server_conf"
     fi
-    
+
     print_success "Server MTU updated to $new_mtu"
-    
+
     # 同时更新所有客户端配置（peer*.conf）
     echo ""
     read -p "Also update all client peer configs to MTU=$new_mtu? (Y/n): " update_peers
@@ -1976,20 +1989,20 @@ modify_server_mtu() {
             fi
         done
     fi
-    
+
     # 重启容器
     echo ""
     print_info "Restarting WireGuard container to apply new MTU..."
     cd "$INSTALL_DIR"
     docker compose restart
     sleep 2
-    
+
     if docker ps | grep -q wireguard; then
         print_success "WireGuard server restarted successfully"
     else
         print_error "Container restart failed, please check logs"
     fi
-    
+
     print_separator
 }
 
@@ -1999,58 +2012,58 @@ modify_client_mtu() {
     print_info "Modify Client MTU"
     print_separator
     echo ""
-    
+
     local config_file="/etc/wireguard/wg0.conf"
-    
+
     if ! command -v wg &> /dev/null; then
         print_error "WireGuard client is not installed"
         return 1
     fi
-    
+
     if [ ! -f "$config_file" ]; then
         print_error "Client configuration file not found"
         return 1
     fi
-    
+
     # 获取当前 MTU
     local current_mtu
     current_mtu=$(grep -E "^MTU = " "$config_file" 2>/dev/null | head -n1 | sed 's/MTU = //')
-    
+
     if [ -n "$current_mtu" ]; then
         print_info "Current client MTU: $current_mtu"
     else
         print_info "Current client MTU: Not configured"
     fi
     echo ""
-    
+
     print_info "Tip: Use option 13 to detect the optimal MTU value"
     echo ""
-    
+
     # 询问新的 MTU 值
     while true; do
         read -p "Enter new MTU value (1280-1500) [current: ${current_mtu:-not set}]: " new_mtu
-        
+
         if [ -z "$new_mtu" ]; then
             print_info "No change made"
             return 0
         fi
-        
+
         if [[ "$new_mtu" =~ ^[0-9]+$ ]] && [ "$new_mtu" -ge 1280 ] && [ "$new_mtu" -le 1500 ]; then
             break
         else
             print_error "Invalid MTU value (must be 1280-1500)"
         fi
     done
-    
+
     # 更新客户端配置
     if [ -n "$current_mtu" ]; then
         sed -i "s/^MTU = .*/MTU = $new_mtu/" "$config_file"
     else
         sed -i "/^\[Interface\]/a MTU = $new_mtu" "$config_file"
     fi
-    
+
     print_success "Client MTU updated to $new_mtu"
-    
+
     # 检查是否正在运行
     if wg show wg0 &> /dev/null 2>&1; then
         echo ""
@@ -2064,7 +2077,7 @@ modify_client_mtu() {
             print_info "Please restart WireGuard manually to apply changes: wg-quick down wg0 && wg-quick up wg0"
         fi
     fi
-    
+
     print_separator
 }
 
@@ -2079,16 +2092,16 @@ show_menu() {
     echo -e "${YELLOW}             Debian 12/13 only${NC}"
     print_separator
     echo ""
-    
+
     # 避免 shell 缓存命令路径导致状态误判
     hash -r 2>/dev/null || true
-    
+
     # 检测服务端状态（使用 Docker 容器扫描）
     local server_status=""
     local nonstandard_installs=""
     local containers
     containers=$(detect_wireguard_containers)
-    
+
     # 检查标准路径安装
     local has_standard_install=false
     local standard_running=false
@@ -2107,7 +2120,7 @@ show_menu() {
             nonstandard_installs="${nonstandard_installs}${line}"$'\n'
         fi
     done <<< "$containers"
-    
+
     if [ "$has_standard_install" = true ]; then
         if [ "$standard_running" = true ]; then
             server_status="${GREEN}Installed | Running${NC}"
@@ -2120,7 +2133,7 @@ show_menu() {
     else
         server_status="${RED}Not installed${NC}"
     fi
-    
+
     # 检测客户端状态
     local client_status=""
     if command -v wg &> /dev/null; then
@@ -2132,15 +2145,15 @@ show_menu() {
     else
         client_status="${RED}Not installed${NC}"
     fi
-    
+
     local ip_info=$(get_public_ip)
     local public_ipv4=$(echo "$ip_info" | cut -d'|' -f1)
     local public_ipv6=$(echo "$ip_info" | cut -d'|' -f2)
-    
+
     # 格式化显示（分别查询 IPv4 和 IPv6 的国家）
     local ipv4_display=""
     local ipv6_display=""
-    
+
     if [ -z "$public_ipv4" ]; then
         ipv4_display="Not detected"
     else
@@ -2151,7 +2164,7 @@ show_menu() {
             ipv4_display="$public_ipv4"
         fi
     fi
-    
+
     if [ -z "$public_ipv6" ]; then
         ipv6_display="Not detected"
     else
@@ -2162,13 +2175,13 @@ show_menu() {
             ipv6_display="$public_ipv6"
         fi
     fi
-    
+
     echo -e "  ${BLUE}System Status:${NC}"
     echo -e "    Server: $server_status"
     echo -e "    Client: $client_status"
     echo -e "    Public IPv4: $ipv4_display"
     echo -e "    Public IPv6: $ipv6_display"
-    
+
     # 显示非标准安装警告
     if [ -n "$nonstandard_installs" ]; then
         echo ""
