@@ -924,11 +924,11 @@ update_nexttrace() {
         return
     fi
 
-    echo -e "  ${BOLD}Updating to ${latest_tag}${RESET}"
+    echo -e "  ${BOLD}Updating: ${local_ver:-?} → ${latest_ver:-latest}${RESET}"
     url="https://github.com/nxtrace/NTrace-core/releases/latest/download/nexttrace_linux_${ARCH_SUFFIX}"
     if download_file "$url" "${TEMP_DIR}/nexttrace"; then
         install -m 755 "${TEMP_DIR}/nexttrace" /usr/local/bin/nexttrace
-        echo -e "  ${GREEN}Updated${RESET}"
+        echo -e "  ${GREEN}Updated to ${latest_ver:-latest}${RESET}"
     else
         echo -e "  ${RED}Download failed${RESET}"
     fi
