@@ -350,6 +350,14 @@ setupCustomDns() {
 
 # Ask whether to keep the system DNS. The prompt auto-continues after 5 seconds;
 # typing a resolver and pressing Enter routes the tests through it instead.
+#
+# Characters are read one at a time with "read -n 1" (which puts the terminal in
+# non-canonical mode) instead of a plain "read -t": a plain read only ever
+# receives a complete line, so on a real terminal every keystroke typed before
+# Enter would sit in the kernel buffer, be invisible to the countdown, then leak
+# to the shell once the script exits. Reading per keystroke also makes the input
+# visible while typing, and the 5 second budget is only spent on idle ticks so
+# typing never eats into the window.
 promptCustomDns() {
     # An explicit -D wins and is applied without asking
     if [ -n "$Dns" ]; then
@@ -362,23 +370,54 @@ promptCustomDns() {
         return
     fi
 
-    echo -e "${Font_SkyBlue}Use the default DNS?${Font_Suffix} ${Font_White}Auto-continue in 5s - or type a DNS server (e.g. 1.2.3.4) or a DoH URL and press Enter.${Font_Suffix}"
+    echo -e "${Font_SkyBlue}Use the default DNS?${Font_Suffix} ${Font_White}Press Enter to continue, or type a DNS server (e.g. 1.2.3.4) or a DoH URL, then press Enter.${Font_Suffix}"
 
-    local input="" answer="" i
-    for i in 5 4 3 2 1; do
-        printf "\r${Font_SkyBlue}  Testing in %s s...${Font_Suffix} " "$i"
-        if read -t 1 -r answer; then
-            input="$answer"
-            break
+    local input="" ch="" esc="" submitted=0 remaining=5
+    printf "${Font_SkyBlue}  DNS (auto in ${remaining}s):${Font_Suffix} "
+    while [ "$remaining" -gt 0 ]; do
+        if read -n 1 -t 1 ch; then
+            case "$ch" in
+                ""|$'\n'|$'\r')
+                    # Enter. read -n 1 reports it as a SUCCESSFUL read of an EMPTY
+                    # character (verified: rc=0, ch=""), while some terminals
+                    # return CR/LF instead, so all three end the prompt
+                    submitted=1
+                    break
+                    ;;
+                $'\177'|$'\b')
+                    # backspace / delete: drop the last character
+                    input="${input%?}"
+                    ;;
+                $'\e')
+                    # swallow the rest of an escape sequence (arrow keys, etc.)
+                    read -n 2 -t 0.2 esc
+                    ;;
+                *)
+                    # keep printable characters only: a closed stdin delivers
+                    # control bytes such as ^D, and they would poison the value
+                    [[ "$ch" == [[:print:]] ]] && input="${input}${ch}"
+                    ;;
+            esac
+        else
+            remaining=$((remaining - 1))
+        fi
+        # Once something is typed the countdown label is dropped, so the line that
+        # stays on screen reads back the value that was entered
+        if [ -n "$input" ]; then
+            printf "\r\033[K${Font_SkyBlue}  DNS:${Font_Suffix} ${Font_White}%s${Font_Suffix}" "$input"
+        elif [ "$remaining" -gt 0 ]; then
+            printf "\r\033[K${Font_SkyBlue}  DNS (auto in ${remaining}s):${Font_Suffix} "
         fi
     done
-    printf "\r\033[K"
+    # Enter is echoed as a newline by the terminal, a timeout is not
+    [ "$submitted" -eq 1 ] || printf "\n"
 
     input=$(echo "$input" | tr -d '[:space:]')
     if [ -z "$input" ]; then
         echo -e "${Font_SkyBlue}  Default DNS selected.${Font_Suffix}"
         return
     fi
+    # The entered value is already on screen from the prompt line above
     if ! isValidDNS "$input"; then
         echo -e "${Font_Red}  '${input}' is not a valid IP or DoH URL; keeping the default DNS.${Font_Suffix}"
         return
