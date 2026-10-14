@@ -59,9 +59,8 @@ while getopts ":I:M:EX:P:F:S:R:C:D:" optname; do
             alias curl=$Curl
         ;;
         "D")
-            # Applied later by setupCustomDns, which picks a mechanism the local
-            # curl build actually supports (see the custom DNS section below)
             Dns="$OPTARG"
+            dns="--dns-servers $Dns"
         ;;
         ":")
             echo "Unknown error while processing options"
@@ -86,11 +85,8 @@ if [ -z "$Dns" ]; then
     dns=""
 fi
 
-# Arguments shared by every request, without any DNS override. The IP banner and
-# the metadata lookups use this so they always go through the system resolver.
-curlArgsBase="$useNIC $usePROXY $xForward $resolve --max-time 10"
-# Requests issued by the tests use this; a custom DNS appends its own arguments
-curlArgs="$curlArgsBase $dns"
+# Base arguments passed to every curl request
+curlArgs="$useNIC $usePROXY $xForward $resolve $dns --max-time 10"
 # Spoofed User-Agent to mimic a standard Windows 10 Edge browser
 UA_Browser="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36 Edg/112.0.1722.64"
 
@@ -185,7 +181,7 @@ GetIPInfo() {
     local asn="" isp=""
 
     if [ -n "$ip" ]; then
-        local ripe=$(curl $curlArgsBase -s --max-time 10 "https://stat.ripe.net/data/prefix-overview/data.json?resource=$ip" 2>/dev/null)
+        local ripe=$(curl $curlArgs -s --max-time 10 "https://stat.ripe.net/data/prefix-overview/data.json?resource=$ip" 2>/dev/null)
         if [ -n "$ripe" ]; then
             asn=$(echo "$ripe" | jq -r '.data.asns[0].asn // empty' 2>/dev/null)
             isp=$(echo "$ripe" | jq -r '.data.asns[0].holder // empty' 2>/dev/null)
@@ -219,210 +215,6 @@ lookup_iata() {
                 exit
             }
         }'
-}
-
-# =========================================================
-# Custom DNS
-# =========================================================
-# curl only honours --dns-servers when libcurl is built with c-ares, which the
-# Debian/Ubuntu builds are not: the option is advertised but fails at runtime.
-# Probe once, then use whichever mechanism this build really supports:
-#   - --dns-servers  when c-ares is compiled in
-#   - --doh-url      for a DoH endpoint (handled by curl itself, no c-ares needed)
-#   - dig + --resolve otherwise (bind9-dnsutils is installed on demand)
-# Only the test requests follow the custom DNS; the IP banner and the metadata
-# lookups keep using the system resolver on purpose.
-#
-# NOTE: keep TEST_HOSTS in sync whenever a test starts using a new hostname.
-TEST_HOSTS=(
-    bard.google.com
-    gemini.google.com
-    chatgpt.com
-    ios.chat.openai.com
-    sora.com
-    claude.ai
-    www.netflix.com
-    api.fast.com
-    disney.api.edge.bamgrid.com
-    disneyplus.com
-    open.live.bbc.co.uk
-    www.youtube.com
-    redirector.googlevideo.com
-    www.spotify.com
-    store.steampowered.com
-    en.wikipedia.org
-)
-
-dnsServersSupported=0
-if ! curl --dns-servers 127.0.0.1 -s -o /dev/null --max-time 3 "http://example.com" 2>&1 | grep -q 'does not support'; then
-    dnsServersSupported=1
-fi
-
-# Accept an IPv4/IPv6 literal, or an http(s) DoH endpoint such as
-# https://dns.example/dns-query
-isValidDNS() {
-    local ip="$1"
-    case "$ip" in
-        http://*|https://*) return 0 ;;
-    esac
-    if [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
-        local octet
-        for octet in ${ip//./ }; do
-            [ "$octet" -le 255 ] || return 1
-        done
-        return 0
-    fi
-    if [[ "$ip" == *:* ]] && [[ "$ip" =~ ^[0-9a-fA-F:.]+$ ]]; then
-        return 0
-    fi
-    return 1
-}
-
-# Resolve every test hostname through $1 and pin the answers with --resolve, so
-# the tests follow that resolver even though curl cannot query it directly.
-# Fills the globals dnsResolve (curl arguments) and dnsPinned (hosts resolved);
-# deliberately not run in a command substitution, that would lose the values.
-# IPv6 answers need bracket notation in --resolve.
-buildDnsResolve() {
-    local server="$1" host ip
-    dnsResolve=""
-    dnsPinned=0
-    for host in "${TEST_HOSTS[@]}"; do
-        ip=$(dig +short +time=3 +tries=1 "@$server" A "$host" 2>/dev/null | grep -Eo '^([0-9]{1,3}\.){3}[0-9]{1,3}$' | head -n1)
-        if [ -z "$ip" ]; then
-            ip=$(dig +short +time=3 +tries=1 "@$server" AAAA "$host" 2>/dev/null | grep -Eo '^[0-9a-fA-F:]+$' | head -n1)
-        fi
-        if [ -n "$ip" ]; then
-            case "$ip" in
-                *:*) dnsResolve="$dnsResolve --resolve $host:443:[$ip]" ;;
-                *)   dnsResolve="$dnsResolve --resolve $host:443:$ip" ;;
-            esac
-            dnsPinned=$((dnsPinned+1))
-        fi
-    done
-}
-
-# Route the test requests through a user-supplied resolver. Returns non-zero
-# when the resolver cannot be honoured, leaving the default DNS in place.
-setupCustomDns() {
-    local server="$1"
-
-    case "$server" in
-        http://*|https://*)
-            dns="--doh-url $server"
-            curlArgs="$curlArgsBase $dns"
-            echo -e "${Font_Green}  Custom DNS: ${server} (DoH)${Font_Suffix}"
-            return 0
-            ;;
-    esac
-
-    if [ "$dnsServersSupported" -eq 1 ]; then
-        dns="--dns-servers $server"
-        curlArgs="$curlArgsBase $dns"
-        echo -e "${Font_Green}  Custom DNS: ${server}${Font_Suffix}"
-        return 0
-    fi
-
-    # No c-ares support: resolve the test hostnames here and pin them instead
-    if ! command -v dig >/dev/null 2>&1 && [ "$(id -u)" -eq 0 ]; then
-        echo -e "${Font_Yellow}  Installing bind9-dnsutils to query ${server}...${Font_Suffix}"
-        apt-get update >/dev/null 2>&1
-        apt-get install -y bind9-dnsutils >/dev/null 2>&1
-    fi
-    if ! command -v dig >/dev/null 2>&1; then
-        echo -e "${Font_Red}  Custom DNS needs 'dig' on this curl build; keeping the default DNS.${Font_Suffix}"
-        echo -e "${Font_Red}  Install it with: apt install bind9-dnsutils${Font_Suffix}"
-        return 1
-    fi
-
-    local pinned
-    buildDnsResolve "$server"
-    pinned="$dnsPinned"
-    if [ "$pinned" -eq 0 ]; then
-        echo -e "${Font_Red}  ${server} resolved none of the test hostnames; keeping the default DNS.${Font_Suffix}"
-        return 1
-    fi
-    dns="$dnsResolve"
-    curlArgs="$curlArgsBase $dns"
-    echo -e "${Font_Green}  Custom DNS: ${server} (${pinned}/${#TEST_HOSTS[@]} hosts pinned)${Font_Suffix}"
-    return 0
-}
-
-# Ask whether to keep the system DNS. The prompt auto-continues after 5 seconds;
-# typing a resolver and pressing Enter routes the tests through it instead.
-#
-# Characters are read one at a time with "read -n 1" (which puts the terminal in
-# non-canonical mode) instead of a plain "read -t": a plain read only ever
-# receives a complete line, so on a real terminal every keystroke typed before
-# Enter would sit in the kernel buffer, be invisible to the countdown, then leak
-# to the shell once the script exits. Reading per keystroke also makes the input
-# visible while typing, and the 5 second budget is only spent on idle ticks so
-# typing never eats into the window.
-promptCustomDns() {
-    # An explicit -D wins and is applied without asking
-    if [ -n "$Dns" ]; then
-        setupCustomDns "$Dns"
-        return
-    fi
-    # Only prompt on a real terminal: with piped or redirected streams the prompt
-    # could swallow script input, so the default DNS is kept silently
-    if [ ! -t 0 ] || [ ! -t 1 ]; then
-        return
-    fi
-
-    echo -e "${Font_SkyBlue}Use the default DNS?${Font_Suffix} ${Font_White}Press Enter to continue, or type a DNS server (e.g. 1.2.3.4) or a DoH URL, then press Enter.${Font_Suffix}"
-
-    local input="" ch="" esc="" submitted=0 remaining=5
-    printf "${Font_SkyBlue}  DNS (auto in ${remaining}s):${Font_Suffix} "
-    while [ "$remaining" -gt 0 ]; do
-        if read -n 1 -t 1 ch; then
-            case "$ch" in
-                ""|$'\n'|$'\r')
-                    # Enter. read -n 1 reports it as a SUCCESSFUL read of an EMPTY
-                    # character (verified: rc=0, ch=""), while some terminals
-                    # return CR/LF instead, so all three end the prompt
-                    submitted=1
-                    break
-                    ;;
-                $'\177'|$'\b')
-                    # backspace / delete: drop the last character
-                    input="${input%?}"
-                    ;;
-                $'\e')
-                    # swallow the rest of an escape sequence (arrow keys, etc.)
-                    read -n 2 -t 0.2 esc
-                    ;;
-                *)
-                    # keep printable characters only: a closed stdin delivers
-                    # control bytes such as ^D, and they would poison the value
-                    [[ "$ch" == [[:print:]] ]] && input="${input}${ch}"
-                    ;;
-            esac
-        else
-            remaining=$((remaining - 1))
-        fi
-        # Once something is typed the countdown label is dropped, so the line that
-        # stays on screen reads back the value that was entered
-        if [ -n "$input" ]; then
-            printf "\r\033[K${Font_SkyBlue}  DNS:${Font_Suffix} ${Font_White}%s${Font_Suffix}" "$input"
-        elif [ "$remaining" -gt 0 ]; then
-            printf "\r\033[K${Font_SkyBlue}  DNS (auto in ${remaining}s):${Font_Suffix} "
-        fi
-    done
-    # Enter is echoed as a newline by the terminal, a timeout is not
-    [ "$submitted" -eq 1 ] || printf "\n"
-
-    input=$(echo "$input" | tr -d '[:space:]')
-    if [ -z "$input" ]; then
-        echo -e "${Font_SkyBlue}  Default DNS selected.${Font_Suffix}"
-        return
-    fi
-    # The entered value is already on screen from the prompt line above
-    if ! isValidDNS "$input"; then
-        echo -e "${Font_Red}  '${input}' is not a valid IP or DoH URL; keeping the default DNS.${Font_Suffix}"
-        return
-    fi
-    setupCustomDns "$input"
 }
 
 # Check Google Search location via Bard batchexecute (1-stream)
@@ -910,12 +702,9 @@ function Run_All_Tests() {
 echo -e "\n${Font_Purple}[ Minimal Service Unlock Test ]${Font_Suffix}"
 echo -e "${Font_Purple}Legend:${Font_Suffix} ${Font_Green}Green=Available${Font_Suffix} | ${Font_Yellow}Yellow=Partial${Font_Suffix} | ${Font_Red}Red=Unavailable/Failed${Font_Suffix}\n"
 
-# Optional custom DNS, chosen before the tests start
-promptCustomDns
-
 # Start IPv4 Tests
 if [[ "$NetworkType" == "4" ]] || [[ -z "$NetworkType" ]]; then
-    trace4=$(curl $curlArgsBase -4 -s --max-time 10 cloudflare.com/cdn-cgi/trace)
+    trace4=$(curl $curlArgs -4 -s --max-time 10 cloudflare.com/cdn-cgi/trace)
     local_ipv4=$(echo "$trace4" | grep '^ip=' | cut -d= -f2)
     loc4=$(echo "$trace4" | grep '^loc=' | cut -d= -f2)
     if [ -n "$local_ipv4" ]; then
@@ -932,7 +721,7 @@ fi
 
 # Start IPv6 Tests
 if [[ "$NetworkType" == "6" ]] || [[ -z "$NetworkType" ]]; then
-    trace6=$(curl $curlArgsBase -6 -s --max-time 10 cloudflare.com/cdn-cgi/trace)
+    trace6=$(curl $curlArgs -6 -s --max-time 10 cloudflare.com/cdn-cgi/trace)
     local_ipv6=$(echo "$trace6" | grep '^ip=' | cut -d= -f2)
     loc6=$(echo "$trace6" | grep '^loc=' | cut -d= -f2)
     if [ -n "$local_ipv6" ]; then
