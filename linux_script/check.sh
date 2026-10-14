@@ -59,8 +59,8 @@ while getopts ":I:M:EX:P:F:S:R:C:D:" optname; do
             alias curl=$Curl
         ;;
         "D")
+            # Applied by setupCustomDns below, once dependencies are in place
             Dns="$OPTARG"
-            dns="--dns-servers $Dns"
         ;;
         ":")
             echo "Unknown error while processing options"
@@ -89,6 +89,12 @@ fi
 curlArgs="$useNIC $usePROXY $xForward $resolve $dns --max-time 10"
 # Spoofed User-Agent to mimic a standard Windows 10 Edge browser
 UA_Browser="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36 Edg/112.0.1722.64"
+
+# Captured here, at the top level: inside a function "$@" and "$BASH_SOURCE" refer to
+# the function's own arguments and defining file, so the custom DNS re-exec below
+# needs the script's own path and its original command line
+SELF="${BASH_SOURCE[0]}"
+ORIG_ARGS=("$@")
 
 # Check if the OS is strictly Debian 13 or higher
 checkOS() {
@@ -138,6 +144,71 @@ checkDependencies() {
     fi
 }
 checkDependencies
+
+# =========================================================
+# Custom DNS (-D)
+# =========================================================
+# curl cannot be pointed at a plain nameserver on Debian/Ubuntu: --dns-servers is
+# advertised by --help but fails at runtime, because those curl builds resolve via
+# glibc instead of c-ares. So override /etc/resolv.conf inside a private mount
+# namespace and re-execute this script there: only this process tree is affected,
+# the real file is never modified, and nothing has to be restored.
+# A DoH endpoint is handed straight to curl, which speaks DoH without c-ares.
+# Runs after checkDependencies so any apt install still uses the normal resolver.
+setupCustomDns() {
+    local server="$1" target
+
+    case "$server" in
+        http://*|https://*)
+            dns="--doh-url $server"
+            curlArgs="$useNIC $usePROXY $xForward $resolve $dns --max-time 10"
+            return 0
+            ;;
+    esac
+
+    if [ "$(id -u)" -ne 0 ] || ! command -v unshare >/dev/null 2>&1; then
+        echo -e "${Font_Red}  -D needs root and unshare (util-linux); keeping the default DNS.${Font_Suffix}"
+        return 1
+    fi
+    # Re-executing needs a script file, which does not exist when piped into bash
+    if [ ! -f "$SELF" ]; then
+        echo -e "${Font_Red}  -D needs this script to run from a file; keeping the default DNS.${Font_Suffix}"
+        return 1
+    fi
+    # Probe the capability first, so a forbidden unshare cannot abort the run
+    if ! unshare -m true 2>/dev/null; then
+        echo -e "${Font_Red}  -D: mount namespaces are unavailable here; keeping the default DNS.${Font_Suffix}"
+        return 1
+    fi
+
+    target=$(readlink -f /etc/resolv.conf 2>/dev/null || echo /etc/resolv.conf)
+    local custom=$(mktemp) || return 1
+    printf 'nameserver %s\noptions timeout:2 attempts:2\n' "$server" > "$custom"
+
+    # The child binds the override over the resolver file and then deletes the
+    # source: the mount keeps its content, so no temporary file is left behind.
+    # It then re-executes this script so every lookup, curl's included, uses it.
+    exec unshare -m bash -c '
+        target="$1"; custom="$2"; shift 2
+        if mount --bind "$custom" "$target" 2>/dev/null; then
+            rm -f "$custom"
+        else
+            rm -f "$custom"
+            echo "  -D: could not override the resolver; keeping the default DNS."
+        fi
+        export CUSTOM_DNS_ACTIVE=1
+        exec bash "$@"
+    ' rrc-dns "$target" "$custom" "$SELF" "${ORIG_ARGS[@]}"
+}
+
+if [ -n "$Dns" ]; then
+    # CUSTOM_DNS_ACTIVE means the namespace is already in place
+    if [ -n "$CUSTOM_DNS_ACTIVE" ]; then
+        customDnsApplied=1
+    elif setupCustomDns "$Dns"; then
+        customDnsApplied=1
+    fi
+fi
 
 # Fetch required payload templates (cookies) for Disney+ tests
 # NOTE: must run in foreground; backgrounding inside $() always yields empty string
@@ -701,6 +772,7 @@ function Run_All_Tests() {
 
 echo -e "\n${Font_Purple}[ Minimal Service Unlock Test ]${Font_Suffix}"
 echo -e "${Font_Purple}Legend:${Font_Suffix} ${Font_Green}Green=Available${Font_Suffix} | ${Font_Yellow}Yellow=Partial${Font_Suffix} | ${Font_Red}Red=Unavailable/Failed${Font_Suffix}\n"
+[ -n "$customDnsApplied" ] && echo -e "${Font_SkyBlue}  DNS: ${Font_White}${Dns}${Font_Suffix}"
 
 # Start IPv4 Tests
 if [[ "$NetworkType" == "4" ]] || [[ -z "$NetworkType" ]]; then
