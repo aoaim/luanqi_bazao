@@ -171,6 +171,30 @@ PrintResult() {
     printf "  %-24s %b\n" "$name" "$result"
 }
 
+# Build a "REGION | ASxxxx | ISP" description for an IP address.
+# $1 = IP address, $2 = region code from the Cloudflare trace (loc=).
+# ASN and holder come from RIPE Stat, which needs no API key. Failures are
+# non-fatal: any missing piece is simply omitted from the output.
+GetIPInfo() {
+    local ip="$1"
+    local country="$2"
+    local asn="" isp=""
+
+    if [ -n "$ip" ]; then
+        local ripe=$(curl $curlArgs -s --max-time 10 "https://stat.ripe.net/data/prefix-overview/data.json?resource=$ip" 2>/dev/null)
+        if [ -n "$ripe" ]; then
+            asn=$(echo "$ripe" | jq -r '.data.asns[0].asn // empty' 2>/dev/null)
+            isp=$(echo "$ripe" | jq -r '.data.asns[0].holder // empty' 2>/dev/null)
+        fi
+    fi
+
+    local info=""
+    [ -n "$country" ] && info="$country"
+    [ -n "$asn" ] && info="${info:+${info} | }AS${asn}"
+    [ -n "$isp" ] && info="${info:+${info} | }${isp}"
+    echo "$info"
+}
+
 # Resolve an IATA code to a city name using the IATACode reference file.
 # Column 3 holds an IATA token, optionally followed by a suffix
 # (e.g. "BER - All Airports", "YMQ All"), so only the leading token is compared.
@@ -229,46 +253,47 @@ function Test_Gemini() {
     fi
 }
 
-# Check ChatGPT availability and blocked ISP traces (1-stream)
+# Check OpenAI ChatGPT availability and blocked ISP traces (1-stream)
 function Test_ChatGPT() {
+    local label="OpenAI ChatGPT:"
     local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsLI --max-time 10 "https://chatgpt.com" 2>&1)
     local tmpresult1=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 "https://ios.chat.openai.com" 2>&1)
     local cf_details=$(echo "$tmpresult1" | jq '.cf_details' 2>/dev/null)
     if [[ "$tmpresult" == "curl"* ]]; then
-        PrintResult "ChatGPT:" "${Font_Red}Failed (Network Connection)${Font_Suffix}"
+        PrintResult "$label" "${Font_Red}Failed (Network Connection)${Font_Suffix}"
         return
     fi
 
     local result1=$(echo "$tmpresult" | grep 'location' )
     if [ ! -n "$result1" ]; then
         if [[ "$tmpresult1" == *"blocked_why_headline"* ]]; then
-            PrintResult "ChatGPT:" "${Font_Red}No (Blocked)${Font_Suffix}"
+            PrintResult "$label" "${Font_Red}No (Blocked)${Font_Suffix}"
             return
         fi
         if [[ "$tmpresult1" == *"unsupported_country_region_territory"* ]]; then
-            PrintResult "ChatGPT:" "${Font_Red}No (Unsupported Region)${Font_Suffix}"
+            PrintResult "$label" "${Font_Red}No (Unsupported Region)${Font_Suffix}"
             return
         fi
         if [[ "$cf_details" == *"(1)"* ]]; then
-            PrintResult "ChatGPT:" "${Font_Red}No (Disallowed ISP[1])${Font_Suffix}"
+            PrintResult "$label" "${Font_Red}No (Disallowed ISP[1])${Font_Suffix}"
             return
         fi
         if [[ "$cf_details" == *"(2)"* ]]; then
-            PrintResult "ChatGPT:" "${Font_Red}No (Disallowed ISP[2])${Font_Suffix}"
+            PrintResult "$label" "${Font_Red}No (Disallowed ISP[2])${Font_Suffix}"
             return
         fi
-        PrintResult "ChatGPT:" "${Font_Red}No${Font_Suffix}"
+        PrintResult "$label" "${Font_Red}No${Font_Suffix}"
     else
         local region1=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 "https://chatgpt.com/cdn-cgi/trace" 2>&1 | grep "loc=" | awk -F= '{print $2}')
         if [[ "$cf_details" == *"(1)"* ]]; then
-            PrintResult "ChatGPT:" "${Font_Yellow}Web Only (Disallowed ISP[1])${Font_Suffix}"
+            PrintResult "$label" "${Font_Yellow}Web Only (Disallowed ISP[1])${Font_Suffix}"
             return
         fi
         if [[ "$cf_details" == *"(2)"* ]]; then
-            PrintResult "ChatGPT:" "${Font_Yellow}Web Only (Disallowed ISP[2])${Font_Suffix}"
+            PrintResult "$label" "${Font_Yellow}Web Only (Disallowed ISP[2])${Font_Suffix}"
             return
         fi
-        PrintResult "ChatGPT:" "${Font_Green}Yes (Region: ${region1})${Font_Suffix}"
+        PrintResult "$label" "${Font_Green}Yes (Region: ${region1})${Font_Suffix}"
     fi
 }
 
@@ -320,6 +345,42 @@ function Test_Netflix() {
     fi
 
     PrintResult "Netflix:" "${Font_Red}Failed${Font_Suffix}"
+}
+
+# Check which Netflix Open Connect Appliance (OCA) serves this connection,
+# i.e. which cache city/ISP the Netflix traffic is actually routed to.
+# "isp.1.oca" in the target hostname means the ISP embeds the cache itself
+# (Open Connect partner); otherwise the route lands on Netflix's own OCA.
+function Test_NetflixCDN() {
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS --max-time 10 \
+        "https://api.fast.com/netflix/speedtest/v2?https=true&token=YXNkZmFzZGxmbnNkYWZoYXNkZmhrYWxm&urlCount=1" 2>&1)
+
+    if [[ -z "$tmpresult" ]] || [[ "$tmpresult" == "curl"* ]]; then
+        PrintResult "Netflix CDN:" "${Font_Red}Failed (Network Connection)${Font_Suffix}"
+        return
+    fi
+
+    local isp=$(echo "$tmpresult" | jq -r '.client.isp // empty' 2>/dev/null)
+    local target_city=$(echo "$tmpresult" | jq -r '.targets[0].location.city // empty' 2>/dev/null)
+    local target_country=$(echo "$tmpresult" | jq -r '.targets[0].location.country // empty' 2>/dev/null)
+    local target_url=$(echo "$tmpresult" | jq -r '.targets[0].url // empty' 2>/dev/null)
+    local target_fqdn=$(echo "$target_url" | awk -F"/" '{print $3}' | awk -F"." '{print $1}')
+
+    if [ -z "$target_city" ]; then
+        PrintResult "Netflix CDN:" "${Font_Red}Failed${Font_Suffix}"
+        return
+    fi
+
+    if [[ "$target_url" == *"isp.1.oca"* ]]; then
+        if [ -n "$isp" ]; then
+            PrintResult "Netflix CDN:" "${Font_Yellow}${isp}'s OCAs in ${target_city},${target_country} (${target_fqdn})${Font_Suffix}"
+        else
+            PrintResult "Netflix CDN:" "${Font_Yellow}ISP's OCAs in ${target_city},${target_country} (${target_fqdn})${Font_Suffix}"
+        fi
+        return
+    fi
+
+    PrintResult "Netflix CDN:" "${Font_Green}${target_city},${target_country} (${target_fqdn})${Font_Suffix}"
 }
 
 # Check Disney+ availability and specific region logic using GraphQL
@@ -556,6 +617,26 @@ function Test_Steam() {
     fi
 }
 
+# Check whether this IP is allowed to edit Wikipedia. Wikipedia blocks known
+# open proxies / hosting ranges at the edit layer, so a "Yes" here also means
+# the IP is not on their public proxy blacklist (IP reputation signal).
+function Test_Wikipedia() {
+    local tmpresult=$(curl $curlArgs -${1} -s --user-agent "${UA_Browser}" --max-time 10 \
+        "https://en.wikipedia.org/w/index.php?title=Wikipedia:WikiProject_on_open_proxies&action=edit" 2>&1)
+
+    if [ -z "$tmpresult" ]; then
+        PrintResult "Wikipedia Editability:" "${Font_Red}Failed (Network Connection)${Font_Suffix}"
+        return
+    fi
+
+    local result=$(echo "$tmpresult" | grep -i 'This IP address has been')
+    if [ -z "$result" ]; then
+        PrintResult "Wikipedia Editability:" "${Font_Green}Yes${Font_Suffix}"
+        return
+    fi
+    PrintResult "Wikipedia Editability:" "${Font_Red}No (Blocked)${Font_Suffix}"
+}
+
 # Main executor: Runs all tests concurrently but outputs sequentially with grouping
 function Run_All_Tests() {
     local IPV=$1
@@ -568,26 +649,30 @@ function Run_All_Tests() {
     Test_Google ${IPV} > "$tmp_dir/01" &
     Test_Gemini ${IPV} > "$tmp_dir/02" &
     Test_ChatGPT ${IPV} > "$tmp_dir/03" &
-    Test_Claude ${IPV} > "$tmp_dir/04" &
-    Test_Netflix ${IPV} > "$tmp_dir/05" &
-    Test_DisneyPlus ${IPV} > "$tmp_dir/06" &
-    Test_BBC ${IPV} > "$tmp_dir/07" &
-    Test_YouTube_Premium ${IPV} > "$tmp_dir/08" &
-    Test_YouTube_CDN ${IPV} > "$tmp_dir/09" &
-    Test_Spotify ${IPV} > "$tmp_dir/10" &
-    Test_Steam ${IPV} > "$tmp_dir/11" &
-    Test_Sora ${IPV} > "$tmp_dir/12" &
+    Test_Sora ${IPV} > "$tmp_dir/04" &
+    Test_Claude ${IPV} > "$tmp_dir/05" &
+    Test_Netflix ${IPV} > "$tmp_dir/06" &
+    Test_NetflixCDN ${IPV} > "$tmp_dir/07" &
+    Test_DisneyPlus ${IPV} > "$tmp_dir/08" &
+    Test_BBC ${IPV} > "$tmp_dir/09" &
+    Test_YouTube_Premium ${IPV} > "$tmp_dir/10" &
+    Test_YouTube_CDN ${IPV} > "$tmp_dir/11" &
+    Test_Spotify ${IPV} > "$tmp_dir/12" &
+    Test_Steam ${IPV} > "$tmp_dir/13" &
+    Test_Wikipedia ${IPV} > "$tmp_dir/14" &
 
     # Wait for all background tasks to complete
     wait
 
     # Output grouped by category
     ShowRegion "AI Services"
-    cat "$tmp_dir/01" "$tmp_dir/02" "$tmp_dir/03" "$tmp_dir/04" "$tmp_dir/12" 2>/dev/null
+    cat "$tmp_dir/01" "$tmp_dir/02" "$tmp_dir/03" "$tmp_dir/04" "$tmp_dir/05" 2>/dev/null
     ShowRegion "Streaming Media"
-    cat "$tmp_dir/05" "$tmp_dir/06" "$tmp_dir/07" "$tmp_dir/08" "$tmp_dir/09" 2>/dev/null
+    cat "$tmp_dir/06" "$tmp_dir/07" "$tmp_dir/08" "$tmp_dir/09" "$tmp_dir/10" "$tmp_dir/11" 2>/dev/null
     ShowRegion "Other Services"
-    cat "$tmp_dir/10" "$tmp_dir/11" 2>/dev/null
+    cat "$tmp_dir/12" "$tmp_dir/13" 2>/dev/null
+    ShowRegion "IP Quality"
+    cat "$tmp_dir/14" 2>/dev/null
 
     # Tally results from collected output
     local total=0 yes=0 no=0 partial=0 failed=0
@@ -621,9 +706,13 @@ echo -e "${Font_Purple}Legend:${Font_Suffix} ${Font_Green}Green=Available${Font_
 
 # Start IPv4 Tests
 if [[ "$NetworkType" == "4" ]] || [[ -z "$NetworkType" ]]; then
-    local_ipv4=$(curl $curlArgs -4 -s --max-time 10 cloudflare.com/cdn-cgi/trace | grep ip | awk -F= '{print $2}')
+    trace4=$(curl $curlArgs -4 -s --max-time 10 cloudflare.com/cdn-cgi/trace)
+    local_ipv4=$(echo "$trace4" | grep '^ip=' | cut -d= -f2)
+    loc4=$(echo "$trace4" | grep '^loc=' | cut -d= -f2)
     if [ -n "$local_ipv4" ]; then
         echo -e "${Font_SkyBlue}IPv4 Address: ${Font_Green}${local_ipv4}${Font_Suffix}"
+        info4=$(GetIPInfo "$local_ipv4" "$loc4")
+        [ -n "$info4" ] && echo -e "${Font_SkyBlue}  IP Info: ${Font_White}${info4}${Font_Suffix}"
         Run_All_Tests 4
     else
         echo -e "\n${Font_Red}No IPv4 Network Detected.${Font_Suffix}"
@@ -632,11 +721,20 @@ fi
 
 # Start IPv6 Tests
 if [[ "$NetworkType" == "6" ]] || [[ -z "$NetworkType" ]]; then
-    local_ipv6=$(curl $curlArgs -6 -s --max-time 10 cloudflare.com/cdn-cgi/trace | grep ip | awk -F= '{print $2}')
+    trace6=$(curl $curlArgs -6 -s --max-time 10 cloudflare.com/cdn-cgi/trace)
+    local_ipv6=$(echo "$trace6" | grep '^ip=' | cut -d= -f2)
+    loc6=$(echo "$trace6" | grep '^loc=' | cut -d= -f2)
     if [ -n "$local_ipv6" ]; then
         echo -e "${Font_SkyBlue}IPv6 Address: ${Font_Green}${local_ipv6}${Font_Suffix}"
+        info6=$(GetIPInfo "$local_ipv6" "$loc6")
+        [ -n "$info6" ] && echo -e "${Font_SkyBlue}  IP Info: ${Font_White}${info6}${Font_Suffix}"
         Run_All_Tests 6
     else
         echo -e "\n${Font_Red}No IPv6 Network Detected.${Font_Suffix}"
     fi
 fi
+
+# Closing summary
+echo -e "${Font_Green}Testing Done! Thanks for using this script.${Font_Suffix}"
+echo -e "${Font_SkyBlue}Finished At: ${Font_White}$(date '+%Y-%m-%d %H:%M:%S %Z')${Font_Suffix}"
+echo ""
