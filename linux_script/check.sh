@@ -670,9 +670,7 @@ function Run_All_Tests() {
     ShowRegion "Streaming Media"
     cat "$tmp_dir/06" "$tmp_dir/07" "$tmp_dir/08" "$tmp_dir/09" "$tmp_dir/10" "$tmp_dir/11" 2>/dev/null
     ShowRegion "Other Services"
-    cat "$tmp_dir/12" "$tmp_dir/13" 2>/dev/null
-    ShowRegion "IP Quality"
-    cat "$tmp_dir/14" 2>/dev/null
+    cat "$tmp_dir/12" "$tmp_dir/13" "$tmp_dir/14" 2>/dev/null
 
     # Tally results from collected output
     local total=0 yes=0 no=0 partial=0 failed=0
@@ -713,9 +711,11 @@ if [[ "$NetworkType" == "4" ]] || [[ -z "$NetworkType" ]]; then
         echo -e "${Font_SkyBlue}IPv4 Address: ${Font_Green}${local_ipv4}${Font_Suffix}"
         info4=$(GetIPInfo "$local_ipv4" "$loc4")
         [ -n "$info4" ] && echo -e "${Font_SkyBlue}  IP Info: ${Font_White}${info4}${Font_Suffix}"
+        echo ""
         Run_All_Tests 4
     else
-        echo -e "\n${Font_Red}No IPv4 Network Detected.${Font_Suffix}"
+        echo -e "${Font_Red}No IPv4 Network Detected.${Font_Suffix}"
+        echo ""
     fi
 fi
 
@@ -728,9 +728,11 @@ if [[ "$NetworkType" == "6" ]] || [[ -z "$NetworkType" ]]; then
         echo -e "${Font_SkyBlue}IPv6 Address: ${Font_Green}${local_ipv6}${Font_Suffix}"
         info6=$(GetIPInfo "$local_ipv6" "$loc6")
         [ -n "$info6" ] && echo -e "${Font_SkyBlue}  IP Info: ${Font_White}${info6}${Font_Suffix}"
+        echo ""
         Run_All_Tests 6
     else
-        echo -e "\n${Font_Red}No IPv6 Network Detected.${Font_Suffix}"
+        echo -e "${Font_Red}No IPv6 Network Detected.${Font_Suffix}"
+        echo ""
     fi
 fi
 
