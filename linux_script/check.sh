@@ -150,6 +150,15 @@ if [ -z "$Media_Cookie" ]; then
     echo -e "${Font_Yellow}Warning: Failed to fetch Disney+ cookie template; Disney+ test may fail.${Font_Suffix}"
 fi
 
+# Fetch IATA airport code reference, used to turn YouTube CDN node names
+# into readable locations (e.g. "ncsina-ag" -> ISP NCSINA at IATA code AG)
+# NOTE: this file is CRLF, so CR must be stripped or plain entries (e.g. "NRT")
+# never match when compared as a whole field
+IATACode=$(curl -s --retry 3 --max-time 10 "https://raw.githubusercontent.com/1-stream/RegionRestrictionCheck/main/reference/IATACode.txt" | tr -d '\r')
+if [ -z "$IATACode" ]; then
+    IATACode=$(curl -s --retry 3 --max-time 10 "https://raw.githubusercontent.com/lmc999/RegionRestrictionCheck/main/reference/IATACode.txt" | tr -d '\r')
+fi
+
 # Print a section header
 ShowRegion() {
     echo -e "${Font_Yellow} --- ${1} ---${Font_Suffix}"
@@ -160,6 +169,28 @@ PrintResult() {
     local name="$1"
     local result="$2"
     printf "  %-24s %b\n" "$name" "$result"
+}
+
+# Resolve an IATA code to a city name using the IATACode reference file.
+# Column 3 holds an IATA token, optionally followed by a suffix
+# (e.g. "BER - All Airports", "YMQ All"), so only the leading token is compared.
+lookup_iata() {
+    local code="$1"
+    [ -n "$code" ] || return
+    [ -n "$IATACode" ] || return
+    echo "$IATACode" | awk -F'|' -v want="$code" '
+        {
+            field = $3
+            gsub(/\r/, "", field)
+            sub(/^[ \t]+/, "", field)
+            n = split(field, parts, /[ \t-]+/)
+            if (toupper(parts[1]) == toupper(want)) {
+                city = $1
+                gsub(/^[ \t]+|[ \t]+$/, "", city)
+                print city
+                exit
+            }
+        }'
 }
 
 # Check Google Search location via Bard batchexecute (1-stream)
@@ -218,6 +249,14 @@ function Test_ChatGPT() {
             PrintResult "ChatGPT:" "${Font_Red}No (Unsupported Region)${Font_Suffix}"
             return
         fi
+        if [[ "$cf_details" == *"(1)"* ]]; then
+            PrintResult "ChatGPT:" "${Font_Red}No (Disallowed ISP[1])${Font_Suffix}"
+            return
+        fi
+        if [[ "$cf_details" == *"(2)"* ]]; then
+            PrintResult "ChatGPT:" "${Font_Red}No (Disallowed ISP[2])${Font_Suffix}"
+            return
+        fi
         PrintResult "ChatGPT:" "${Font_Red}No${Font_Suffix}"
     else
         local region1=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 "https://chatgpt.com/cdn-cgi/trace" 2>&1 | grep "loc=" | awk -F= '{print $2}')
@@ -247,31 +286,36 @@ function Test_Claude(){
 # Check Netflix availability for full catalog or originals only
 function Test_Netflix() {
     # 81280792 = LEGO Ninjago (non-original); 70143836 = Breaking Bad (licensed)
-    local tmpresult1=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sL --max-time 10 "https://www.netflix.com/title/81280792" 2>&1)
-    local tmpresult2=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sL --max-time 10 "https://www.netflix.com/title/70143836" 2>&1)
+    # --tlsv1.3 matches upstream: Netflix fingerprints the TLS handshake
+    local tmpresult1=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sL --tlsv1.3 --max-time 10 "https://www.netflix.com/title/81280792" 2>&1)
+    local tmpresult2=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sL --tlsv1.3 --max-time 10 "https://www.netflix.com/title/70143836" 2>&1)
     if [[ -z "$tmpresult1" ]] || [[ -z "$tmpresult2" ]] || [[ "$tmpresult1" == "curl"* ]] || [[ "$tmpresult2" == "curl"* ]]; then
         PrintResult "Netflix:" "${Font_Red}Failed (Network Connection)${Font_Suffix}"
         return
     fi
 
-    # "Oh no!" appears when the title is unavailable in the current region
-    local result1=$(echo "${tmpresult1}" | grep 'Oh no!')
-    local result2=$(echo "${tmpresult2}" | grep 'Oh no!')
+    # "og:video" is only emitted for a playable title; "Oh no!" means the
+    # title is unavailable in the current region
+    local playable1=$(echo "${tmpresult1}" | grep -c 'og:video')
+    local playable2=$(echo "${tmpresult2}" | grep -c 'og:video')
 
-    # Both titles blocked => originals only (or fully blocked catalog)
-    if [ -n "${result1}" ] && [ -n "${result2}" ]; then
-        PrintResult "Netflix:" "${Font_Yellow}Originals Only${Font_Suffix}"
-        return
-    fi
+    # Region id lives in the reactContext JSON: models.geo.data.requestCountry
+    # (line-based field cutting is unreliable because the page is minified)
+    local region1=$(echo "$tmpresult1" | grep -oE '"requestCountry":\{[^}]*\}' | head -n1 | grep -oE '"id":"[^"]{2}"' | cut -d'"' -f4)
 
-    # At least one title playable => unlocked; extract region from page JSON
-    if [ -z "${result1}" ] || [ -z "${result2}" ]; then
-        local region1=$(echo "$tmpresult1" | sed -n 's/.*"id":"\([^"]*\)".*"countryName":"[^"]*".*/\1/p' | head -n1)
+    # At least one title playable => unlocked
+    if [ "$playable1" -gt 0 ] || [ "$playable2" -gt 0 ]; then
         if [ -n "$region1" ]; then
             PrintResult "Netflix:" "${Font_Green}Yes (Region: ${region1})${Font_Suffix}"
         else
             PrintResult "Netflix:" "${Font_Green}Yes${Font_Suffix}"
         fi
+        return
+    fi
+
+    # Nothing playable but the region is known => originals only (or fully blocked)
+    if [ -n "$region1" ]; then
+        PrintResult "Netflix:" "${Font_Yellow}Originals Only (Region: ${region1})${Font_Suffix}"
         return
     fi
 
@@ -401,7 +445,9 @@ function Test_YouTube_Premium() {
     fi
 
     local isAvailable=$(echo "$tmpresult" | grep 'Premium is not available in your country')
-    local region=$(echo "$tmpresult" | grep "countryCode" | head -1 | cut -d '"' -f 4)
+    # The page is minified into one huge line, so line-based field cutting
+    # returns an arbitrary field; match the "countryCode":"XX" pair directly
+    local region=$(echo "$tmpresult" | grep -oE '"countryCode":"[^"]{2}"' | head -1 | cut -d'"' -f4)
     if [ -z "$isAvailable" ]; then
         if [ -n "$region" ]; then
             PrintResult "YouTube Premium:" "${Font_Green}Yes (Region: $region)${Font_Suffix}"
@@ -421,20 +467,64 @@ function Test_YouTube_Premium() {
 function Test_YouTube_CDN() {
     local tmpresult=$(curl $curlArgs -${1} -sS --max-time 10 "https://redirector.googlevideo.com/report_mapping?di=no" 2>&1)
 
-    if [[ "$tmpresult" == "curl"* ]]; then
+    if [[ "$tmpresult" == "curl"* ]] || [ -z "$tmpresult" ]; then
         PrintResult "YouTube CDN:" "${Font_Red}Check Failed (Network Connection)${Font_Suffix}"
         return
     fi
 
-    local router=$(echo $tmpresult | grep -o "router: .*" | cut -d '"' -f 2)
-    local location=$(echo $router | cut -d "-" -f 1 | tr 'a-z' 'A-Z')
-    local cdn_node=$(echo $router | cut -d "-" -f 2 | tr 'a-z' 'A-Z')
-
-    if [ -n "$location" ] && [ -n "$cdn_node" ]; then
-        PrintResult "YouTube CDN:" "${Font_Green}Yes ($location / $cdn_node)${Font_Suffix}"
+    # Plain-text response format: "<client-ip> => <cdn-node> (<ipv4-prefix>)",
+    # e.g. "151.245.184.5 => ncsina-ag (151.245.184.0/24)". The node tells which
+    # cache serves this connection, hence the real route/quality of the proxy.
+    local cdn_node=$(echo "$tmpresult" | awk '{print $3}')
+    if [ -z "$cdn_node" ]; then
+        PrintResult "YouTube CDN:" "${Font_Red}Failed${Font_Suffix}"
         return
     fi
+
+    # ISP nodes are "<isp>-<iata>" (route goes through the ISP's cache);
+    # Google-hosted nodes are "<iata><digits>s<digits>"
+    if [[ "$cdn_node" == *"-"* ]]; then
+        local cdn_isp=$(echo "$cdn_node" | cut -f1 -d"-" | tr 'a-z' 'A-Z')
+        local cdn_loc=$(echo "$cdn_node" | cut -f2 -d"-" | sed 's/[^a-zA-Z]//g' | tr 'a-z' 'A-Z')
+        local location=$(lookup_iata "$cdn_loc")
+        if [ -n "$location" ]; then
+            PrintResult "YouTube CDN:" "${Font_Yellow}${cdn_isp} in ${location} (${cdn_node})${Font_Suffix}"
+        else
+            PrintResult "YouTube CDN:" "${Font_Yellow}${cdn_isp} (${cdn_node})${Font_Suffix}"
+        fi
+        return
+    fi
+    if [[ "$cdn_node" == *"s"* ]]; then
+        local cdn_loc=$(echo "$cdn_node" | cut -f2 -d"-" | cut -c1-3 | tr 'a-z' 'A-Z')
+        local location=$(lookup_iata "$cdn_loc")
+        if [ -n "$location" ]; then
+            PrintResult "YouTube CDN:" "${Font_Green}${location} (${cdn_node})${Font_Suffix}"
+        else
+            PrintResult "YouTube CDN:" "${Font_Green}${cdn_loc} (${cdn_node})${Font_Suffix}"
+        fi
+        return
+    fi
+
     PrintResult "YouTube CDN:" "${Font_Red}Failed${Font_Suffix}"
+}
+
+# Check OpenAI Sora availability via Cloudflare geo redirect (upstream parity)
+function Test_Sora() {
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsLI --max-time 10 "https://sora.com" 2>&1)
+
+    if [[ "$tmpresult" == "curl"* ]]; then
+        PrintResult "OpenAI Sora:" "${Font_Red}Failed (Network Connection)${Font_Suffix}"
+        return
+    fi
+
+    local result1=$(echo "$tmpresult" | grep 'location')
+    if [ ! -n "$result1" ]; then
+        PrintResult "OpenAI Sora:" "${Font_Red}No${Font_Suffix}"
+        return
+    fi
+
+    local region1=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 "https://sora.com/cdn-cgi/trace" 2>&1 | grep "loc=" | awk -F= '{print $2}')
+    PrintResult "OpenAI Sora:" "${Font_Green}Yes (Region: ${region1})${Font_Suffix}"
 }
 
 # Check Spotify market region via signup page properties
@@ -486,21 +576,23 @@ function Run_All_Tests() {
     Test_YouTube_CDN ${IPV} > "$tmp_dir/09" &
     Test_Spotify ${IPV} > "$tmp_dir/10" &
     Test_Steam ${IPV} > "$tmp_dir/11" &
+    Test_Sora ${IPV} > "$tmp_dir/12" &
 
     # Wait for all background tasks to complete
     wait
 
     # Output grouped by category
     ShowRegion "AI Services"
-    cat "$tmp_dir/01" "$tmp_dir/02" "$tmp_dir/03" "$tmp_dir/04" 2>/dev/null
+    cat "$tmp_dir/01" "$tmp_dir/02" "$tmp_dir/03" "$tmp_dir/04" "$tmp_dir/12" 2>/dev/null
     ShowRegion "Streaming Media"
     cat "$tmp_dir/05" "$tmp_dir/06" "$tmp_dir/07" "$tmp_dir/08" "$tmp_dir/09" 2>/dev/null
     ShowRegion "Other Services"
     cat "$tmp_dir/10" "$tmp_dir/11" 2>/dev/null
 
     # Tally results from collected output
-    local total=0 yes=0 no=0 failed=0
+    local total=0 yes=0 no=0 partial=0 failed=0
     local GREEN=$'\033[32m'
+    local YELLOW=$'\033[33m'
     local RED=$'\033[31m'
     for f in "$tmp_dir"/*; do
         [ -s "$f" ] || continue
@@ -514,9 +606,11 @@ function Run_All_Tests() {
             else
                 no=$((no+1))
             fi
+        elif [[ "$line" == *"${YELLOW}"* ]]; then
+            partial=$((partial+1))
         fi
     done
-    echo -e "${Font_Purple}  Summary: ${yes} available, ${no} unavailable, ${failed} failed (of ${total})${Font_Suffix}"
+    echo -e "${Font_Purple}  Summary: ${yes} available, ${no} unavailable, ${partial} partial, ${failed} failed (of ${total})${Font_Suffix}"
 
     rm -rf "$tmp_dir"
     echo ""
