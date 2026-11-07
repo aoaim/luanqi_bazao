@@ -591,7 +591,8 @@ validate_managed_config() {
 write_managed_config() {
     local dest="$1" mode="${2:-644}" staged
     mkdir -p "$(dirname "$dest")" || return 1
-    staged=$(mktemp "${dest}.tmp.XXXXXX") || return 1
+    # APT silently ignores .disabled staging files during directory scans.
+    staged=$(mktemp --suffix=.disabled "${dest}.tmp.XXXXXX") || return 1
     if ! cat > "$staged" || ! validate_managed_config "$staged" "$dest"; then
         rm -f "$staged"
         print_error "Configuration generation/validation failed: $dest" >&2
@@ -1316,19 +1317,19 @@ net.ipv4.conf.all.rp_filter = 2
 net.ipv4.conf.default.rp_filter = 2
 
 # ============================================================================
-# Fast Failover (aggressive dead-connection detection, proxy-friendly)
+# Connection Reliability (tolerate transient loss on cross-region links)
 # ============================================================================
 # Reboot 1s after kernel panic instead of hanging
 kernel.panic = 1
-# Detect dead peers within ~126s (120s idle + 2 probes * 3s)
-net.ipv4.tcp_keepalive_time = 120
-net.ipv4.tcp_keepalive_intvl = 3
-net.ipv4.tcp_keepalive_probes = 2
-# Fail fast on unresponsive hosts
-net.ipv4.tcp_syn_retries = 2
-net.ipv4.tcp_synack_retries = 2
-net.ipv4.tcp_retries1 = 2
-net.ipv4.tcp_retries2 = 2
+# Keepalive defaults for sockets that enable SO_KEEPALIVE (applications may override).
+net.ipv4.tcp_keepalive_time = 600
+net.ipv4.tcp_keepalive_intvl = 30
+net.ipv4.tcp_keepalive_probes = 5
+# Retain standard TCP retransmission tolerance; application deadlines handle fast failover.
+net.ipv4.tcp_syn_retries = 6
+net.ipv4.tcp_synack_retries = 5
+net.ipv4.tcp_retries1 = 3
+net.ipv4.tcp_retries2 = 15
 
 # ============================================================================
 # TCP Memory (auto-scaled to RAM: 12% / 50% / 70% of total pages)
@@ -1339,24 +1340,24 @@ net.ipv4.tcp_mem = ${tcp_mem_min} ${tcp_mem_pressure} ${tcp_mem_max}
 # Conntrack (requires nf_conntrack module; loaded before this config is written)
 # ============================================================================
 net.netfilter.nf_conntrack_max = ${conntrack_max}
-# Aggressive expiry keeps the table small on busy NAT/proxy boxes
-net.netfilter.nf_conntrack_tcp_timeout_established = 600
-net.netfilter.nf_conntrack_tcp_timeout_time_wait = 15
-net.netfilter.nf_conntrack_tcp_timeout_close = 5
-net.netfilter.nf_conntrack_tcp_timeout_close_wait = 5
-net.netfilter.nf_conntrack_tcp_timeout_fin_wait = 30
-net.netfilter.nf_conntrack_tcp_timeout_last_ack = 5
-net.netfilter.nf_conntrack_tcp_timeout_max_retrans = 5
-net.netfilter.nf_conntrack_tcp_timeout_syn_recv = 5
-net.netfilter.nf_conntrack_tcp_timeout_syn_sent = 5
-net.netfilter.nf_conntrack_tcp_timeout_unacknowledged = 5
-net.netfilter.nf_conntrack_udp_timeout = 5
-net.netfilter.nf_conntrack_udp_timeout_stream = 60
-net.netfilter.nf_conntrack_icmp_timeout = 5
-net.netfilter.nf_conntrack_icmpv6_timeout = 5
-net.netfilter.nf_conntrack_generic_timeout = 10
-net.netfilter.nf_conntrack_gre_timeout = 5
-net.netfilter.nf_conntrack_gre_timeout_stream = 30
+# Use Linux 6.12 default protocol timeouts to preserve NAT/conntrack state during loss or idle periods.
+net.netfilter.nf_conntrack_tcp_timeout_established = 432000
+net.netfilter.nf_conntrack_tcp_timeout_time_wait = 120
+net.netfilter.nf_conntrack_tcp_timeout_close = 10
+net.netfilter.nf_conntrack_tcp_timeout_close_wait = 60
+net.netfilter.nf_conntrack_tcp_timeout_fin_wait = 120
+net.netfilter.nf_conntrack_tcp_timeout_last_ack = 30
+net.netfilter.nf_conntrack_tcp_timeout_max_retrans = 300
+net.netfilter.nf_conntrack_tcp_timeout_syn_recv = 60
+net.netfilter.nf_conntrack_tcp_timeout_syn_sent = 120
+net.netfilter.nf_conntrack_tcp_timeout_unacknowledged = 300
+net.netfilter.nf_conntrack_udp_timeout = 30
+net.netfilter.nf_conntrack_udp_timeout_stream = 120
+net.netfilter.nf_conntrack_icmp_timeout = 30
+net.netfilter.nf_conntrack_icmpv6_timeout = 30
+net.netfilter.nf_conntrack_generic_timeout = 600
+net.netfilter.nf_conntrack_gre_timeout = 30
+net.netfilter.nf_conntrack_gre_timeout_stream = 180
 
 SYSCTL
 
@@ -1422,7 +1423,7 @@ net.ipv4.tcp_fastopen = 3
 net.ipv4.tcp_mtu_probing = 1
 # Aggressive connection recycling for small memory
 net.ipv4.tcp_fin_timeout = 15
-net.ipv4.tcp_tw_reuse = 1
+net.ipv4.tcp_tw_reuse = 2
 SYSCTL
     else
         # >= 1GB RAM Profile: Performance & Stability
@@ -1454,7 +1455,7 @@ vm.panic_on_oom = 0
 net.ipv4.tcp_fastopen = 3
 net.ipv4.tcp_mtu_probing = 1
 net.ipv4.tcp_fin_timeout = 15
-net.ipv4.tcp_tw_reuse = 1
+net.ipv4.tcp_tw_reuse = 2
 # Increased queue depth for high concurrency
 net.core.somaxconn = 4096
 net.ipv4.tcp_max_syn_backlog = 4096
