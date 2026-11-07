@@ -46,6 +46,7 @@ trap 'cleanup_temp; exit 1' INT TERM
 APT_INDEX_READY=0
 DOCKER_ACTION="keep"
 KERNEL_BOOT_PENDING=0
+CLOUD_KERNEL_ACTION=unknown
 THP_SELECTED=""
 THP_DEFRAG_SELECTED=""
 UI_SECTION=0
@@ -497,7 +498,7 @@ fetch_ipinfo() {
             if [ "$has_ipv6_addr" -gt 0 ] 2>/dev/null; then
                 IPV6_STATUS="address assigned but external unreachable"
             else
-                IPV6_STATUS="not assigned by provider"
+                IPV6_STATUS="no global IPv6 address detected"
             fi
         fi
     fi
@@ -1768,6 +1769,16 @@ configure_ipv6_choice() {
         return 0
     fi
 
+    local local_addresses
+    if ! local_addresses=$(ipv6_usable_addresses); then
+        print_info 'IPv6 address state could not be checked; keeping the stack unchanged.'
+        return 0
+    fi
+    if [ -z "$local_addresses" ]; then
+        print_info 'No usable global IPv6 address detected; disable prompt skipped.'
+        return 0
+    fi
+
     # Require both a previously successful IPv4 probe and an IPv4 route.
     # Failure is conservative: leave the working network unchanged.
     if [ -z "${IPV4_ADDR:-}" ] || [ "$IPV4_ADDR" = "N/A" ] ||
@@ -1789,7 +1800,28 @@ configure_ipv6_choice() {
     fi
 }
 
+ipv6_usable_addresses() {
+    ip -6 -o addr show scope global 2>/dev/null | awk '
+        /inet6/ && $0 !~ /(^|[[:space:]])(tentative|dadfailed)([[:space:]]|$)/ {
+            for (i=1; i<NF; i++) if ($i == "inet6") { print $(i+1); break }
+        }'
+}
+
 show_ipv6_status() {
+    local addresses first
+    # Refresh local configuration before presenting an action; a failed
+    # external lookup must not be described as a provider assignment fact.
+    if addresses=$(ipv6_usable_addresses); then
+        if [ -z "$addresses" ]; then
+            IPV6_ADDR="N/A"
+            IPV6_STATUS='no global IPv6 address detected'
+        elif [ "${IPV6_ADDR:-N/A}" = N/A ] ||
+             ! awk -F/ '{print $1}' <<< "$addresses" | grep -iqxF "${IPV6_ADDR:-N/A}"; then
+            first=${addresses%%$'\n'*}
+            IPV6_ADDR="N/A"
+            IPV6_STATUS="address assigned (${first%/*}); external connectivity unconfirmed"
+        fi
+    fi
     print_kv 'Current state' "$(ipv6_status_text)"
 }
 
@@ -1812,24 +1844,67 @@ ipv6_status_text() {
     elif [ -n "${IPV6_STATUS:-}" ]; then
         echo "${YELLOW}${IPV6_STATUS}${RESET}"
     else
-        echo "${YELLOW}not assigned by provider${RESET}"
+        echo "${YELLOW}no global IPv6 address detected${RESET}"
     fi
 }
 
 show_kernel_info() {
-    local virt
-    virt=$(systemd-detect-virt 2>/dev/null || true)
-    if [ -z "$virt" ] || [ "$virt" = none ]; then
-        print_warning 'Cloud kernels omit hardware drivers; verify suitability before installing on bare metal.'
-    fi
+    local package="linux-image-cloud-${ARCH_DEB}" record status installed="" candidate policy
+    record=$(dpkg-query -W -f='${Status}\n${Version}' "$package" 2>/dev/null || true)
+    status=${record%%$'\n'*}
+    if [[ "$status" == *' ok installed' ]]; then installed=${record#*$'\n'}; fi
+    policy=$(LC_ALL=C apt-cache policy "$package" 2>/dev/null || true)
+    candidate=$(awk '$1 == "Candidate:" { print $2; exit }' <<< "$policy")
     detect_kernel_versions
-    if dpkg-query -W -f='${Status}' "linux-image-cloud-${ARCH_DEB}" 2>/dev/null | grep -Eq '^[^ ]+ ok installed$'; then
-        print_kv 'Package' 'Installed'
-    else
-        print_kv 'Package' 'Not installed'
-    fi
+    if [ -n "$installed" ]; then print_kv 'Package' 'Installed'; else print_kv 'Package' 'Not installed'; fi
     print_kv 'Running version' "$CURRENT_KERNEL"
     print_kv 'Latest installed' "${LATEST_KERNEL:-Not detected}"
+    # Compare APT package versions, not uname strings or /boot filenames.
+    # Equal running/installed image names do not prove the repository is current.
+    CLOUD_KERNEL_ACTION=unknown
+    if [ -z "$candidate" ] || [ "$candidate" = '(none)' ]; then
+        print_kv 'Source candidate' 'Unavailable'
+        print_warning 'Cannot determine an installable cloud-kernel candidate; no install/update is offered.'
+        return 0
+    fi
+    if [ -n "$installed" ]; then
+        print_kv 'Package installed / candidate' "$installed / $candidate"
+        if dpkg --compare-versions "$candidate" gt "$installed"; then
+            CLOUD_KERNEL_ACTION=update
+        else
+            CLOUD_KERNEL_ACTION=none
+        fi
+    else
+        print_kv 'Source candidate' "$candidate"
+        CLOUD_KERNEL_ACTION=install
+    fi
+}
+
+configure_cloud_kernel_choice() {
+    print_subsection 'Cloud kernel'
+    show_kernel_info || return 1
+    case "$CLOUD_KERNEL_ACTION" in
+        none)
+            print_success 'No cloud-kernel update is offered by the current package sources.'
+            if [ -n "$LATEST_KERNEL" ] && [ "$LATEST_KERNEL" != "$CURRENT_KERNEL" ]; then
+                print_info 'An installed kernel differs from the running one; check the selected kernel after a planned reboot.'
+            fi
+            ;;
+        install|update)
+            local virt prompt
+            virt=$(systemd-detect-virt 2>/dev/null || true)
+            if [ -z "$virt" ] || [ "$virt" = none ]; then
+                print_warning 'Cloud kernels omit hardware drivers; verify suitability before installing on bare metal.'
+            fi
+            if [ "$CLOUD_KERNEL_ACTION" = install ]; then prompt='Install cloud kernel?'; else prompt='Update cloud kernel to the source candidate?'; fi
+            if ask_yes_no "$prompt" n; then
+                install_cloud_kernel || return 1
+            else
+                print_info 'No additional kernel installation requested; boot configuration is unchanged here.'
+            fi
+            ;;
+        unknown) : ;;
+    esac
 }
 
 install_cloud_kernel() {
@@ -2138,6 +2213,18 @@ read_thp_mode() {
     sed -nE 's/.*\[([^]]+)\].*/\1/p' "$file" 2>/dev/null
 }
 
+verify_thp_unit() {
+    local unit="$1" isolated target status=0
+    isolated=$(mktemp -d "${TEMP_DIR}/thp-verify.XXXXXX") || return 1
+    cp "$unit" "$isolated/debian-init-thp.service" || { rm -rf "$isolated"; return 1; }
+    for target in sysinit.target local-fs.target basic.target; do
+        printf '[Unit]\nDescription=THP syntax validation target\nDefaultDependencies=no\n' > "$isolated/$target" || { rm -rf "$isolated"; return 1; }
+    done
+    SYSTEMD_UNIT_PATH="$isolated" systemd-analyze verify --generators=no --man=no --recursive-errors=no "$isolated/debian-init-thp.service" || status=$?
+    rm -rf "$isolated"
+    return "$status"
+}
+
 apply_thp_mode() {
     local mode="$1" defrag="$2" unit=/etc/systemd/system/debian-init-thp.service
     case "$mode" in always|madvise|never) ;; *) return 1 ;; esac
@@ -2156,7 +2243,7 @@ ExecStart=/bin/sh -c 'echo ${mode} > /sys/kernel/mm/transparent_hugepage/enabled
 [Install]
 WantedBy=basic.target
 EOF
-    systemd-analyze verify "$unit" || return 1
+    verify_thp_unit "$unit" || return 1
     systemctl daemon-reload || return 1
     systemctl enable debian-init-thp.service || return 1
     systemctl restart debian-init-thp.service || return 1
@@ -2185,13 +2272,7 @@ configure_thp_choice() {
 }
 
 configure_optional_components() {
-    print_subsection 'Cloud kernel'
-    show_kernel_info
-    if ask_yes_no 'Install/update cloud kernel?' n; then
-        install_cloud_kernel || return 1
-    else
-        print_info 'No additional kernel installation requested; boot configuration is unchanged here.'
-    fi
+    configure_cloud_kernel_choice || return 1
     configure_docker_choice || return 1
     configure_thp_choice || return 1
     print_subsection 'IPv6'
@@ -2297,5 +2378,6 @@ main() {
 }
 
 main "$@"
+
 
 
