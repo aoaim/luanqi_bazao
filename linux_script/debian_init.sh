@@ -43,9 +43,14 @@ trap 'report_failure "$?" "$LINENO"' ERR
 trap cleanup_temp EXIT
 trap 'cleanup_temp; exit 1' INT TERM
 
-RUN_LOG="/var/log/debian-init.log"
+APT_INDEX_READY=0
+DOCKER_ACTION="keep"
+KERNEL_BOOT_PENDING=0
+THP_SELECTED=""
+THP_DEFRAG_SELECTED=""
 UI_SECTION=0
 UI_PHASE="Starting"
+UI_DETAIL=0
 RED=$'\033[0;31m'
 GREEN=$'\033[0;32m'
 YELLOW=$'\033[1;33m'
@@ -57,55 +62,80 @@ RESET=$'\033[0m'
 if [ ! -t 1 ] || [ -n "${NO_COLOR+x}" ] || [ "${TERM:-}" = dumb ]; then
     RED=""; GREEN=""; YELLOW=""; BLUE=""; CYAN=""; BOLD=""; DIM=""; RESET=""
 fi
-# Legacy category variables remain empty; section numbering supplies hierarchy.
-ICON_PKG=""; ICON_TIME=""; ICON_DONE=""; ICON_TOOL=""; ICON_INFO=""
 
 print_section() {
     UI_SECTION=$((UI_SECTION + 1))
     UI_PHASE=${1# }
-    printf '\n%s%02d · %s%s\n' "$BOLD" "$UI_SECTION" "$UI_PHASE" "$RESET"
+    UI_DETAIL=0
+    printf '\n%s%s%02d · %s%s\n' "$BLUE" "$BOLD" "$UI_SECTION" "$UI_PHASE" "$RESET"
 }
-print_status() { printf '  %s%-6s%s %s\n' "$1" "$2" "$RESET" "$3"; }
+print_status() {
+    local indent='  '
+    [ "$UI_DETAIL" -eq 0 ] || indent='    '
+    printf '%s%s%-6s%s %s\n' "$indent" "$1" "$2" "$RESET" "$3"
+}
 print_success() { print_status "$GREEN" '[OK]' "$1"; }
 print_warning() { print_status "$YELLOW" '[WARN]' "$1"; }
 print_error() { print_status "$RED" '[FAIL]' "$1" >&2; }
 print_info() { print_status "$CYAN" '[INFO]' "$1"; }
-print_subsection() { printf '\n  %s%s%s\n' "$BOLD" "$1" "$RESET"; }
-print_kv() { printf '  %-28s %s\n' "$1" "$2"; }
+print_subsection() { UI_DETAIL=1; printf '\n  %s%s%s\n' "$BOLD" "$1" "$RESET"; }
+print_kv() {
+    local indent='  '
+    [ "$UI_DETAIL" -eq 0 ] || indent='    '
+    printf '%s%-28s %s\n' "$indent" "$1" "$2"
+}
 
-init_run_log() {
-    mkdir -p "$(dirname "$RUN_LOG")" || return 1
-    (umask 077; : > "$RUN_LOG") || return 1
-    chmod 600 "$RUN_LOG" || return 1
-    printf '%sDebian initialization%s\n' "$BOLD" "$RESET"
-    print_info "Routine command output is logged; failures include diagnostic details."
+init_ui() {
+    printf '%s%sDebian initialization%s\n' "$BLUE" "$BOLD" "$RESET"
 }
-append_run_log() {
-    [ -n "${RUN_LOG:-}" ] || return 0
-    printf '\n[%s] %s\n' "$(date -Is)" "$1" >> "$RUN_LOG" || return 1
-    cat "$2" >> "$RUN_LOG"
-}
-run_logged() {
-    local label="$1" capture status
-    shift
+
+# Keep output on the terminal. Temporary captures only allow indentation and
+# are removed immediately; no diagnostic log file is created.
+run_step() {
+    local detail=1 display=1 label capture status
+    case "${1:-}" in
+        --quiet) detail=0; shift ;;
+        --silent) detail=0; display=0; shift ;;
+    esac
+    label="$1"; shift
     capture=$(mktemp "${TEMP_DIR}/command.XXXXXX") || return 1
+    if [ "$display" -eq 1 ]; then printf '    %-43s ' "${label}..."; fi
     if "$@" > "$capture" 2>&1; then
-        append_run_log "$label" "$capture" || return 1
+        if [ "$display" -eq 1 ]; then printf '%s[OK]%s\n' "$GREEN" "$RESET"; fi
+        if [ "$detail" -eq 1 ]; then
+            # Drop repetitive progress and service compatibility boilerplate,
+            # while retaining package changes, warnings and other details.
+            sed -E '/^(Reading package lists|Building dependency tree|Reading state information|Synchronizing state of |Executing: .*systemd-sysv-install|OK: configuration test is successful)/d; /^[[:space:]]*$/d; s/^/      /' "$capture"
+        elif grep -Eq '(^|[[:space:]])(WARNING|Warning:|W:|ERROR|Error:)|[Dd]eprecated' "$capture"; then
+            print_warning "$label reported a note:"
+            grep -E '(^|[[:space:]])(WARNING|Warning:|W:|ERROR|Error:)|[Dd]eprecated' "$capture" | sed 's/^/      /'
+        fi
         rm -f "$capture"
         return 0
     else
         status=$?
-        append_run_log "$label" "$capture" || return 1
-        print_error "$label failed (exit $status)."
-        tail -n 12 "$capture" | sed 's/^/    /' >&2
-        print_info "Full diagnostic output: $RUN_LOG"
+        if [ "$display" -eq 1 ]; then printf '%s[FAIL]%s\n' "$RED" "$RESET"; else print_error "$label failed (exit $status)."; fi
+        if [ -s "$capture" ]; then
+            printf '\n    Command output:\n' >&2
+            sed 's/^/      /' "$capture" >&2
+            printf '\n' >&2
+        fi
         rm -f "$capture"
         return "$status"
     fi
 }
 report_failure() {
-    print_error "Stopped during '${UI_PHASE:-initialization}' at line $2 (exit $1)."
-    print_info "Completed steps are not rolled back. Diagnostic log: ${RUN_LOG:-unavailable}"
+    printf '\n' >&2
+    print_error "RESULT: Configuration stopped"
+    print_kv 'Failed step' "${UI_PHASE:-initialization} (line $2, exit $1)" >&2
+    print_info "Completed steps remain applied. Errors are shown above; no log file is required."
+}
+
+refresh_apt_indexes() {
+    if [ "$APT_INDEX_READY" -eq 0 ]; then
+        run_step 'Refreshing package indexes' apt-get update -qq || return 1
+        APT_INDEX_READY=1
+    fi
 }
 
 # Persistent choices are data, never sourced as shell code. Config files
@@ -169,7 +199,7 @@ can_prompt() { { : < /dev/tty; } 2>/dev/null; }
 
 read_tty_value() {
     local __dest="$1" __prompt="$2" __input
-    printf '  %s%s%s ' "$CYAN" "$__prompt" "$RESET"
+    printf '    %s%s%s ' "$CYAN" "$__prompt" "$RESET"
     if ! { read -r __input < /dev/tty; } 2>/dev/null; then
         print_warning "Terminal input ended; keeping the previous choice."
         return 1
@@ -245,23 +275,22 @@ probe_buffer_targets() {
     else
         print_info "Using the specified business peers as the RTT reference."
     fi
-    printf '  %-26s %10s %10s %10s\n' 'Target' 'RTT p50' 'Loss' 'Jitter'
+    printf '\n    %-24s %8s %13s %12s %12s\n' 'Target' 'Replies' 'Median RTT' 'Probe loss' 'Jitter'
     for target in "${PROBE_TARGETS[@]}"; do
         count=$((count + 1)); file="${TEMP_DIR}/probe-${count}.log"
         # Bound DNS lookup as well as echo replies; ping's own deadline
         # alone does not reliably bound name resolution.
         LC_ALL=C timeout -k 1s 8s ping -n -c 5 -i 0.2 -W 1 -w 6 -- "$target" > "$file" 2>&1 || true
-        append_run_log "RTT probe: $target" "$file"
         samples=$(sed -nE 's/.*time[=<]([0-9]+([.][0-9]+)?).*/\1/p' "$file" | sort -n)
         received=$(printf '%s\n' "$samples" | awk 'NF { n++ } END { print n+0 }')
         loss=$(sed -nE 's/.* ([0-9]+([.][0-9]+)?)% packet loss.*/\1/p' "$file" | tail -n1)
         jitter=$(awk -F' = ' '/^(rtt|round-trip)/ { split($2,a,"/"); split(a[4],b," "); print b[1] }' "$file")
         if [ "$received" -lt 3 ] || [ -z "$loss" ]; then
-            printf '  %-26s %10s %10s %10s\n' "$target" 'unusable' "${loss:-?}%" '-'
+            printf '    %-24s %8s %13s %12s %12s\n' "$target" "$received / 5" 'Unusable' "${loss:-?}%" '-'
             continue
         fi
         median=$(printf '%s\n' "$samples" | awk 'NF { a[++n]=$1 } END { if (n%2) printf "%.2f",a[(n+1)/2]; else printf "%.2f",(a[n/2]+a[n/2+1])/2 }')
-        printf '  %-26s %8sms %9s%% %8sms\n' "$target" "$median" "$loss" "${jitter:-?}"
+        printf '    %-24s %8s %13s %12s %12s\n' "$target" "$received / 5" "$median ms" "$loss%" "${jitter:-?} ms"
         # ICMP loss is only a probe result, not a TCP loss measurement.
         # Incomplete probes inform the report but not buffer sizing.
         if awk -v loss="$loss" 'BEGIN { exit !(loss <= 20) }'; then
@@ -270,11 +299,10 @@ probe_buffer_targets() {
     done
     BUFFER_MEASURED_RTT="$best"
     print_info "ICMP results are advisory; they do not measure TCP loss or available bandwidth."
-    print_info "Sizing uses the highest usable median; fewer than 3 replies or loss above 20% excludes a target."
+
 }
 
 configure_buffers() {
-    print_section "Transfer buffer profile"
     if [ -z "$BUFFER_CLI_PROFILE" ]; then load_buffer_state || return 1; fi
     if [ -n "$BUFFER_CLI_PROFILE" ]; then
         BUFFER_PROFILE="$BUFFER_CLI_PROFILE"
@@ -287,7 +315,7 @@ configure_buffers() {
         print_info "No interactive terminal; using the saved choice or system-default buffers."
     else
         local answer rate="${BUFFER_CLI_MBPS:-unknown}" recommended choice peer=""
-        print_info "Only buffer limits are considered; retransmission and conntrack settings are independent."
+
         if [ "${#PROBE_TARGETS[@]}" -eq 0 ]; then
             if ! read_tty_value peer 'Business peer host/IP [Enter: reference sites in China]:'; then return 0; fi
             if [ -n "$peer" ]; then
@@ -301,10 +329,8 @@ configure_buffers() {
             return 0
         fi
         if [ -z "$BUFFER_CLI_MBPS" ]; then
-            print_info "Target rate for ONE TCP connection (not the NIC's advertised speed)."
-            print_info "1) Unknown: recommend system-default buffers (no assumed bandwidth)"
-            print_info "2) 100 Mbps   3) 200 Mbps   4) 500 Mbps"
-            print_info "5) 1000 Mbps  6) Custom"
+            print_subsection 'Target rate per TCP connection'
+            printf '    1) Unknown — system-default recommendation\n    2) 100 Mbps\n    3) 200 Mbps\n    4) 500 Mbps\n    5) 1000 Mbps\n    6) Custom\n' 
             while true; do
                 if ! read_tty_value answer 'Target [1]:'; then return 0; fi
                 case "$answer" in
@@ -324,8 +350,7 @@ configure_buffers() {
         recommended=$(recommend_buffer_profile "$rate" "$BUFFER_MEASURED_RTT" "$((MEM_KB / 1024))")
         if [ "$BUFFER_MEASURED_RTT" = unknown ]; then print_kv 'Reference RTT' 'Not measured reliably'; else print_kv 'Reference RTT' "${BUFFER_MEASURED_RTT} ms"; fi
         if [ "$rate" = unknown ]; then print_kv 'Target per connection' 'Not specified'; else print_kv 'Target per connection' "$rate Mbps"; fi
-        print_kv 'Recommended profile' "$recommended"
-        print_info "Recommendation uses a coarse 2 x BDP allowance; measured throughput may differ."
+        print_kv 'Recommended profile' "${GREEN}${recommended}${RESET}"
         if [ "$recommended" = default ]; then print_info "Insufficient sizing evidence, low BDP or limited RAM: prefer system defaults."; fi
         if [ "$BUFFER_MEASURED_RTT" != unknown ] && [ "$rate" != unknown ]; then
             local need
@@ -333,19 +358,32 @@ configure_buffers() {
             print_kv '2 x BDP allowance' "$need MiB"
             if awk -v n="$need" 'BEGIN { exit !(n > 64) }'; then print_warning "The estimate exceeds 64 MiB; this script's profiles cannot promise the target rate."; fi
         fi
-        print_info "default) System-managed buffers   32m) 32 MiB cap   64m) 64 MiB cap"
-        print_info "Larger caps allow growth; they neither preallocate that amount nor guarantee safety under high concurrency."
+        local suggested=1
+        case "$recommended" in 32m) suggested=2 ;; 64m) suggested=3 ;; esac
+        printf '\n    1) System default\n    2) 32 MiB\n    3) 64 MiB\n'
         while true; do
-            if ! read_tty_value choice "Profile [$recommended]:"; then return 0; fi
-            choice=${choice:-$recommended}
+            if ! read_tty_value choice "Select [$suggested, ? for explanation]:"; then return 0; fi
+            choice=${choice:-$suggested}
+            case "$choice" in
+                1|default) choice=default ;;
+                2|32m) choice=32m ;;
+                3|64m) choice=64m ;;
+                '?')
+                    print_info 'Sizing uses the highest reliable median RTT and a coarse 2× bandwidth-delay allowance.'
+                    print_info 'Targets with fewer than 3 replies or ICMP loss above 20% are excluded.'
+                    print_info 'Caps permit growth, not preallocation. They do not guarantee throughput or safety under high concurrency.'
+                    print_info '32 MiB requires at least 1 GiB RAM; 64 MiB requires at least 2 GiB. Unknown bandwidth recommends defaults.'
+                    continue ;;
+                *) print_warning 'Choose 1, 2, 3 or ?.'; continue ;;
+            esac
             if profile_allowed "$choice"; then break; fi
-            print_warning "Choose default, 32m (RAM >= 1 GiB) or 64m (RAM >= 2 GiB)."
+            print_warning 'This profile exceeds the script RAM guard; choose a smaller profile.'
         done
         BUFFER_PROFILE="$choice"; BUFFER_TARGET_MBPS="$rate"; BUFFER_RTT_MS="$BUFFER_MEASURED_RTT"
     fi
     profile_allowed "$BUFFER_PROFILE" || { print_error "Saved/requested buffer profile exceeds the script's RAM guard; reassess it."; return 1; }
     print_kv 'Selected profile' "$(buffer_profile_label)"
-    print_info "Reassess with --reassess-buffers; ordinary runs keep this choice."
+
 }
 
 track_kernel_default_reset() {
@@ -401,14 +439,15 @@ require_debian() {
 }
 
 ensure_basic_tools() {
-    print_section "${ICON_PKG} Preparing prerequisites"
-    run_logged "Refresh package indexes" apt-get update -qq || { print_error "APT index update failed; aborting."; return 1; }
-    run_logged "Install packages" apt-get install $APT_INSTALL_OPTS curl wget iputils-ping iproute2 || { print_error "Prerequisite installation failed; aborting."; return 1; }
-    if ! command -v curl >/dev/null || ! command -v wget >/dev/null; then
-        print_error "Failed to install curl or wget. Please check network or mirrors."
-        exit 1
+    local cmd missing=0
+    for cmd in curl wget ping ip; do command -v "$cmd" >/dev/null 2>&1 || missing=1; done
+    if [ "$missing" -eq 1 ]; then
+        refresh_apt_indexes || return 1
+        run_step 'Installing prerequisites' apt-get install $APT_INSTALL_OPTS curl wget iputils-ping iproute2 || return 1
     fi
-    print_success "Base utilities ready (curl, wget, ping, iproute2)"
+    for cmd in curl wget ping ip; do
+        command -v "$cmd" >/dev/null 2>&1 || { print_error "Missing required command: $cmd"; return 1; }
+    done
 }
 
 fetch_ipinfo() {
@@ -509,7 +548,7 @@ download_file() {
 
 ensure_unzip() {
     if ! command_exists unzip; then
-        run_logged "Install packages" apt-get install -qq -y unzip >/dev/null 2>&1 || true
+        run_step "Install packages" apt-get install -qq -y unzip >/dev/null 2>&1 || true
     fi
     if ! command_exists unzip; then
         print_error "unzip install failed"
@@ -520,7 +559,7 @@ ensure_unzip() {
 
 ensure_xz() {
     if ! command_exists xz; then
-        run_logged "Install packages" apt-get install -qq -y xz-utils >/dev/null 2>&1 || true
+        run_step "Install packages" apt-get install -qq -y xz-utils >/dev/null 2>&1 || true
     fi
     if ! command_exists xz; then
         print_error "xz-utils install failed"
@@ -531,7 +570,7 @@ ensure_xz() {
 
 ensure_bzip2() {
     if ! command_exists bzip2; then
-        run_logged "Install packages" apt-get install -qq -y bzip2 >/dev/null 2>&1 || true
+        run_step "Install packages" apt-get install -qq -y bzip2 >/dev/null 2>&1 || true
     fi
     if ! command_exists bzip2; then
         print_error "bzip2 install failed"
@@ -586,7 +625,6 @@ detect_system() {
 }
 
 show_detection() {
-    print_section "${ICON_INFO} Environment check"
     print_kv "IPv4" "${IPV4_ADDR:-N/A}"
     if [ "${IPV6_ADDR:-N/A}" != "N/A" ] && [ -n "$IPV6_ADDR" ]; then
         print_kv "IPv6" "$IPV6_ADDR"
@@ -705,11 +743,6 @@ install_cf_speedtest() {
 
             if [ -n "$binpath" ]; then
                 install -m 755 "$binpath" /usr/local/bin/cloudflare-speed-cli
-                write_managed_config /etc/profile.d/cfspeed-alias.sh <<'EOF'
-# Generated by: debian_init.sh
-# Do not edit manually - changes may be overwritten
-alias cf='cloudflare-speed-cli'
-EOF
 
                 print_success "Cloudflare Speedtest CLI installed (alias: cf)"
             else
@@ -725,12 +758,11 @@ EOF
 }
 
 apt_refresh() {
-    print_section "${ICON_PKG} System update"
-    run_logged "Refresh package indexes" apt-get update -qq || { print_error "APT index update failed; aborting."; return 1; }
-    run_logged "Upgrade installed packages" apt-get upgrade $APT_INSTALL_OPTS || { print_error "APT upgrade failed; aborting."; return 1; }
-    run_logged "Remove unused packages" apt-get autoremove $APT_INSTALL_OPTS || { print_error "APT autoremove failed; aborting."; return 1; }
-    run_logged "Clean package cache" apt-get clean || { print_error "APT cache cleanup failed."; return 1; }
-    print_success "System update completed"
+    print_subsection 'System packages'
+    refresh_apt_indexes || return 1
+    run_step 'Applying package upgrades' apt-get upgrade $APT_INSTALL_OPTS || return 1
+    run_step 'Removing unused packages' apt-get autoremove $APT_INSTALL_OPTS || return 1
+    run_step --silent 'Cleaning package cache' apt-get clean || return 1
 }
 
 install_helix() {
@@ -772,13 +804,6 @@ install_helix() {
                 rm -rf /usr/local/lib/helix/runtime
                 [ -d "${helix_dir}/runtime" ] && cp -r "${helix_dir}/runtime" /usr/local/lib/helix/
 
-                write_managed_config /etc/profile.d/helix-alias.sh <<'EOF'
-# Generated by: debian_init.sh
-# Do not edit manually - changes may be overwritten
-export HELIX_RUNTIME=/usr/local/lib/helix/runtime
-alias vi='hx'
-alias vim='hx'
-EOF
 
                 print_success "Helix installed (aliases: vi, vim, hx)"
             else
@@ -815,11 +840,6 @@ install_nexttrace() {
 
     if download_file "$url" "${TEMP_DIR}/nexttrace"; then
         install -m 755 "${TEMP_DIR}/nexttrace" /usr/local/bin/nexttrace
-        write_managed_config /etc/profile.d/nexttrace-alias.sh <<'EOF'
-# Generated by: debian_init.sh
-# Do not edit manually - changes may be overwritten
-alias nt='nexttrace'
-EOF
 
         print_success "Nexttrace installed (alias: nt)"
         rm -f "${TEMP_DIR}/nexttrace"
@@ -831,7 +851,7 @@ EOF
 MANIFEST_FILE="/var/lib/debian-init/manifest"
 GENERATED_MARKER="Generated by: debian_init.sh"
 CONFIG_TARGETS=()
-RETIRED_CONFIGS=()  # Explicit old paths may be listed here when renaming configs.
+RETIRED_CONFIGS=("/etc/systemd/system/disable-transparent-huge-pages.service")
 STALE_RUNTIME_CONFIG=0
 
 collect_config_targets() {
@@ -841,7 +861,7 @@ collect_config_targets() {
         "/etc/modules-load.d/network-optimized.conf"
         "/etc/modules-load.d/tcp_bbr.conf"
         "/etc/systemd/journald.conf.d/99-limit.conf"
-        "/etc/systemd/system/disable-transparent-huge-pages.service"
+        "/etc/systemd/system/debian-init-thp.service"
         "/etc/profile.d/helix-alias.sh"
         "/etc/profile.d/nexttrace-alias.sh"
         "/etc/profile.d/cfspeed-alias.sh"
@@ -881,7 +901,7 @@ write_managed_config() {
     mkdir -p "$(dirname "$dest")" || return 1
     # APT silently ignores .disabled staging files during directory scans.
     staged=$(mktemp --suffix=.disabled "${dest}.tmp.XXXXXX") || return 1
-    if ! cat > "$staged" || ! run_logged "Validate ${dest##*/}" validate_managed_config "$staged" "$dest"; then
+    if ! cat > "$staged" || ! run_step --silent "Validate ${dest##*/}" validate_managed_config "$staged" "$dest"; then
         rm -f "$staged"
         print_error "Configuration generation/validation failed: $dest" >&2
         return 1
@@ -910,7 +930,6 @@ is_cleanup_path() {
 }
 
 cleanup_stale_configs() {
-    print_section "${ICON_INFO} Stale config cleanup"
     local candidates="${TEMP_DIR}/managed-candidates" f t keep unit removed=0 reload=0
     : > "$candidates"
     [ ! -f "$MANIFEST_FILE" ] || cat "$MANIFEST_FILE" >> "$candidates"
@@ -938,17 +957,17 @@ cleanup_stale_configs() {
         [ -e "$f" ] || [ -L "$f" ] || continue
         if [[ "$f" == /etc/systemd/system/*.service ]]; then
             unit=${f##*/}
-            if systemctl is-active --quiet "$unit"; then run_logged "Stop retired service" systemctl stop "$unit" || return 1; fi
-            if systemctl is-enabled --quiet "$unit"; then run_logged "Disable retired service" systemctl disable "$unit" || return 1; fi
+            if systemctl is-active --quiet "$unit"; then run_step "Stop retired service" systemctl stop "$unit" || return 1; fi
+            if systemctl is-enabled --quiet "$unit"; then run_step "Disable retired service" systemctl disable "$unit" || return 1; fi
             reload=1
         fi
         rm -f -- "$f" || { print_error "Cannot remove retired config: $f"; return 1; }
         [ ! -e "$f" ] && [ ! -L "$f" ] || return 1
         case "$f" in /etc/sysctl.d/*|/etc/modules-load.d/*) STALE_RUNTIME_CONFIG=1 ;; esac
-        print_info "Removed retired configuration: $f"
+        print_kv 'Removed retired file' "$f"
         removed=$((removed + 1))
     done < "$candidates"
-    if [ "$reload" -eq 1 ]; then run_logged "Reload service definitions" systemctl daemon-reload || return 1; fi
+    if [ "$reload" -eq 1 ]; then run_step "Reload service definitions" systemctl daemon-reload || return 1; fi
     print_success "Retired configuration cleanup complete ($removed removed)"
     if [ "$STALE_RUNTIME_CONFIG" -eq 1 ]; then
         print_warning "Retired kernel settings/modules can remain in memory until reboot; their old files have been removed."
@@ -968,10 +987,7 @@ save_manifest() {
 
 preflight_config() {
     collect_config_targets
-    print_section "Configuration policy"
-    print_kv 'Managed paths' "${#CONFIG_TARGETS[@]}"
-    print_kv 'Update policy' 'Full replacement; no merge or backup'
-    print_kv 'Retired configurations' 'Remove script-owned files no longer used'
+    print_kv 'Configuration policy' 'Full replacement; no merge or backup'
 }
 
 ask_yes_no() {
@@ -987,28 +1003,30 @@ ask_yes_no() {
         return 1
     fi
     while true; do
-        printf '  %s%s [%s] (y/n):%s ' "$CYAN" "$prompt" "$default" "$RESET"
+        local hint='y/N'
+        [ "$default" != y ] || hint='Y/n'
+        printf '    %s%s [%s]:%s ' "$CYAN" "$prompt" "$hint" "$RESET"
         # Read from the terminal, never from piped script text. EOF is not
         # consent, even when an optional action has a default of yes.
         if ! { read -r choice < /dev/tty; } 2>/dev/null; then
-            print_warning "No terminal input available; skipping: $prompt"
+            print_warning "Input ended; current state retained."
             return 1
         fi
         case "$choice" in
             y|Y|yes|Yes)
-                print_info "Selected: y"
+
                 return 0
                 ;;
             n|N|no|No)
-                print_info "Selected: n"
+
                 return 1
                 ;;
             "")
                 if [ "$default" = "y" ]; then
-                    print_info "Selected: y (default)"
+
                     return 0
                 fi
-                print_info "Selected: n (default)"
+
                 return 1
                 ;;
             *) echo "Please enter y/yes or n/no." ;;
@@ -1016,18 +1034,6 @@ ask_yes_no() {
     done
 }
 
-show_docker_status() {
-    print_info "Checking Docker status..."
-    if command_exists docker; then
-        local docker_ver
-        docker_ver=$(docker --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 || echo "?")
-        print_kv "Docker" "${GREEN}already installed${RESET} (v${docker_ver})"
-        return 1
-    else
-        print_kv "Docker" "${YELLOW}not installed${RESET}"
-        return 0
-    fi
-}
 
 install_docker() {
     print_info "Installing Docker..."
@@ -1037,7 +1043,7 @@ install_docker() {
     fi
 
     local docker_script="${TEMP_DIR}/get-docker.sh"
-    if download_file https://get.docker.com "$docker_script" && run_logged "Install Docker" sh "$docker_script"; then
+    if download_file https://get.docker.com "$docker_script" && run_step "Install Docker" sh "$docker_script"; then
         print_success "Docker installed successfully"
         local docker_user="${SUDO_USER:-${USER:-}}"
         if [ -n "$docker_user" ] && [ "$docker_user" != "root" ]; then
@@ -1046,61 +1052,17 @@ install_docker() {
         fi
     else
         print_error "Failed to install Docker"
-    fi
-}
-
-# Returns 0 (ask user) when THP is not already disabled
-show_thp_status() {
-    print_info "Checking Transparent Huge Pages (THP) status..."
-    local thp_enabled thp_defrag
-    thp_enabled=$(cat /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null | grep -oE '\[[^]]+\]' | tr -d '[]' || echo "unknown")
-    thp_defrag=$(cat /sys/kernel/mm/transparent_hugepage/defrag 2>/dev/null | grep -oE '\[[^]]+\]' | tr -d '[]' || echo "unknown")
-    print_kv "THP enabled" "$thp_enabled"
-    print_kv "THP defrag" "$thp_defrag"
-
-    if [ "$thp_enabled" = "never" ]; then
-        print_success "THP already disabled"
         return 1
     fi
-    if [ "$thp_enabled" = "unknown" ]; then
-        print_warning "Cannot read THP status (not supported on this kernel?)"
-        return 1
-    fi
-    return 0
 }
 
-disable_thp() {
-    print_info "Disabling Transparent Huge Pages..."
-    # sysfs values reset on reboot; persist via a systemd oneshot service.
-    write_managed_config /etc/systemd/system/disable-transparent-huge-pages.service <<'EOF'
-# Generated by: debian_init.sh
-# Do not edit manually - changes may be overwritten
-[Unit]
-Description=Disable Transparent Huge Pages (THP)
-DefaultDependencies=no
-After=sysinit.target local-fs.target
-[Service]
-Type=oneshot
-ExecStart=/bin/sh -c 'echo never > /sys/kernel/mm/transparent_hugepage/enabled; echo never > /sys/kernel/mm/transparent_hugepage/defrag'
-[Install]
-WantedBy=basic.target
-EOF
-    run_logged "Service configuration" systemctl daemon-reload
-    run_logged "Validate THP service" systemd-analyze verify /etc/systemd/system/disable-transparent-huge-pages.service || return 1
-    run_logged "Service configuration" systemctl enable disable-transparent-huge-pages || return 1
-    run_logged "Service configuration" systemctl restart disable-transparent-huge-pages || return 1
-    grep -qF '[never]' /sys/kernel/mm/transparent_hugepage/enabled || return 1
-    grep -qF '[never]' /sys/kernel/mm/transparent_hugepage/defrag || return 1
-    print_success "THP disabled (persistent via systemd service)"
-}
+
 
 install_tools() {
-    print_section "${ICON_TOOL} Tools setup"
     install_helix
     install_cf_speedtest
     install_nexttrace
     generate_update_tools_script
-    configure_tool_aliases
 }
 
 generate_update_tools_script() {
@@ -1306,12 +1268,12 @@ echo ""
 update_cf_speedtest
 
 echo ""
-echo -e "${GREEN}[OK]${RESET} Tools update complete."
+echo -e "${CYAN}[INFO]${RESET} Tools update checks finished; see the results above."
 
 rm -rf "$TEMP_DIR"
 SCRIPT_EOF
 
-    print_success "update-tools script generated (/usr/local/bin/update-tools)"
+
 }
 
 configure_tool_aliases() {
@@ -1361,7 +1323,7 @@ alias la='eza -al --icons --group-directories-first --git'
 alias lt='eza -T --icons --level=2'
 EOF
 
-    print_success "Eza aliases configured (ll, la, lt; ls kept native)"
+
 }
 
 configure_update_alias() {
@@ -1372,11 +1334,10 @@ configure_update_alias() {
 alias update='apt update && apt upgrade && apt autoremove -y && update-tools'
 EOF
 
-    print_success "Update alias configured (update -> apt update && apt upgrade && apt autoremove -y && update-tools)"
+
 }
 
 configure_chrony() {
-    print_section "${ICON_TIME} Time sync & timezone"
     # Choose NTP pool based on IP
     local region_prefix=""
     case "${IP_TZ:-}" in
@@ -1409,16 +1370,10 @@ rtcsync
 log tracking measurements statistics
 logdir /var/log/chrony
 EOF
-    chronyd -p -f "$CHRONY_CONF" >/dev/null || { print_error "Chrony configuration validation failed."; return 1; }
-    run_logged "Service configuration" systemctl enable chrony || return 1
-    run_logged "Service configuration" systemctl restart chrony || return 1
-    systemctl is-active --quiet chrony || { print_error "Chrony is not active."; return 1; }
-    print_success "chrony configured (${region_prefix:-global} pool)"
+    run_step 'Restarting Chrony' activate_service chrony || return 1
+    print_kv 'NTP pool' "${region_prefix:-global}pool.ntp.org"
 
     CURRENT_TZ=$(timedatectl show --property=Timezone --value 2>/dev/null || echo "Unknown")
-    print_kv "Current timezone" "$CURRENT_TZ"
-    print_kv "Suggested timezone" "${IP_TZ:-Unknown}"
-    echo ""
 
     # Timezone: Auto-set to IP_TZ if available and different
     if [ -n "${IP_TZ:-}" ] && [ "$IP_TZ" != "$CURRENT_TZ" ]; then
@@ -1429,14 +1384,12 @@ EOF
         else
             print_error "Failed to set timezone; keeping current."
         fi
-    else
-        print_info "Timezone already matches detection or no detection available ($CURRENT_TZ)."
     fi
     TIMEZONE_FINAL="$CURRENT_TZ"
+    print_kv 'Timezone' "$TIMEZONE_FINAL"
 }
 
 ensure_kernel_modules() {
-    print_section "${ICON_TOOL} Kernel modules"
     local modules_conf="/etc/modules-load.d/network-optimized.conf"
 
     local staged="${TEMP_DIR}/network-modules.conf"
@@ -1447,7 +1400,7 @@ ensure_kernel_modules() {
     # so without this step all net.netfilter.* keys would be skipped.
     if modprobe nf_conntrack >/dev/null 2>&1 || [ -r /proc/sys/net/netfilter/nf_conntrack_max ]; then
         echo "nf_conntrack" >> "$staged"
-        print_success "nf_conntrack ready (conntrack tuning will apply)"
+        print_kv 'nf_conntrack' 'Loaded'
     else
         print_warning "nf_conntrack unavailable; conntrack tuning keys will be skipped"
     fi
@@ -1455,7 +1408,7 @@ ensure_kernel_modules() {
     # TLS offload (optional; only persisted when the module exists)
     if modprobe tls >/dev/null 2>&1; then
         echo "tls" >> "$staged"
-        print_success "tls module loaded (optional)"
+        print_kv 'tls' 'Loaded'
     else
         print_info "tls module not available (optional, skipped)"
     fi
@@ -1463,7 +1416,6 @@ ensure_kernel_modules() {
 }
 
 configure_journald() {
-    print_section "${ICON_TOOL} Journald limits"
     local conf_dir="/etc/systemd/journald.conf.d"
     mkdir -p "$conf_dir"
 
@@ -1482,9 +1434,10 @@ RuntimeMaxFiles=3
 MaxRetentionSec=1209600
 MaxFileSec=259200
 EOF
-    run_logged "Service configuration" systemctl restart systemd-journald || return 1
+    run_step 'Restarting journald' systemctl restart systemd-journald || return 1
     systemctl is-active --quiet systemd-journald || return 1
-    print_success "journald capped (384M on disk / 256M runtime, up to 14 days; size limits may shorten retention)"
+    print_kv 'Journal limits' '384 MiB disk / 256 MiB runtime / up to 14 days'
+    print_info 'Size limits may shorten journal retention.' 
 }
 
 is_sysctl_supported() {
@@ -1751,7 +1704,6 @@ SYSCTL
 }
 
 apply_network_sysctl() {
-    print_section "${ICON_INFO} Network tuning"
 
     local tmpfile
     tmpfile="${TEMP_DIR}/sysctl_network.conf"
@@ -1766,7 +1718,7 @@ apply_network_sysctl() {
     filter_sysctl_file "$tmpfile" "$filtered"
     write_managed_config "$SYSCTL_NETWORK_FILE" < "$filtered"
 
-    print_success "Network tuning config written to $SYSCTL_NETWORK_FILE"
+
 }
 
 apply_ipv6_sysctl() {
@@ -1784,7 +1736,7 @@ net.ipv6.conf.all.disable_ipv6 = 1
 net.ipv6.conf.default.disable_ipv6 = 1
 net.ipv6.conf.lo.disable_ipv6 = 1
 EOF
-        print_success "IPv6 disabled ($SYSCTL_IPV6_FILE)"
+        print_kv 'IPv6 configuration' 'Disabled'
     else
         # Enable IPv6 immediately (kernel defaults to 0 = enabled)
         sysctl -w net.ipv6.conf.all.disable_ipv6=0 >/dev/null || return 1
@@ -1794,7 +1746,7 @@ EOF
         if [ -f "$SYSCTL_IPV6_FILE" ]; then
             rm -f "$SYSCTL_IPV6_FILE"
         fi
-        print_success "IPv6 enabled"
+        print_kv 'IPv6 configuration' 'Enabled'
     fi
 }
 
@@ -1838,8 +1790,7 @@ configure_ipv6_choice() {
 }
 
 show_ipv6_status() {
-    print_info "Checking IPv6 status..."
-    print_kv "IPv6" "$(ipv6_status_text)"
+    print_kv 'Current state' "$(ipv6_status_text)"
 }
 
 # Populates CURRENT_KERNEL / LATEST_KERNEL (latest installed vs running).
@@ -1866,44 +1817,31 @@ ipv6_status_text() {
 }
 
 show_kernel_info() {
-    print_info "Checking kernel status..."
-
-    # Cloud Kernel is tailored for virtualized environments and omits many
-    # hardware drivers; warn before installing on bare metal.
     local virt
-    virt=$(systemd-detect-virt 2>/dev/null || echo "unknown")
-    if [ "$virt" = "none" ] || [ "$virt" = "unknown" ]; then
-        print_warning "Detected bare-metal/unknown environment ($virt). Cloud Kernel omits many hardware drivers and may break networking/storage on physical machines."
+    virt=$(systemd-detect-virt 2>/dev/null || true)
+    if [ -z "$virt" ] || [ "$virt" = none ]; then
+        print_warning 'Cloud kernels omit hardware drivers; verify suitability before installing on bare metal.'
     fi
-
-    local current_kernel latest_kernel
     detect_kernel_versions
-    current_kernel="$CURRENT_KERNEL"
-    latest_kernel="$LATEST_KERNEL"
-
-    print_kv "Current Kernel" "$current_kernel"
-    if [ -n "$latest_kernel" ] && [ "$latest_kernel" != "$current_kernel" ]; then
-        print_kv "Latest Installed" "$latest_kernel (will load on reboot)"
+    if dpkg-query -W -f='${Status}' "linux-image-cloud-${ARCH_DEB}" 2>/dev/null | grep -Eq '^[^ ]+ ok installed$'; then
+        print_kv 'Package' 'Installed'
+    else
+        print_kv 'Package' 'Not installed'
     fi
-
-    # Check if cloud kernel package is already installed
-    if dpkg -l "linux-image-cloud-${ARCH_DEB}" 2>/dev/null | grep -q "^ii"; then
-        print_success "Cloud Kernel already installed"
-        return 1
-    fi
-    return 0
+    print_kv 'Running version' "$CURRENT_KERNEL"
+    print_kv 'Latest installed' "${LATEST_KERNEL:-Not detected}"
 }
 
 install_cloud_kernel() {
-    echo ""
-    print_info "Installing Cloud Kernel..."
-    if run_logged "Install cloud kernel" apt-get install $APT_INSTALL_OPTS "linux-image-cloud-${ARCH_DEB}"; then
-        print_success "Cloud Kernel installed"
-        print_info "Updating GRUB..."
-        update-grub 2>/dev/null || true
+    run_step 'Installing/updating cloud kernel' apt-get install $APT_INSTALL_OPTS "linux-image-cloud-${ARCH_DEB}" || return 1
+    if command_exists update-grub; then
+        run_step 'Updating GRUB configuration' update-grub || return 1
     else
-        print_error "Failed to install Cloud Kernel"
+        print_warning 'No GRUB update command found; verify your bootloader before rebooting.'
     fi
+    detect_kernel_versions
+    if [ -n "$LATEST_KERNEL" ] && [ "$LATEST_KERNEL" != "$CURRENT_KERNEL" ]; then KERNEL_BOOT_PENDING=1; fi
+    print_info 'Kernel installation does not reboot the server. Check uname -r after reboot.'
 }
 
 detect_ssh_ports() {
@@ -1923,21 +1861,46 @@ detect_ssh_ports() {
 }
 
 install_base_packages() {
-    print_section "${ICON_PKG} Installing base packages"
-    run_logged "Install packages" apt-get install -y -o=Dpkg::Use-Pty=0 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold rsyslog openssl gnupg cron chrony fail2ban python3-systemd logrotate nano vnstat nload htop unzip unattended-upgrades eza duf bat zoxide || { print_error "Base package installation failed; aborting before service configuration."; return 1; }
-
-    # Debian ships bat as batcat on some releases; expose it through a shell alias.
+    print_subsection 'Required packages'
+    local package status missing=()
+    local packages=(rsyslog openssl gnupg cron chrony fail2ban python3-systemd logrotate nano vnstat nload htop unzip unattended-upgrades eza duf bat zoxide)
+    for package in "${packages[@]}"; do
+        status=$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null || true)
+        [[ "$status" == *' ok installed' ]] || missing+=("$package")
+    done
+    if [ "${#missing[@]}" -gt 0 ]; then
+        run_step 'Installing missing packages' apt-get install $APT_INSTALL_OPTS "${missing[@]}" || return 1
+    else
+        print_success "All ${#packages[@]} required packages are installed."
+    fi
     write_managed_config /etc/profile.d/bat-alias.sh <<'EOF'
 # Generated by: debian_init.sh
-# Do not edit manually - changes may be overwritten
-# Only alias bat to batcat when the real `bat` binary is not installed.
 command -v bat >/dev/null 2>&1 || alias bat='batcat'
 EOF
+}
 
-    print_success "bat alias configured (bat -> batcat)"
+activate_service() {
+    local service="$1"
+    systemctl enable "$service" || return 1
+    systemctl restart "$service" || return 1
+    systemctl is-active --quiet "$service"
+}
 
+restart_fail2ban() {
+    activate_service fail2ban || return 1
+    local attempt
+    for attempt in {1..10}; do
+        if fail2ban-client status sshd >/dev/null 2>&1; then return 0; fi
+        sleep 1
+    done
+    print_error 'Fail2Ban SSH jail did not become ready.'
+    return 1
+}
+
+configure_fail2ban() {
+    print_subsection 'SSH protection'
     # Ensure rsyslog is enabled and started
-    run_logged "Service configuration" systemctl enable --now rsyslog || return 1
+    run_step 'Starting rsyslog' systemctl enable --now rsyslog || return 1
     systemctl is-active --quiet rsyslog || return 1
 
     # Configure Fail2Ban (systemd backend)
@@ -1958,22 +1921,14 @@ backend = systemd
 mode = normal
 port = ${ssh_ports}
 EOF
-    run_logged "Validate Fail2Ban" fail2ban-client -t || { print_error "Fail2Ban configuration validation failed."; return 1; }
-    run_logged "Service configuration" systemctl enable fail2ban || return 1
-    run_logged "Service configuration" systemctl restart fail2ban || return 1
-    # The daemon can become active before its control socket and jails are
-    # ready. Wait briefly, then verify the actual jail rather than only PID.
-    local attempt jail_ready=0
-    for attempt in {1..10}; do
-        if fail2ban-client status sshd >/dev/null 2>&1; then
-            jail_ready=1
-            break
-        fi
-        sleep 1
-    done
-    [ "$jail_ready" -eq 1 ] || { print_error "Fail2Ban sshd jail did not become ready."; return 1; }
-    print_success "Fail2Ban sshd jail active (SSH ports: $ssh_ports)"
+    run_step --silent "Validate Fail2Ban" fail2ban-client -t || { print_error "Fail2Ban configuration validation failed."; return 1; }
+    run_step 'Restarting Fail2Ban and checking SSH jail' restart_fail2ban || return 1
+    print_kv 'Protected SSH ports' "$ssh_ports"
 
+}
+
+configure_auto_updates() {
+    print_subsection 'Automatic updates'
     # Configure unattended-upgrades for security updates only.
     # The Origins-Pattern must reference the real suite (e.g. trixie-security);
     # a literal ${...} placeholder would silently match nothing, so the
@@ -2004,10 +1959,11 @@ APT::Periodic::Unattended-Upgrade "1";
 APT::Periodic::AutocleanInterval "7";
 EOF
 
-    run_logged "Service configuration" systemctl enable --now apt-daily.timer apt-daily-upgrade.timer || return 1
+    run_step 'Enabling security update timers' systemctl enable --now apt-daily.timer apt-daily-upgrade.timer || return 1
     systemctl is-active --quiet apt-daily.timer || return 1
     systemctl is-active --quiet apt-daily-upgrade.timer || return 1
-    print_success "Base packages installed"
+    print_kv 'Update scope' 'Debian security updates'
+    print_kv 'Update timers' 'Active'
 }
 
 verify_sysctl_file() {
@@ -2035,35 +1991,51 @@ verify_sysctl_file() {
 apply_all_sysctl() {
     modprobe tcp_bbr 2>/dev/null || true
     printf '# Generated by: debian_init.sh\ntcp_bbr\n' | write_managed_config /etc/modules-load.d/tcp_bbr.conf
+    run_step --quiet 'Applying kernel parameters' sysctl --system || return 1
+    run_step --quiet 'Reading back TCP parameters' verify_network_state || return 1
+    print_kv 'TCP data retries' "$(sysctl -n net.ipv4.tcp_retries1) / $(sysctl -n net.ipv4.tcp_retries2)"
+    print_kv 'SYN retries' "$(sysctl -n net.ipv4.tcp_syn_retries) / $(sysctl -n net.ipv4.tcp_synack_retries)"
+    print_kv 'Keepalive (s / s / probes)' "$(sysctl -n net.ipv4.tcp_keepalive_time) / $(sysctl -n net.ipv4.tcp_keepalive_intvl) / $(sysctl -n net.ipv4.tcp_keepalive_probes)"
+    print_kv 'TIME_WAIT reuse' 'Loopback only'
+    print_kv 'Connection tracking' 'Standard protocol timeouts'
+    print_kv 'Selected buffer profile' "$(buffer_profile_label)"
+    print_kv 'Current receive / send caps' "$(current_buffer_caps)"
+    print_kv 'TCP global memory override' 'Removed; kernel-managed after any required reboot'
+    if [ "$KERNEL_RESET_REQUIRED" -eq 1 ]; then print_warning 'Reboot is required to clear previous TCP memory/buffer overrides.'; fi
+}
 
-    local log="${TEMP_DIR}/sysctl-apply.log"
-    if ! sysctl --system > "$log" 2>&1; then
-        append_run_log 'Apply kernel parameters' "$log" || return 1
-        tail -n 12 "$log" | sed 's/^/    /' >&2
-        print_error "sysctl application failed; configuration is not fully applied." >&2
-        return 1
-    fi
-    append_run_log 'Apply kernel parameters' "$log" || return 1
+verify_network_state() {
     verify_sysctl_file "$SYSCTL_NETWORK_FILE" || return 1
-    verify_sysctl_file "$SYSCTL_IPV6_FILE" || return 1
-    BBR_APPLIED=$(sysctl -n net.ipv4.tcp_congestion_control) || return 1
-    QDISC_APPLIED=$(sysctl -n net.core.default_qdisc) || return 1
-    print_success "Managed sysctl values applied and verified (BBR: $BBR_APPLIED, default qdisc: $QDISC_APPLIED)"
+    verify_sysctl_file "$SYSCTL_IPV6_FILE"
+}
+
+current_buffer_caps() {
+    local receive send
+    receive=$(sysctl -n net.ipv4.tcp_rmem | awk '{printf "%.1f",$3/1048576}') || return 1
+    send=$(sysctl -n net.ipv4.tcp_wmem | awk '{printf "%.1f",$3/1048576}') || return 1
+    printf '%s MiB / %s MiB' "$receive" "$send"
 }
 
 verify_managed_state() {
-    print_section "${ICON_INFO} Verifying managed configuration"
     local f line module apt_state journal_state key expected actual
-    for f in "${CONFIG_TARGETS[@]}"; do
-        [ -f "$f" ] || continue
-        run_logged "Validate ${f##*/}" validate_managed_config "$f" "$f" || return 1
-    done
-    chronyd -p -f /etc/chrony/chrony.conf >/dev/null || return 1
-    run_logged "Validate Fail2Ban" fail2ban-client -t || return 1
     for module in chrony fail2ban rsyslog systemd-journald apt-daily.timer apt-daily-upgrade.timer; do
         systemctl is-active --quiet "$module" || { print_error "Required service is not active: $module"; return 1; }
     done
     fail2ban-client status sshd >/dev/null || return 1
+    if [ "$DOCKER_ACTION" = start ]; then
+        systemctl is-active --quiet docker.service || return 1
+        systemctl is-enabled --quiet docker.service || return 1
+    elif [ "$DOCKER_ACTION" = stop ]; then
+        local unit
+        while IFS= read -r unit; do
+            if systemctl is-active --quiet "$unit" || systemctl is-enabled --quiet "$unit"; then return 1; fi
+        done < <(docker_units)
+    fi
+    if [ -n "$THP_SELECTED" ]; then
+        [ "$(read_thp_mode /sys/kernel/mm/transparent_hugepage/enabled)" = "$THP_SELECTED" ] || return 1
+        [ "$(read_thp_mode /sys/kernel/mm/transparent_hugepage/defrag)" = "$THP_DEFRAG_SELECTED" ] || return 1
+        systemctl is-enabled --quiet debian-init-thp.service || return 1
+    fi
     verify_sysctl_file "$SYSCTL_NETWORK_FILE" || return 1
     verify_sysctl_file "$SYSCTL_IPV6_FILE" || return 1
     for f in /etc/modules-load.d/network-optimized.conf /etc/modules-load.d/tcp_bbr.conf; do
@@ -2101,112 +2073,229 @@ RuntimeMaxFiles 3
 MaxRetentionSec 1209600
 MaxFileSec 259200
 SETTINGS
-    print_success "Managed configuration validated and active"
+
+}
+
+docker_units() {
+    printf '%s\n' docker.service
+    if systemctl cat docker.socket >/dev/null 2>&1; then printf '%s\n' docker.socket; fi
+}
+
+set_docker_state() {
+    local action="$1" unit units=()
+    if [ "$action" = start ]; then
+        systemctl enable --now docker.service || return 1
+        systemctl is-active --quiet docker.service || return 1
+        systemctl is-enabled --quiet docker.service || return 1
+    else
+        while IFS= read -r unit; do units+=("$unit"); done < <(docker_units)
+        systemctl disable --now "${units[@]}" || return 1
+        for unit in "${units[@]}"; do
+            if systemctl is-active --quiet "$unit" || systemctl is-enabled --quiet "$unit"; then
+                print_error "$unit did not stop/disable as requested."
+                return 1
+            fi
+        done
+    fi
+    DOCKER_ACTION="$action"
+}
+
+configure_docker_choice() {
+    print_subsection 'Docker'
+    if ! command_exists docker; then
+        print_kv 'Package' 'Not installed'
+        if ask_yes_no 'Install Docker?' n; then install_docker || return 1; else return 0; fi
+    fi
+    local version state startup choice
+    version=$(docker --version 2>/dev/null || true)
+    state=$(systemctl is-active docker.service 2>/dev/null || true)
+    startup=$(systemctl is-enabled docker.service 2>/dev/null || true)
+    print_kv 'Version' "${version:-Unknown}"
+    print_kv 'Service' "${state:-Unknown}"
+    print_kv 'Start at boot' "${startup:-Unknown}"
+    if ! can_prompt; then print_info 'No terminal; Docker state retained.'; return 0; fi
+    printf '\n    1) Keep current state\n    2) Start Docker and enable it at boot\n    3) Stop Docker and disable it at boot\n'
+    while true; do
+        if ! read_tty_value choice 'Select [1]:'; then return 0; fi
+        case "$choice" in
+            ''|1) print_info 'Docker state retained.'; return 0 ;;
+            2) run_step 'Starting/enabling Docker' set_docker_state start; return $? ;;
+            3)
+                print_warning 'Stopping Docker can interrupt running containers and dependent services.'
+                if ask_yes_no 'Stop Docker and disable startup? Confirm' n; then
+                    run_step 'Stopping/disabling Docker' set_docker_state stop || return 1
+                else
+                    print_info 'Docker state retained.'
+                fi
+                return 0 ;;
+            *) print_warning 'Choose 1, 2 or 3.' ;;
+        esac
+    done
+}
+
+read_thp_mode() {
+    local file="$1"
+    sed -nE 's/.*\[([^]]+)\].*/\1/p' "$file" 2>/dev/null
+}
+
+apply_thp_mode() {
+    local mode="$1" defrag="$2" unit=/etc/systemd/system/debian-init-thp.service
+    case "$mode" in always|madvise|never) ;; *) return 1 ;; esac
+    case "$defrag" in always|defer|defer+madvise|madvise|never) ;; *) return 1 ;; esac
+    write_managed_config "$unit" <<EOF
+# Generated by: debian_init.sh
+[Unit]
+Description=Apply selected Transparent Huge Pages mode
+DefaultDependencies=no
+After=sysinit.target local-fs.target
+ConditionPathIsReadWrite=/sys/kernel/mm/transparent_hugepage/enabled
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'echo ${mode} > /sys/kernel/mm/transparent_hugepage/enabled && echo ${defrag} > /sys/kernel/mm/transparent_hugepage/defrag'
+[Install]
+WantedBy=basic.target
+EOF
+    systemd-analyze verify "$unit" || return 1
+    systemctl daemon-reload || return 1
+    systemctl enable debian-init-thp.service || return 1
+    systemctl restart debian-init-thp.service || return 1
+    [ "$(read_thp_mode /sys/kernel/mm/transparent_hugepage/enabled)" = "$mode" ] || return 1
+    [ "$(read_thp_mode /sys/kernel/mm/transparent_hugepage/defrag)" = "$defrag" ] || return 1
+    THP_SELECTED="$mode"
+    THP_DEFRAG_SELECTED="$defrag"
+}
+
+configure_thp_choice() {
+    print_subsection 'Transparent Huge Pages'
+    local mode defrag
+    mode=$(read_thp_mode /sys/kernel/mm/transparent_hugepage/enabled || true)
+    defrag=$(read_thp_mode /sys/kernel/mm/transparent_hugepage/defrag || true)
+    case "$mode" in always|madvise|never) ;; *) print_info 'THP is not supported; skipped.'; return 0 ;; esac
+    case "$defrag" in always|defer|defer+madvise|madvise|never) ;; *) print_warning 'Unknown THP defrag mode; leaving THP unchanged.'; return 0 ;; esac
+    print_kv 'Current mode' "$mode"
+    print_kv 'Defragmentation' "$defrag"
+    if [ "$mode" = never ]; then
+        if ask_yes_no 'Enable THP in madvise mode?' n; then mode=madvise; defrag=madvise; fi
+    else
+        if ask_yes_no 'Disable THP?' n; then mode=never; defrag=never; fi
+    fi
+    run_step 'Persisting selected THP mode' apply_thp_mode "$mode" "$defrag" || return 1
+    print_kv 'Selected mode' "$THP_SELECTED"
+}
+
+configure_optional_components() {
+    print_subsection 'Cloud kernel'
+    show_kernel_info
+    if ask_yes_no 'Install/update cloud kernel?' n; then
+        install_cloud_kernel || return 1
+    else
+        print_info 'No additional kernel installation requested; boot configuration is unchanged here.'
+    fi
+    configure_docker_choice || return 1
+    configure_thp_choice || return 1
+    print_subsection 'IPv6'
+    show_ipv6_status
+    configure_ipv6_choice || return 1
 }
 
 show_report() {
-    print_section "Summary"
-    print_success "Configuration applied and verified."
-    print_subsection "Transfer buffers"
-    print_kv 'Saved profile' "$(buffer_profile_label)"
-    if [ "$BUFFER_TARGET_MBPS" = unknown ]; then print_kv 'Target per connection' 'Not specified'; else print_kv 'Target per connection' "$BUFFER_TARGET_MBPS Mbps"; fi
-    if [ "$BUFFER_RTT_MS" = unknown ]; then print_kv 'RTT at selection' 'Not measured'; else print_kv 'RTT at selection' "$BUFFER_RTT_MS ms (saved reference)"; fi
-    print_kv 'Current receive cap' "$(sysctl -n net.ipv4.tcp_rmem | awk '{printf "%.1f MiB", $3/1048576}')"
-    print_kv 'Current send cap' "$(sysctl -n net.ipv4.tcp_wmem | awk '{printf "%.1f MiB", $3/1048576}')"
-    print_kv 'TCP global memory' "$(sysctl -n net.ipv4.tcp_mem) pages (current)"
-    if [ "$KERNEL_RESET_REQUIRED" -eq 1 ]; then
-        print_warning "Reboot required: removed TCP memory/buffer overrides can still be active in this session."
+    printf '\n'
+    if [ "$KERNEL_RESET_REQUIRED" -eq 1 ] || [ "$STALE_RUNTIME_CONFIG" -eq 1 ] || [ "$KERNEL_BOOT_PENDING" -eq 1 ]; then
+        print_warning 'RESULT: Configuration completed — reboot required'
     else
-        print_info "This script does not override TCP global memory thresholds."
+        print_success 'RESULT: Configuration completed'
     fi
-    print_subsection "Network and services"
-    print_kv 'BBR / default qdisc' "$(sysctl -n net.ipv4.tcp_congestion_control) / $(sysctl -n net.core.default_qdisc)"
+    print_subsection 'Active now'
+    print_kv 'Saved buffer profile' "$(buffer_profile_label)"
+    if [ "$BUFFER_TARGET_MBPS" = unknown ]; then print_kv 'Target per connection' 'Not specified'; else print_kv 'Target per connection' "$BUFFER_TARGET_MBPS Mbps"; fi
+    print_kv 'Receive / send caps' "$(current_buffer_caps)"
+    print_kv 'Congestion / default qdisc' "$(sysctl -n net.ipv4.tcp_congestion_control) / $(sysctl -n net.core.default_qdisc)"
     print_kv 'IPv6' "$(ipv6_status_text)"
-    print_kv 'Chrony / Fail2Ban' "$(systemctl is-active chrony) / $(systemctl is-active fail2ban)"
-    print_kv 'Timezone' "${TIMEZONE_FINAL:-unknown}"
-    print_kv 'Running kernel' "$(uname -r)"
-    print_subsection "Next steps"
-    print_kv 'Reassess buffers' 'bash debian_init.sh --reassess-buffers'
-    print_kv 'Diagnostic log' "$RUN_LOG"
-    print_info "Re-login to load shell aliases. A reboot is recommended after kernel/package changes."
+    if command_exists docker; then
+        print_kv 'Docker service / startup' "$(systemctl is-active docker.service 2>/dev/null || true) / $(systemctl is-enabled docker.service 2>/dev/null || true)"
+    fi
+    print_kv 'THP mode' "$(read_thp_mode /sys/kernel/mm/transparent_hugepage/enabled || echo unavailable)"
+    if [ "$KERNEL_RESET_REQUIRED" -eq 1 ] || [ "$STALE_RUNTIME_CONFIG" -eq 1 ] || [ "$KERNEL_BOOT_PENDING" -eq 1 ]; then
+        print_subsection 'Action required'
+        if [ "$KERNEL_RESET_REQUIRED" -eq 1 ] || [ "$STALE_RUNTIME_CONFIG" -eq 1 ]; then
+            print_warning 'Reboot when a service interruption is acceptable to clear retired kernel settings.'
+            print_info 'Selected buffer caps are already applied; boot-calculated defaults may still be pending.'
+        fi
+        if [ "$KERNEL_BOOT_PENDING" -eq 1 ]; then
+            print_warning 'A different kernel is installed; reboot and verify the selected kernel to complete the change.'
+        fi
+        printf '\n    After reboot:\n      uname -r\n'
+        if [ "$KERNEL_RESET_REQUIRED" -eq 1 ]; then printf '      sysctl net.ipv4.tcp_mem net.ipv4.tcp_rmem net.ipv4.tcp_wmem\n'; fi
+    fi
+    print_subsection 'Next steps'
+    print_info 'Re-login to load shell shortcuts. Check the running kernel after any planned reboot.'
+    print_info 'To reassess buffers, this command also works when launched through Script Hub:'
+    printf '    curl -fsSL https://raw.githubusercontent.com/aoaim/luanqi_bazao/main/linux_script/debian_init.sh | bash -s -- --reassess-buffers\n'
 }
 
 main() {
     parse_args "$@"
     require_root
     require_debian
-    init_run_log
+    init_ui
+
+    print_section 'Environment'
     ensure_basic_tools
     fetch_ipinfo
     detect_system
     show_detection
+
+    print_section 'Transfer buffers'
     configure_buffers
-    profile_allowed "$BUFFER_PROFILE" || { print_error "Buffer profile is not allowed on this host."; return 1; }
+    profile_allowed "$BUFFER_PROFILE" || { print_error 'Buffer profile is not allowed on this host.'; return 1; }
 
-    preflight_config
-    cleanup_stale_configs
-
+    print_section 'Packages and tools'
     apt_refresh
-    install_tools
     install_base_packages
+    print_subsection 'Additional tools'
+    install_tools
+    configure_tool_aliases
     configure_eza_aliases
     configure_update_alias
+    print_subsection 'Shell shortcuts'
+    if command_exists hx; then print_kv 'vi / vim' 'Helix'; fi
+    if command_exists cloudflare-speed-cli; then print_kv 'cf' 'Cloudflare Speedtest'; fi
+    if command_exists nexttrace; then print_kv 'nt' 'Nexttrace'; fi
+    if command_exists eza; then print_kv 'll / la / lt' 'Eza listings'; fi
+    print_kv 'update' 'Package and tool updates'
+
+    print_section 'System configuration'
+    preflight_config
+    cleanup_stale_configs
+    print_subsection 'Time synchronization'
     configure_chrony
-    ensure_kernel_modules
+    configure_fail2ban
+    configure_auto_updates
+    print_subsection 'Journal retention'
     configure_journald
+    print_subsection 'Kernel modules'
+    ensure_kernel_modules
+
+    print_section 'Network configuration'
     apply_network_sysctl
-
-    # Use local stack state, not third-party IP lookup success. Do not
-    # silently undo a previous disable choice; recovery is offered below.
-    if [ "$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null || echo unavailable)" = "0" ]; then
-        apply_ipv6_sysctl
-    elif [ "$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null || echo unavailable)" = "1" ]; then
-        DISABLE_IPV6=1
-        apply_ipv6_sysctl
-    else
-        print_info "IPv6 is unavailable; skipping IPv6 configuration."
-    fi
-
+    case "$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null || echo unavailable)" in
+        0) apply_ipv6_sysctl ;;
+        1) DISABLE_IPV6=1; apply_ipv6_sysctl ;;
+        *) print_info 'IPv6 sysctl unavailable; IPv6 configuration skipped.' ;;
+    esac
     apply_all_sysctl
 
-    print_section "${ICON_TOOL} Optional components"
+    print_section 'Optional components'
+    configure_optional_components
 
-    # Show kernel info first, then ask
-    if show_kernel_info; then
-        if ask_yes_no "Install Cloud Kernel?"; then
-            install_cloud_kernel
-        fi
-    fi
-
-    # Show docker status first, then ask
-    if show_docker_status; then
-        if ask_yes_no "Install Docker?"; then
-            install_docker
-        fi
-    fi
-
-    # Refresh the existing managed service even when THP is already off.
-    # Otherwise retain the original optional/default behavior.
-    if [ -f /etc/systemd/system/disable-transparent-huge-pages.service ]; then
-        disable_thp
-    elif show_thp_status; then
-        if ask_yes_no "Disable Transparent Huge Pages (THP)?" y; then
-            disable_thp
-        fi
-    fi
-
-    # Show IPv6 status first, then ask
-    show_ipv6_status
-    configure_ipv6_choice
-
-    verify_managed_state
+    print_section 'Verification and result'
+    run_step --quiet 'Verifying configuration and services' verify_managed_state
     save_manifest
     save_buffer_state
-
     show_report
 }
 
 main "$@"
-
 
 
