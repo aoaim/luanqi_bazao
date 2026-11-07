@@ -302,19 +302,22 @@ configure_buffers() {
         fi
         if [ -z "$BUFFER_CLI_MBPS" ]; then
             print_info "Target rate for ONE TCP connection (not the NIC's advertised speed)."
-            print_info "1) Unknown   2) 100 Mbps   3) 500 Mbps   4) 1000 Mbps   5) Custom"
+            print_info "1) Unknown: recommend system-default buffers (no assumed bandwidth)"
+            print_info "2) 100 Mbps   3) 200 Mbps   4) 500 Mbps"
+            print_info "5) 1000 Mbps  6) Custom"
             while true; do
                 if ! read_tty_value answer 'Target [1]:'; then return 0; fi
                 case "$answer" in
                     ''|1) rate=unknown; break ;;
                     2) rate=100; break ;;
-                    3) rate=500; break ;;
-                    4) rate=1000; break ;;
-                    5)
+                    3) rate=200; break ;;
+                    4) rate=500; break ;;
+                    5) rate=1000; break ;;
+                    6)
                         if ! read_tty_value answer 'Custom target in Mbps (1..100000):'; then return 0; fi
                         if valid_target_rate "$answer"; then rate="$answer"; break; fi
                         print_warning "Enter a whole number from 1 to 100000." ;;
-                    *) print_warning "Choose 1, 2, 3, 4 or 5." ;;
+                    *) print_warning "Choose 1, 2, 3, 4, 5 or 6." ;;
                 esac
             done
         fi
