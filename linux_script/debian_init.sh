@@ -48,6 +48,12 @@ DOCKER_ACTION="keep"
 KERNEL_BOOT_PENDING=0
 CLOUD_KERNEL_ACTION=unknown
 THP_SELECTED=""
+OPTIONAL_TOOL_FAILURES=()
+OPTIONAL_TOOL_UNVERIFIED=()
+OPTIONAL_TOOL_SKIPS=()
+TOOL_CHECK_UNVERIFIED=0
+OPTIONAL_TOOLS_EXIT=0
+BUFFER_CHOICE_SAVED=0
 THP_DEFRAG_SELECTED=""
 UI_SECTION=0
 UI_PHASE="Starting"
@@ -130,6 +136,7 @@ report_failure() {
     print_error "RESULT: Configuration stopped"
     print_kv 'Failed step' "${UI_PHASE:-initialization} (line $2, exit $1)" >&2
     print_info "Completed steps remain applied. Errors are shown above; no log file is required."
+    if [ "${BUFFER_CHOICE_SAVED:-0}" -eq 1 ]; then print_info 'Your buffer choice is saved; rerun to finish applying it.'; fi
 }
 
 refresh_apt_indexes() {
@@ -162,6 +169,7 @@ Usage: bash debian_init.sh [options]
   --target-mbps RATE          Target rate for one TCP connection (1..100000)
   --probe-target HOST         Business peer to probe; may be repeated (max 5)
   --help                     Show this help without changing the system
+Exit status: 0 completed, 2 completed with optional tool failures; other nonzero values indicate a stopped run.
 Existing choices are reused unless reassessment or a profile is requested.
 Without a terminal, a first run uses system-default buffers unless explicitly set.
 USAGE
@@ -441,19 +449,43 @@ require_debian() {
 
 ensure_basic_tools() {
     local cmd missing=0
-    for cmd in curl wget ping ip; do command -v "$cmd" >/dev/null 2>&1 || missing=1; done
+    for cmd in curl wget ping ip python3; do command -v "$cmd" >/dev/null 2>&1 || missing=1; done
     if [ "$missing" -eq 1 ]; then
         refresh_apt_indexes || return 1
-        run_step 'Installing prerequisites' apt-get install $APT_INSTALL_OPTS curl wget iputils-ping iproute2 || return 1
+        run_step 'Installing prerequisites' apt-get install $APT_INSTALL_OPTS curl wget iputils-ping iproute2 python3 || return 1
     fi
-    for cmd in curl wget ping ip; do
+    for cmd in curl wget ping ip python3; do
         command -v "$cmd" >/dev/null 2>&1 || { print_error "Missing required command: $cmd"; return 1; }
     done
 }
 
+normalize_public_ip() {
+    # Accept only one public address of the requested family. Reject HTML,
+    # banners, private/loopback addresses, zones and multiline payloads.
+    [ "${#2}" -le 128 ] || return 1
+    python3 - "$1" "$2" <<'PY_IP'
+import ipaddress
+import sys
+try:
+    text = sys.argv[2].strip()
+    if '%' in text:
+        raise ValueError('scoped address')
+    address = ipaddress.ip_address(text)
+    if (address.version != int(sys.argv[1]) or not address.is_global
+            or address.is_multicast or address.is_unspecified
+            or address.is_loopback or address.is_link_local
+            or (address.version == 6 and address.ipv4_mapped is not None)):
+        raise ValueError('not a public address of the requested family')
+    print(address.compressed)
+except ValueError:
+    sys.exit(1)
+PY_IP
+}
+
 fetch_ipinfo() {
-    local raw
-    raw=$(curl -s --max-time 5 ipinfo.io 2>/dev/null || true)
+    local raw tmp_ip normalized
+    GITHUB_ALLOWED=1
+    raw=$(curl -fsSL --proto "=https" --proto-redir "=https" --connect-timeout 3 --max-time 5 https://ipinfo.io/json 2>/dev/null || true)
     IP_CITY=$(echo "$raw" | grep -oP '"city":\s*"\K[^"]+' || true)
     IP_REGION=$(echo "$raw" | grep -oP '"region":\s*"\K[^"]+' || true)
     IP_COUNTRY=$(echo "$raw" | grep -oP '"country":\s*"\K[^"]+' || true)
@@ -461,10 +493,10 @@ fetch_ipinfo() {
     IP_TZ=$(echo "$raw" | grep -oP '"timezone":\s*"\K[^"]+' || true)
     IPV4_ADDR="N/A"
     for attempt in 1 2; do
-        for api in "ip.sb" "api.ipify.org" "ifconfig.me" "ipinfo.io/ip"; do
-            tmp_ip=$(curl -fsSL --max-time 5 -4 "$api" 2>/dev/null || true)
-            if [ -n "$tmp_ip" ]; then
-                IPV4_ADDR="$tmp_ip"
+        for api in "https://ip.sb" "https://api.ipify.org" "https://ifconfig.me/ip" "https://ipinfo.io/ip"; do
+            tmp_ip=$(curl -fsSL --proto "=https" --proto-redir "=https" --connect-timeout 3 --max-time 5 -4 "$api" 2>/dev/null || true)
+            if normalized=$(normalize_public_ip 4 "$tmp_ip"); then
+                IPV4_ADDR="$normalized"
                 break 2
             fi
         done
@@ -474,10 +506,10 @@ fetch_ipinfo() {
     done
 
     IPV6_ADDR="N/A"
-    for api in "ip.sb" "ifconfig.co" "icanhazip.com" "ident.me"; do
-        tmp_ip=$(curl -fsSL --max-time 5 -6 "$api" 2>/dev/null || true)
-        if [ -n "$tmp_ip" ]; then
-            IPV6_ADDR="$tmp_ip"
+    for api in "https://ip.sb" "https://ifconfig.co/ip" "https://icanhazip.com" "https://ident.me"; do
+        tmp_ip=$(curl -fsSL --proto "=https" --proto-redir "=https" --connect-timeout 3 --max-time 5 -6 "$api" 2>/dev/null || true)
+        if normalized=$(normalize_public_ip 6 "$tmp_ip"); then
+            IPV6_ADDR="$normalized"
             break
         fi
     done
@@ -496,7 +528,7 @@ fetch_ipinfo() {
             has_ipv6_addr=$(echo "$has_ipv6_addr" | tr -d '[:space:]')
             has_ipv6_addr=${has_ipv6_addr:-0}
             if [ "$has_ipv6_addr" -gt 0 ] 2>/dev/null; then
-                IPV6_STATUS="address assigned but external unreachable"
+                IPV6_STATUS="address assigned; external connectivity unconfirmed"
             else
                 IPV6_STATUS="no global IPv6 address detected"
             fi
@@ -506,9 +538,10 @@ fetch_ipinfo() {
     # IPv6-only fallback: use ifconfig.co/json to populate IP and region fields
     if { [ -z "${IPV4_ADDR:-}" ] || [ "${IPV4_ADDR}" = "N/A" ]; } && [ "${IPV6_ADDR:-N/A}" != "N/A" ]; then
         local raw6
-        raw6=$(curl -s --max-time 8 -6 ifconfig.co/json 2>/dev/null || true)
+        raw6=$(curl -fsSL --proto "=https" --proto-redir "=https" --connect-timeout 3 --max-time 8 -6 https://ifconfig.co/json 2>/dev/null || true)
         if [ -n "$raw6" ]; then
-            IPV6_ADDR=$(echo "$raw6" | grep -oP '"ip":\s*"\K[^"]+' || echo "$IPV6_ADDR")
+            tmp_ip=$(echo "$raw6" | grep -oP '"ip":\s*"\K[^"]+' || true)
+            if normalized=$(normalize_public_ip 6 "$tmp_ip"); then IPV6_ADDR="$normalized"; fi
             IP_CITY=$(echo "$raw6" | grep -oP '"city":\s*"\K[^"]+' || echo "${IP_CITY:-}")
             IP_REGION=$(echo "$raw6" | grep -oP '"region":\s*"\K[^"]+' || echo "${IP_REGION:-}")
             IP_COUNTRY=$(echo "$raw6" | grep -oP '"country_iso":\s*"\K[^"]+' || echo "${IP_COUNTRY:-}")
@@ -701,6 +734,7 @@ tool_skip_check() {
     latest_tag=$(get_github_latest_version "$repo")
     if [ -z "$latest_tag" ]; then
         print_warning "${label} v${local_ver} installed; couldn't check latest release, skipping update."
+        TOOL_CHECK_UNVERIFIED=1
         return 0
     fi
     latest_ver=$(echo "$latest_tag" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' || true)
@@ -716,46 +750,22 @@ tool_skip_check() {
 
 install_cf_speedtest() {
     if [ "$GITHUB_ALLOWED" -eq 0 ]; then
-        print_warning "IPv6-only detected: skipping Cloudflare Speedtest CLI (GitHub download required)."
-        return
+        print_warning 'CF Speedtest download skipped: GitHub access is unavailable for this profile.'
+        return 2
     fi
-    if tool_skip_check cloudflare-speed-cli "kavehtehrani/cloudflare-speed-cli" "CF Speedtest"; then
-        return
-    fi
-    print_info "Installing Cloudflare Speedtest CLI..."
-
-    local arch_url=""
-    if [ "$ARCH" = "x86_64" ]; then
-        arch_url="https://github.com/kavehtehrani/cloudflare-speed-cli/releases/latest/download/cloudflare-speed-cli-x86_64-unknown-linux-musl.tar.xz"
-    elif [ "$ARCH" = "aarch64" ]; then
-        arch_url="https://github.com/kavehtehrani/cloudflare-speed-cli/releases/latest/download/cloudflare-speed-cli-aarch64-unknown-linux-musl.tar.xz"
-    else
-        print_warning "Unsupported architecture for Cloudflare Speedtest CLI: $ARCH"
-        return
-    fi
-
-    if download_file "$arch_url" "${TEMP_DIR}/cfspeed.tar.xz"; then
-        if extract_archive "${TEMP_DIR}/cfspeed.tar.xz" "$TEMP_DIR"; then
-            local binpath
-            binpath=$(find "$TEMP_DIR" -type f -name "cloudflare-speed-cli*" -executable -print -quit 2>/dev/null || true)
-            if [ -z "$binpath" ]; then
-                binpath=$(find "$TEMP_DIR" -type f -name "cloudflare-speed-cli*" -print -quit 2>/dev/null || true)
-            fi
-
-            if [ -n "$binpath" ]; then
-                install -m 755 "$binpath" /usr/local/bin/cloudflare-speed-cli
-
-                print_success "Cloudflare Speedtest CLI installed (alias: cf)"
-            else
-                print_error "Binary not found in archive"
-            fi
-        else
-            print_error "Failed to extract archive"
-        fi
-        rm -f "${TEMP_DIR}/cfspeed.tar.xz"
-    else
-        print_error "Failed to download Cloudflare Speedtest CLI"
-    fi
+    if tool_skip_check cloudflare-speed-cli "kavehtehrani/cloudflare-speed-cli" "CF Speedtest"; then return 0; fi
+    local url="https://github.com/kavehtehrani/cloudflare-speed-cli/releases/latest/download/cloudflare-speed-cli-${ARCH}-unknown-linux-musl.tar.xz" binpath
+    print_info 'Installing Cloudflare Speedtest CLI...'
+    download_file "$url" "${TEMP_DIR}/cfspeed.tar.xz" || { print_error 'CF Speedtest download failed.'; return 1; }
+    extract_archive "${TEMP_DIR}/cfspeed.tar.xz" "$TEMP_DIR" || { print_error 'CF Speedtest extraction failed.'; return 1; }
+    binpath=$(find "$TEMP_DIR" -type f -name 'cloudflare-speed-cli*' ! -name '*.tar.*' -print -quit) || return 1
+    [ -n "$binpath" ] || { print_error 'CF Speedtest binary missing from archive.'; return 1; }
+    chmod 755 "$binpath" || return 1
+    "$binpath" --version >/dev/null 2>&1 || { print_error 'Downloaded CF Speedtest binary cannot run.'; return 1; }
+    install -m 755 "$binpath" /usr/local/bin/cloudflare-speed-cli || return 1
+    rm -f "${TEMP_DIR}/cfspeed.tar.xz" || return 1
+    print_success 'CF Speedtest installed.'
+    return 0
 }
 
 apt_refresh() {
@@ -768,85 +778,54 @@ apt_refresh() {
 
 install_helix() {
     if [ "$GITHUB_ALLOWED" -eq 0 ]; then
-        print_warning "IPv6-only detected: skipping Helix (GitHub download required)."
-        return
+        print_warning 'Helix download skipped: GitHub access is unavailable for this profile.'
+        return 2
     fi
-    if tool_skip_check hx "helix-editor/helix" "Helix"; then
-        return
+    if tool_skip_check hx "helix-editor/helix" "Helix"; then return 0; fi
+    local tag ver url="" helix_dir
+    print_info 'Installing Helix...'
+    tag=$(get_github_latest_version 'helix-editor/helix')
+    ver=$(printf '%s' "$tag" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' || true)
+    if [ -n "$tag" ] && [ -n "$ver" ]; then url="https://github.com/helix-editor/helix/releases/download/${tag}/helix-${ver}-${ARCH}-linux.tar.xz"; fi
+    if [ -z "$url" ] || ! download_file "$url" "${TEMP_DIR}/helix.tar.xz"; then
+        url=$(get_github_api_asset_url 'helix-editor/helix' "helix-.*-${ARCH}-linux\\.tar\\.xz$")
+        [ -n "$url" ] || { print_error 'Helix download URL could not be determined.'; return 1; }
+        download_file "$url" "${TEMP_DIR}/helix.tar.xz" || { print_error 'Helix download failed.'; return 1; }
     fi
-    print_info "Installing Helix..."
-
-    local tag="" ver="" url=""
-
-    tag=$(get_github_latest_version "helix-editor/helix")
-    if [ -n "$tag" ]; then
-        ver=$(echo "$tag" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' || true)
-        [ -n "$ver" ] && url="https://github.com/helix-editor/helix/releases/download/${tag}/helix-${ver}-${ARCH}-linux.tar.xz"
-    fi
-
-    # Fallback to API if tag/url construction failed
-    if [ -z "$url" ]; then
-        url=$(get_github_api_asset_url "helix-editor/helix" "helix-.*-${ARCH}-linux\\.tar\\.xz$")
-    fi
-
-    if [ -z "$url" ]; then
-        print_error "Unable to get Helix download URL"
-        return
-    fi
-
-    if download_file "$url" "${TEMP_DIR}/helix.tar.xz"; then
-        if extract_archive "${TEMP_DIR}/helix.tar.xz" "$TEMP_DIR"; then
-            local helix_dir
-            helix_dir=$(find "$TEMP_DIR" -maxdepth 1 -type d -name "helix-*" -print -quit)
-
-            if [ -n "$helix_dir" ] && [ -f "${helix_dir}/hx" ]; then
-                install -m 755 "${helix_dir}/hx" /usr/local/bin/hx
-                mkdir -p /usr/local/lib/helix
-                rm -rf /usr/local/lib/helix/runtime
-                [ -d "${helix_dir}/runtime" ] && cp -r "${helix_dir}/runtime" /usr/local/lib/helix/
-
-
-                print_success "Helix installed (aliases: vi, vim, hx)"
-            else
-                print_error "Helix binary or directory structure not found in archive"
-            fi
-        else
-            print_error "Failed to extract Helix archive"
-        fi
-        rm -f "${TEMP_DIR}/helix.tar.xz"
-        rm -rf "${TEMP_DIR}/helix-"* 2>/dev/null || true
-    else
-        print_error "Helix download failed"
-    fi
+    extract_archive "${TEMP_DIR}/helix.tar.xz" "$TEMP_DIR" || { print_error 'Helix extraction failed.'; return 1; }
+    helix_dir=$(find "$TEMP_DIR" -maxdepth 1 -type d -name 'helix-*' -print -quit) || return 1
+    [ -n "$helix_dir" ] && [ -f "${helix_dir}/hx" ] && [ -d "${helix_dir}/runtime" ] || {
+        print_error 'Helix binary or runtime missing from archive.'; return 1;
+    }
+    chmod 755 "${helix_dir}/hx" || return 1
+    "${helix_dir}/hx" --version >/dev/null 2>&1 || { print_error 'Downloaded Helix binary cannot run.'; return 1; }
+    install -m 755 "${helix_dir}/hx" /usr/local/bin/hx || return 1
+    mkdir -p /usr/local/lib/helix || return 1
+    rm -rf /usr/local/lib/helix/runtime || return 1
+    cp -r "${helix_dir}/runtime" /usr/local/lib/helix/ || return 1
+    rm -f "${TEMP_DIR}/helix.tar.xz" || return 1
+    rm -rf "$helix_dir" || return 1
+    print_success 'Helix installed.'
+    return 0
 }
 
 install_nexttrace() {
     if [ "$GITHUB_ALLOWED" -eq 0 ]; then
-        print_warning "IPv6-only detected: skipping Nexttrace (GitHub download required)."
-        return
+        print_warning 'Nexttrace download skipped: GitHub access is unavailable for this profile.'
+        return 2
     fi
-    if tool_skip_check nexttrace "nxtrace/NTrace-core" "Nexttrace"; then
-        return
-    fi
-    print_info "Installing Nexttrace..."
-    # nexttrace_linux_amd64 or nexttrace_linux_arm64
-    local arch_suffix
-    if [ "$ARCH" = "x86_64" ]; then
-        arch_suffix="amd64"
-    else
-        arch_suffix="arm64"
-    fi
-
-    local url="https://github.com/nxtrace/NTrace-core/releases/latest/download/nexttrace_linux_${arch_suffix}"
-
-    if download_file "$url" "${TEMP_DIR}/nexttrace"; then
-        install -m 755 "${TEMP_DIR}/nexttrace" /usr/local/bin/nexttrace
-
-        print_success "Nexttrace installed (alias: nt)"
-        rm -f "${TEMP_DIR}/nexttrace"
-    else
-        print_error "Nexttrace download failed"
-    fi
+    if tool_skip_check nexttrace 'nxtrace/NTrace-core' 'Nexttrace'; then return 0; fi
+    local suffix=arm64 url
+    [ "$ARCH" != x86_64 ] || suffix=amd64
+    url="https://github.com/nxtrace/NTrace-core/releases/latest/download/nexttrace_linux_${suffix}"
+    print_info 'Installing Nexttrace...'
+    download_file "$url" "${TEMP_DIR}/nexttrace" || { print_error 'Nexttrace download failed.'; return 1; }
+    chmod 755 "${TEMP_DIR}/nexttrace" || return 1
+    "${TEMP_DIR}/nexttrace" --version >/dev/null 2>&1 || { print_error 'Downloaded Nexttrace binary cannot run.'; return 1; }
+    install -m 755 "${TEMP_DIR}/nexttrace" /usr/local/bin/nexttrace || return 1
+    rm -f "${TEMP_DIR}/nexttrace" || return 1
+    print_success 'Nexttrace installed.'
+    return 0
 }
 
 MANIFEST_FILE="/var/lib/debian-init/manifest"
@@ -1060,221 +1039,82 @@ install_docker() {
 
 
 install_tools() {
-    install_helix
-    install_cf_speedtest
-    install_nexttrace
-    generate_update_tools_script
+    local installer label status
+    for installer in install_helix install_cf_speedtest install_nexttrace; do
+        case "$installer" in install_helix) label=Helix ;; install_cf_speedtest) label='CF Speedtest' ;; *) label=Nexttrace ;; esac
+        TOOL_CHECK_UNVERIFIED=0
+        if "$installer"; then
+            if [ "$TOOL_CHECK_UNVERIFIED" -eq 1 ]; then OPTIONAL_TOOL_UNVERIFIED+=("$label"); fi
+        else
+            status=$?
+            if [ "$status" -eq 2 ]; then
+                OPTIONAL_TOOL_SKIPS+=("$label")
+            else
+                OPTIONAL_TOOL_FAILURES+=("$label")
+                OPTIONAL_TOOLS_EXIT=2
+                print_warning "$label failed; remaining configuration will continue."
+            fi
+        fi
+    done
+    # This generated configuration is mandatory even when a tool download fails.
+    generate_update_tools_script || return 1
+    return 0
 }
 
 generate_update_tools_script() {
-    write_managed_config /usr/local/bin/update-tools 755 <<'SCRIPT_EOF'
+    local staged="${TEMP_DIR}/update-tools" helper
+    cat > "$staged" <<'SCRIPT_EOF'
 #!/bin/bash
-# Generated by debian_init.sh - updates GitHub-sourced tools (Helix, Nexttrace, CF Speedtest)
-# Runs independently; invoked by the system-wide "update" alias.
-set -euo pipefail
-
+# Generated by: debian_init.sh
+# Update installed GitHub tools using the same checked functions as initialization.
+set -Eeuo pipefail
 export DEBIAN_FRONTEND=noninteractive
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-DIM='\033[2m'
-RESET='\033[0m'
-if [ ! -t 1 ] || [ -n "${NO_COLOR+x}" ] || [ "${TERM:-}" = dumb ]; then
-    RED= GREEN= YELLOW= CYAN= BOLD= DIM= RESET=
-fi
-
+APT_INSTALL_OPTS="-y -qq -o=Dpkg::Use-Pty=0 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
 TEMP_DIR=$(mktemp -d -p /var/tmp)
 trap 'rm -rf "$TEMP_DIR"' EXIT
-
-# Architecture detection (self-contained)
+UI_DETAIL=0
+RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'; CYAN=$'\033[0;36m'; BOLD=$'\033[1m'; RESET=$'\033[0m'
+if [ ! -t 1 ] || [ -n "${NO_COLOR+x}" ] || [ "${TERM:-}" = dumb ]; then RED= GREEN= YELLOW= CYAN= BOLD= RESET=; fi
 case "$(uname -m)" in
-    x86_64|amd64)  SYS_ARCH="x86_64"; ARCH_SUFFIX="amd64" ;;
-    aarch64|arm64) SYS_ARCH="aarch64"; ARCH_SUFFIX="arm64" ;;
-    *) echo "Unsupported architecture"; exit 1 ;;
+    x86_64|amd64) ARCH=x86_64 ;;
+    aarch64|arm64) ARCH=aarch64 ;;
+    *) printf '[FAIL] Unsupported architecture\n' >&2; exit 1 ;;
 esac
-
-# ---- helpers ----
-cmd_ok() { command -v "$1" >/dev/null 2>&1; }
-get_ver() { "$@" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 || true; }
-
-download_file() {
-    curl -fsSL --connect-timeout 10 --max-time 300 --retry 3 --retry-delay 2 \
-        "$1" -o "$2" 2>/dev/null && [ -s "$2" ] && return 0
-    rm -f "$2"
-    return 1
-}
-
-ensure_xz()   { cmd_ok xz   || apt-get install -qq -y xz-utils >/dev/null 2>&1 || true; }
-ensure_bzip2(){ cmd_ok bzip2|| apt-get install -qq -y bzip2 >/dev/null 2>&1 || true; }
-ensure_unzip(){ cmd_ok unzip|| apt-get install -qq -y unzip >/dev/null 2>&1 || true; }
-
-extract_archive() {
-    case "$1" in
-        *.tar.xz|*.txz)       ensure_xz    && tar -xJf "$1" -C "$2" ;;
-        *.tar.gz|*.tgz)       tar -xzf "$1" -C "$2" ;;
-        *.tar.bz2|*.tbz|*.tbz2) ensure_bzip2 && tar -xjf "$1" -C "$2" ;;
-        *.zip)                ensure_unzip && unzip -q -o "$1" -d "$2" ;;
-        *) return 1 ;;
-    esac
-}
-
-github_latest_tag() {
-    curl -sL --connect-timeout 5 --max-time 15 --retry 3 --retry-delay 1 \
-        -o /dev/null -w '%{url_effective}' \
-        "https://github.com/$1/releases/latest" 2>/dev/null \
-        | grep -oE 'tag/[^/]+$' | sed 's#tag/##' || true
-}
-
-github_asset_url() {
-    curl -sL --connect-timeout 5 --max-time 20 --retry 3 --retry-delay 1 \
-        "https://api.github.com/repos/$1/releases/latest" 2>/dev/null \
-        | grep -oE '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]+"' \
-        | sed -E 's/.*"([^"]+)"$/\1/' | grep -E "$2" | head -n1 || true
-}
-
-# ---- update functions ----
-
-update_helix() {
-    echo -e "${CYAN}[INFO]${RESET} Helix: checking..."
-    local local_ver latest_tag latest_ver url
-    if cmd_ok hx; then
-        local_ver=$(get_ver hx --version)
-        echo -e "  ${DIM}Installed:${RESET} ${local_ver:-?}"
-    else
-        echo -e "  ${YELLOW}[WARN] Not installed, skipping${RESET}"
-        return
-    fi
-
-    latest_tag=$(github_latest_tag "helix-editor/helix")
-    latest_ver=$(echo "$latest_tag" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' || true)
-    if [ -z "$latest_tag" ] || [ -z "$latest_ver" ]; then
-        echo -e "  ${YELLOW}[WARN] Failed to check latest version${RESET}"
-        return
-    fi
-
-    if [ "$local_ver" = "$latest_ver" ]; then
-        echo -e "  ${GREEN}[OK] Already up to date (${latest_ver})${RESET}"
-        return
-    fi
-
-    echo -e "  ${BOLD}Updating: ${local_ver:-?} → ${latest_ver}${RESET}"
-    url="https://github.com/helix-editor/helix/releases/download/${latest_tag}/helix-${latest_ver}-${SYS_ARCH}-linux.tar.xz"
-    if [ -z "$url" ] || ! download_file "$url" "${TEMP_DIR}/helix.tar.xz"; then
-        url=$(github_asset_url "helix-editor/helix" "helix-.*-${SYS_ARCH}-linux\\.tar\\.xz\$")
-        [ -z "$url" ] && { echo -e "  ${RED}[FAIL] No download URL found${RESET}"; return; }
-        download_file "$url" "${TEMP_DIR}/helix.tar.xz" || { echo -e "  ${RED}[FAIL] Download failed${RESET}"; return; }
-    fi
-
-    extract_archive "${TEMP_DIR}/helix.tar.xz" "$TEMP_DIR" || { echo -e "  ${RED}[FAIL] Extract failed${RESET}"; return; }
-    local helix_dir
-    helix_dir=$(find "$TEMP_DIR" -maxdepth 1 -type d -name "helix-*" -print -quit)
-    if [ -n "$helix_dir" ] && [ -f "${helix_dir}/hx" ]; then
-        install -m 755 "${helix_dir}/hx" /usr/local/bin/hx
-        [ -d "${helix_dir}/runtime" ] && rm -rf /usr/local/lib/helix/runtime && mkdir -p /usr/local/lib/helix && cp -r "${helix_dir}/runtime" /usr/local/lib/helix/
-        echo -e "  ${GREEN}[OK] Updated to ${latest_ver}${RESET}"
-    else
-        echo -e "  ${RED}[FAIL] Binary not found in archive${RESET}"
-    fi
-}
-
-update_nexttrace() {
-    echo -e "${CYAN}[INFO]${RESET} Nexttrace: checking..."
-    local local_ver latest_tag url
-    if cmd_ok nexttrace; then
-        local_ver=$(get_ver nexttrace --version)
-        echo -e "  ${DIM}Installed:${RESET} ${local_ver:-?}"
-    else
-        echo -e "  ${YELLOW}[WARN] Not installed, skipping${RESET}"
-        return
-    fi
-
-    latest_tag=$(github_latest_tag "nxtrace/NTrace-core")
-    if [ -z "$latest_tag" ]; then
-        echo -e "  ${YELLOW}[WARN] Failed to check latest version${RESET}"
-        return
-    fi
-
-    # Compare version strings; skip if same
-    local latest_ver
-    latest_ver=$(echo "$latest_tag" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' || true)
-    if [ -n "$latest_ver" ] && [ "$local_ver" = "$latest_ver" ]; then
-        echo -e "  ${GREEN}[OK] Already up to date (${latest_ver})${RESET}"
-        return
-    fi
-
-    echo -e "  ${BOLD}Updating: ${local_ver:-?} → ${latest_ver:-latest}${RESET}"
-    url="https://github.com/nxtrace/NTrace-core/releases/latest/download/nexttrace_linux_${ARCH_SUFFIX}"
-    if download_file "$url" "${TEMP_DIR}/nexttrace"; then
-        install -m 755 "${TEMP_DIR}/nexttrace" /usr/local/bin/nexttrace
-        echo -e "  ${GREEN}[OK] Updated to ${latest_ver:-latest}${RESET}"
-    else
-        echo -e "  ${RED}[FAIL] Download failed${RESET}"
-    fi
-}
-
-update_cf_speedtest() {
-    echo -e "${CYAN}[INFO]${RESET} CF Speedtest: checking..."
-    local local_ver latest_tag latest_ver url
-    if cmd_ok cloudflare-speed-cli; then
-        local_ver=$(get_ver cloudflare-speed-cli --version)
-        echo -e "  ${DIM}Installed:${RESET} ${local_ver:-?}"
-    else
-        echo -e "  ${YELLOW}[WARN] Not installed, skipping${RESET}"
-        return
-    fi
-
-    latest_tag=$(github_latest_tag "kavehtehrani/cloudflare-speed-cli")
-    if [ -z "$latest_tag" ]; then
-        echo -e "  ${YELLOW}[WARN] Failed to check latest version${RESET}"
-        return
-    fi
-    # Release tags are prefixed with 'v' (e.g. v0.6.2); strip it for comparison.
-    latest_ver=$(echo "$latest_tag" | sed -E 's/^v//' | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' || true)
-
-    if [ -n "$latest_ver" ] && [ "$local_ver" = "$latest_ver" ]; then
-        echo -e "  ${GREEN}[OK] Already up to date (${latest_ver})${RESET}"
-        return
-    fi
-
-    echo -e "  ${BOLD}Updating: ${local_ver:-?} → ${latest_ver:-latest}${RESET}"
-    url="https://github.com/kavehtehrani/cloudflare-speed-cli/releases/latest/download/cloudflare-speed-cli-${SYS_ARCH}-unknown-linux-musl.tar.xz"
-    if download_file "$url" "${TEMP_DIR}/cfspeed.tar.xz"; then
-        extract_archive "${TEMP_DIR}/cfspeed.tar.xz" "$TEMP_DIR" || { echo -e "  ${RED}[FAIL] Extract failed${RESET}"; return; }
-        local binpath
-        binpath=$(find "$TEMP_DIR" -type f -name "cloudflare-speed-cli*" -executable -print -quit 2>/dev/null || true)
-        [ -z "$binpath" ] && binpath=$(find "$TEMP_DIR" -type f -name "cloudflare-speed-cli*" -print -quit 2>/dev/null || true)
-        if [ -n "$binpath" ]; then
-            install -m 755 "$binpath" /usr/local/bin/cloudflare-speed-cli
-            echo -e "  ${GREEN}[OK] Updated to ${latest_ver:-latest}${RESET}"
-        else
-            echo -e "  ${RED}[FAIL] Binary not found in archive${RESET}"
-        fi
-    else
-        echo -e "  ${YELLOW}[WARN] Download failed (may already be latest)${RESET}"
-    fi
-}
-
-# ---- main ----
-echo ""
-echo -e "${BOLD}GitHub tools update${RESET}"
-echo ""
-
-update_helix
-echo ""
-update_nexttrace
-echo ""
-update_cf_speedtest
-
-echo ""
-echo -e "${CYAN}[INFO]${RESET} Tools update checks finished; see the results above."
-
-rm -rf "$TEMP_DIR"
+GITHUB_ALLOWED=1
+IPV4_ADDR=''
+TOOL_CHECK_UNVERIFIED=0
 SCRIPT_EOF
-
-
+    # Serialize shared functions instead of maintaining a second installer.
+    for helper in print_status print_success print_warning print_error print_info print_subsection run_step \
+                  command_exists download_file ensure_unzip ensure_xz ensure_bzip2 extract_archive \
+                  get_github_latest_version get_github_api_asset_url tool_skip_check \
+                  install_helix install_cf_speedtest install_nexttrace; do
+        declare -f "$helper" >> "$staged" || return 1
+    done
+    cat >> "$staged" <<'SCRIPT_FOOTER'
+printf '%sGitHub tool updates%s\n' "$BOLD" "$RESET"
+failed=(); unverified=()
+for command in hx cloudflare-speed-cli nexttrace; do
+    case "$command" in hx) installer=install_helix; label=Helix ;; cloudflare-speed-cli) installer=install_cf_speedtest; label='CF Speedtest' ;; *) installer=install_nexttrace; label=Nexttrace ;; esac
+    if ! command_exists "$command"; then print_info "$label is not installed; skipped."; continue; fi
+    TOOL_CHECK_UNVERIFIED=0
+    if "$installer"; then
+        if [ "$TOOL_CHECK_UNVERIFIED" -eq 1 ]; then unverified+=("$label"); fi
+    else
+        failed+=("$label")
+    fi
+done
+if [ "${#failed[@]}" -gt 0 ]; then
+    print_warning "RESULT: Tool updates completed with failures: ${failed[*]}"
+    exit 2
+fi
+if [ "${#unverified[@]}" -gt 0 ]; then
+    print_warning "RESULT: Latest versions could not be verified: ${unverified[*]}"
+else
+    print_success 'RESULT: Installed tool update checks completed.'
+fi
+SCRIPT_FOOTER
+    write_managed_config /usr/local/bin/update-tools 755 < "$staged" || return 1
 }
 
 configure_tool_aliases() {
@@ -2229,7 +2069,7 @@ apply_thp_mode() {
     local mode="$1" defrag="$2" unit=/etc/systemd/system/debian-init-thp.service
     case "$mode" in always|madvise|never) ;; *) return 1 ;; esac
     case "$defrag" in always|defer|defer+madvise|madvise|never) ;; *) return 1 ;; esac
-    write_managed_config "$unit" <<EOF
+    write_managed_config "$unit" <<EOF || return 1
 # Generated by: debian_init.sh
 [Unit]
 Description=Apply selected Transparent Huge Pages mode
@@ -2282,7 +2122,15 @@ configure_optional_components() {
 
 show_report() {
     printf '\n'
-    if [ "$KERNEL_RESET_REQUIRED" -eq 1 ] || [ "$STALE_RUNTIME_CONFIG" -eq 1 ] || [ "$KERNEL_BOOT_PENDING" -eq 1 ]; then
+    local needs_reboot=0
+    if [ "$KERNEL_RESET_REQUIRED" -eq 1 ] || [ "$STALE_RUNTIME_CONFIG" -eq 1 ] || [ "$KERNEL_BOOT_PENDING" -eq 1 ]; then needs_reboot=1; fi
+    if [ "${#OPTIONAL_TOOL_FAILURES[@]}" -gt 0 ] || [ "${#OPTIONAL_TOOL_UNVERIFIED[@]}" -gt 0 ] || [ "${#OPTIONAL_TOOL_SKIPS[@]}" -gt 0 ]; then
+        if [ "$needs_reboot" -eq 1 ]; then print_warning 'RESULT: Configuration completed with tool issues — reboot required'; else print_warning 'RESULT: Configuration completed with tool issues'; fi
+        print_subsection 'Tool results requiring attention'
+        if [ "${#OPTIONAL_TOOL_FAILURES[@]}" -gt 0 ]; then print_kv 'Failed to install/update' "${OPTIONAL_TOOL_FAILURES[*]}"; fi
+        if [ "${#OPTIONAL_TOOL_UNVERIFIED[@]}" -gt 0 ]; then print_kv 'Latest version not verified' "${OPTIONAL_TOOL_UNVERIFIED[*]}"; fi
+        if [ "${#OPTIONAL_TOOL_SKIPS[@]}" -gt 0 ]; then print_kv 'Download skipped' "${OPTIONAL_TOOL_SKIPS[*]}"; fi
+    elif [ "$needs_reboot" -eq 1 ]; then
         print_warning 'RESULT: Configuration completed — reboot required'
     else
         print_success 'RESULT: Configuration completed'
@@ -2330,6 +2178,8 @@ main() {
     print_section 'Transfer buffers'
     configure_buffers
     profile_allowed "$BUFFER_PROFILE" || { print_error 'Buffer profile is not allowed on this host.'; return 1; }
+    save_buffer_state || return 1
+    BUFFER_CHOICE_SAVED=1
 
     print_section 'Packages and tools'
     apt_refresh
@@ -2373,11 +2223,13 @@ main() {
     print_section 'Verification and result'
     run_step --quiet 'Verifying configuration and services' verify_managed_state
     save_manifest
-    save_buffer_state
     show_report
 }
 
 main "$@"
+# Exit 2 reports optional tool failures after the rest of configuration completes.
+exit "$OPTIONAL_TOOLS_EXIT"
+
 
 
 
