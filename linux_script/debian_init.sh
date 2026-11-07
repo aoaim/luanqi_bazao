@@ -1577,7 +1577,7 @@ net.ipv6.conf.all.disable_ipv6 = 1
 net.ipv6.conf.default.disable_ipv6 = 1
 net.ipv6.conf.lo.disable_ipv6 = 1
 EOF
-        print_kv 'IPv6 configuration' 'Disabled'
+        print_kv 'IPv6 protocol' 'Disabled'
     else
         # Enable IPv6 immediately (kernel defaults to 0 = enabled)
         sysctl -w net.ipv6.conf.all.disable_ipv6=0 >/dev/null || return 1
@@ -1587,7 +1587,7 @@ EOF
         if [ -f "$SYSCTL_IPV6_FILE" ]; then
             rm -f "$SYSCTL_IPV6_FILE"
         fi
-        print_kv 'IPv6 configuration' 'Enabled'
+        print_kv 'IPv6 protocol' 'Enabled'
     fi
 }
 
