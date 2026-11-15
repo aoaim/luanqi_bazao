@@ -1,0 +1,52 @@
+# Apple API / Apple News —— mihomo 规则集（应走代理）
+# 由 proxy_filter/surge/apple_api.list 转换，上游 geekdada/surge-list surgio-snippet/apple.tpl（api_rule + apple_news_rule）
+# 用法：rule-providers 中 behavior: classical / format: yaml；含 apple.com 兜底，须排在 apple_direct 之后
+# Surge 的 USER-AGENT 规则 mihomo 无法表达，已注释保留以便对账
+# 最后更新 2026-11-15
+payload:
+  - DOMAIN,apps.apple.com
+  - DOMAIN,xp.apple.com
+  - DOMAIN,bag.itunes.apple.com
+  - DOMAIN,api-edge.apps.apple.com
+  - DOMAIN,api.apps.apple.com
+  - DOMAIN,play.itunes.apple.com
+  - DOMAIN,se.itunes.apple.com
+  - DOMAIN,se-edge.itunes.apple.com
+  - DOMAIN,su.itunes.apple.com
+  - DOMAIN,upp.itunes.apple.com
+  - DOMAIN,beta.music.apple.com
+  - DOMAIN-KEYWORD,buy.itunes.apple.com
+  - DOMAIN-SUFFIX,itunes-apple.com.akadns.net
+  # Apple Intelligence
+  - DOMAIN,apple-relay.apple.com
+  - DOMAIN,guzzoni.apple.com
+  # Apple News
+  # 已省略（mihomo 不支持 USER-AGENT 规则）：USER-AGENT,AppleNews*
+  - DOMAIN-SUFFIX,apple.news
+  - DOMAIN,news-events.apple.com
+  - DOMAIN,news-edge.apple.com
+  - DOMAIN,apple.comscoreresearch.com
+  # Apple 其他自选
+  # iMessage
+  - DOMAIN-SUFFIX,ess.apple.com
+  # Apple Music
+  - DOMAIN-SUFFIX,music.apple.com
+  - DOMAIN-SUFFIX,sonos-music.apple.com
+  # Configuration
+  - DOMAIN,configuration.apple.com
+  # Others
+  - DOMAIN-SUFFIX,aaplimg.com
+  - DOMAIN-SUFFIX,apple.co
+  - DOMAIN-SUFFIX,itunes.com
+  - DOMAIN-SUFFIX,itunes.apple.com
+  - DOMAIN-SUFFIX,apple
+  - DOMAIN,weather-analytics-events.apple.com
+  # Fallback
+  - DOMAIN-SUFFIX,icloud-content.com
+  - DOMAIN-SUFFIX,me.com
+  - DOMAIN-SUFFIX,apple.com
+  - DOMAIN-SUFFIX,icloud.com
+  - DOMAIN-SUFFIX,apple-cloudkit.com
+  - DOMAIN-SUFFIX,apple.com.edgesuite.net
+  - DOMAIN-SUFFIX,apple.com.akadns.net
+  - DOMAIN-SUFFIX,apple.com.edgekey.net

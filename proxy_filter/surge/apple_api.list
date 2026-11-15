@@ -1,8 +1,9 @@
 ## 应当代理的苹果服务
-## 包括 Apple API 和在中国大陆无 CDN 的 Apple 服务
+## 仅包含 Apple API 与 Apple News；在大陆无 CDN 的域名（上游 default_rule 段）不在此列，交由主配置最终 PROXY 兜底
+## 含 apple.com 兜底规则，须在 apple_direct.list 之后引用
 ## 参见 https://github.com/geekdada/surge-list/blob/master/surgio-snippet/apple.tpl
 ## 相关域名作用说明 https://support.apple.com/zh-cn/101555
-## 最后更新 2026-06-05
+## 最后更新 2026-11-15
 ## Surge
 
 #
@@ -54,9 +55,12 @@ DOMAIN-SUFFIX,itunes.com
 DOMAIN-SUFFIX,itunes.apple.com
 DOMAIN-SUFFIX,apple
 DOMAIN,weather-analytics-events.apple.com
-# iCloud 上传和下载
+# Fallback
 DOMAIN-SUFFIX,icloud-content.com
 DOMAIN-SUFFIX,me.com
 DOMAIN-SUFFIX,apple.com
 DOMAIN-SUFFIX,icloud.com
 DOMAIN-SUFFIX,apple-cloudkit.com
+DOMAIN-SUFFIX,apple.com.edgesuite.net
+DOMAIN-SUFFIX,apple.com.akadns.net
+DOMAIN-SUFFIX,apple.com.edgekey.net

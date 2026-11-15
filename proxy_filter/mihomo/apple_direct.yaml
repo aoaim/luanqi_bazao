@@ -1,0 +1,76 @@
+# Apple 可直连服务（中国大陆有 CDN / 落地节点）—— mihomo 规则集（应走 DIRECT）
+# 由 proxy_filter/surge/apple_direct.list 转换，上游 geekdada/surge-list surgio-snippet/apple.tpl（DIRECT + cdn_rule）
+# 用法：rule-providers 中 behavior: classical / format: yaml；须排在 apple_api 之前
+# Surge 的 USER-AGENT 规则 mihomo 无法表达，已注释保留以便对账；PROCESS-NAME 规则依赖 find-process-mode 不为 off
+# 最后更新 2026-11-15
+payload:
+  # 已省略（mihomo 不支持 USER-AGENT 规则）：USER-AGENT,*com.apple.mobileme.fmip1
+  # Weather
+  # 已省略（mihomo 不支持 USER-AGENT 规则）：USER-AGENT,*WeatherFoundation*
+  - DOMAIN,weather-data.apple.com
+  # Settings
+  # 已省略（mihomo 不支持 USER-AGENT 规则）：USER-AGENT,%E8%AE%BE%E7%BD%AE*
+  # 已省略（mihomo 不支持 USER-AGENT 规则）：USER-AGENT,FindMyFriends*
+  # 已省略（mihomo 不支持 USER-AGENT 规则）：USER-AGENT,FindMyiPhone*
+  # 已省略（mihomo 不支持 USER-AGENT 规则）：USER-AGENT,FMDClient*
+  # 已省略（mihomo 不支持 USER-AGENT 规则）：USER-AGENT,FMFD*
+  # 已省略（mihomo 不支持 USER-AGENT 规则）：USER-AGENT,fmflocatord*
+  # Apple Global CDN
+  # iOS App Store
+  - DOMAIN,iosapps.itunes.apple.com
+  # Mac App Store
+  - DOMAIN,osxapps.itunes.apple.com
+  - DOMAIN,oscdn.apple.com
+  # Update
+  - DOMAIN,supportdownload.apple.com
+  - DOMAIN,appldnld.apple.com
+  - DOMAIN,appldnld.apple.com.edgesuite.net
+  - DOMAIN,swcdn.apple.com
+  - DOMAIN,updates-http.cdn-apple.com
+  - DOMAIN,updates.cdn-apple.com
+  # App Store & iTunes Images
+  - DOMAIN-SUFFIX,mzstatic.com
+  # Mac App Store
+  - PROCESS-NAME,storedownloadd
+  # iOS App Store
+  # 已省略（mihomo 不支持 USER-AGENT 规则）：USER-AGENT,com.apple.appstored*
+  # iTunes
+  - DOMAIN,aod.itunes.apple.com
+  - DOMAIN,mvod.itunes.apple.com
+  - DOMAIN,streamingaudio.itunes.apple.com
+  - DOMAIN,apptrailers.itunes.apple.com
+  # Other
+  - DOMAIN,download.developer.apple.com
+  - DOMAIN,downloaddispatch.itunes.apple.com
+  - DOMAIN,app-site-association.cdn-apple.com
+  # Apple 其他直连
+  # Store
+  - DOMAIN-SUFFIX,store.apple.com
+  # Hotspot captive
+  - DOMAIN,captive.apple.com
+  # Apple Pay
+  - DOMAIN,smp-device-content.apple.com
+  - DOMAIN-KEYWORD,smp-device
+  # 已省略（mihomo 不支持 USER-AGENT 规则）：USER-AGENT,passd*
+  # 已省略（mihomo 不支持 USER-AGENT 规则）：USER-AGENT,Wallet*
+  # Reserve
+  - DOMAIN,reserve-prime.apple.com
+  # Push
+  - DOMAIN-KEYWORD,push-apple
+  - DOMAIN-KEYWORD,push.apple
+  # Asset Cache Locator Service
+  - DOMAIN-SUFFIX,lcdn-locator.apple.com
+  # Caching Server Registration
+  - DOMAIN,lcdn-registration.apple.com
+  - DOMAIN,suconfig.apple.com
+  - DOMAIN,xp-cdn.apple.com
+  # Translation
+  # See https://github.com/ripperhe/Bob/issues/405
+  - DOMAIN,sequoia.apple.com
+  - DOMAIN,seed-sequoia.siri.apple.com
+  # Settings
+  - DOMAIN,sq-device.apple.com
+  # CN specific
+  - DOMAIN-KEYWORD,-cn.apple.com
+  - DOMAIN-SUFFIX,icloud.com.cn
+  - DOMAIN-SUFFIX,apple.com.cn
