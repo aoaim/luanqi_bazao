@@ -2,9 +2,9 @@
 
 # Debian 13+ initialization script
 # Performs environment detection, tool installation, timezone configuration, and kernel tuning
-# Update: 26/08/06
+# Update: 26/11/07
 
-set -euo pipefail
+set -Eeuo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -26,7 +26,7 @@ case "$(uname -m)" in
         ARCH_DEB="arm64"
         ;;
     *)
-        echo -e "\033[0;31mUnsupported architecture: $(uname -m)\033[0m"
+        printf '  [FAIL] Unsupported architecture: %s\n' "$(uname -m)" >&2
         exit 1
         ;;
 esac
@@ -39,46 +39,382 @@ cleanup_temp() {
         rm -rf "$TEMP_DIR"
     fi
 }
+trap 'report_failure "$?" "$LINENO"' ERR
 trap cleanup_temp EXIT
 trap 'cleanup_temp; exit 1' INT TERM
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-DIM='\033[2m'
-RESET='\033[0m'
-
-# Icons
-ICON_PKG="[PKG]"
-ICON_TIME="[TIME]"
-ICON_DONE="[DONE]"
-ICON_TOOL="[TOOL]"
-ICON_OK="[OK]"
-ICON_WARN="[WARN]"
-ICON_ERR="[ERR]"
-ICON_INFO="[INFO]"
+APT_INDEX_READY=0
+DOCKER_ACTION="keep"
+KERNEL_BOOT_PENDING=0
+CLOUD_KERNEL_ACTION=unknown
+THP_SELECTED=""
+OPTIONAL_TOOL_FAILURES=()
+OPTIONAL_TOOL_UNVERIFIED=()
+OPTIONAL_TOOL_SKIPS=()
+TOOL_CHECK_UNVERIFIED=0
+OPTIONAL_TOOLS_EXIT=0
+BUFFER_CHOICE_SAVED=0
+THP_DEFRAG_SELECTED=""
+UI_SECTION=0
+UI_PHASE="Starting"
+UI_DETAIL=0
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[1;33m'
+BLUE=$'\033[0;34m'
+CYAN=$'\033[0;36m'
+BOLD=$'\033[1m'
+DIM=$'\033[2m'
+RESET=$'\033[0m'
+if [ ! -t 1 ] || [ -n "${NO_COLOR+x}" ] || [ "${TERM:-}" = dumb ]; then
+    RED=""; GREEN=""; YELLOW=""; BLUE=""; CYAN=""; BOLD=""; DIM=""; RESET=""
+fi
 
 print_section() {
-    echo ""
-    echo -e "${BLUE}${BOLD}▶ $1${RESET}"
+    UI_SECTION=$((UI_SECTION + 1))
+    UI_PHASE=${1# }
+    UI_DETAIL=0
+    printf '\n%s%s%02d · %s%s\n' "$BLUE" "$BOLD" "$UI_SECTION" "$UI_PHASE" "$RESET"
 }
-
-print_success() { echo -e "${GREEN}${ICON_OK} $1${RESET}"; }
-print_warning() { echo -e "${YELLOW}${ICON_WARN} $1${RESET}"; }
-print_error()   { echo -e "${RED}${ICON_ERR} $1${RESET}"; }
-print_info()    { echo -e "${CYAN}${ICON_INFO} $1${RESET}"; }
-
-print_subsection() {
-    echo -e "${BOLD}${CYAN}$1${RESET}"
+print_status() {
+    local indent='  '
+    [ "$UI_DETAIL" -eq 0 ] || indent='    '
+    printf '%s%s%-6s%s %s\n' "$indent" "$1" "$2" "$RESET" "$3"
 }
-
+print_success() { print_status "$GREEN" '[OK]' "$1"; }
+print_warning() { print_status "$YELLOW" '[WARN]' "$1"; }
+print_error() { print_status "$RED" '[FAIL]' "$1" >&2; }
+print_info() { print_status "$CYAN" '[INFO]' "$1"; }
+print_subsection() { UI_DETAIL=1; printf '\n  %s%s%s\n' "$BOLD" "$1" "$RESET"; }
 print_kv() {
-    local key="$1"
-    local val="$2"
-    printf "${DIM}%-22s${RESET} : %b\n" "$key" "$val"
+    local indent='  '
+    [ "$UI_DETAIL" -eq 0 ] || indent='    '
+    printf '%s%-28s %s\n' "$indent" "$1" "$2"
+}
+
+init_ui() {
+    printf '%s%sDebian initialization%s\n' "$BLUE" "$BOLD" "$RESET"
+}
+
+# Keep output on the terminal. Temporary captures only allow indentation and
+# are removed immediately; no diagnostic log file is created.
+run_step() {
+    local detail=1 display=1 label capture status
+    case "${1:-}" in
+        --quiet) detail=0; shift ;;
+        --silent) detail=0; display=0; shift ;;
+    esac
+    label="$1"; shift
+    capture=$(mktemp "${TEMP_DIR}/command.XXXXXX") || return 1
+    if [ "$display" -eq 1 ]; then printf '    %-43s ' "${label}..."; fi
+    if "$@" > "$capture" 2>&1; then
+        if [ "$display" -eq 1 ]; then printf '%s[OK]%s\n' "$GREEN" "$RESET"; fi
+        if [ "$detail" -eq 1 ]; then
+            # Drop repetitive progress and service compatibility boilerplate,
+            # while retaining package changes, warnings and other details.
+            sed -E '/^(Reading package lists|Building dependency tree|Reading state information|Synchronizing state of |Executing: .*systemd-sysv-install|OK: configuration test is successful)/d; /^[[:space:]]*$/d; s/^/      /' "$capture"
+        elif grep -Eq '(^|[[:space:]])(WARNING|Warning:|W:|ERROR|Error:)|[Dd]eprecated' "$capture"; then
+            print_warning "$label reported a note:"
+            grep -E '(^|[[:space:]])(WARNING|Warning:|W:|ERROR|Error:)|[Dd]eprecated' "$capture" | sed 's/^/      /'
+        fi
+        rm -f "$capture"
+        return 0
+    else
+        status=$?
+        if [ "$display" -eq 1 ]; then printf '%s[FAIL]%s\n' "$RED" "$RESET"; else print_error "$label failed (exit $status)."; fi
+        if [ -s "$capture" ]; then
+            printf '\n    Command output:\n' >&2
+            sed 's/^/      /' "$capture" >&2
+            printf '\n' >&2
+        fi
+        rm -f "$capture"
+        return "$status"
+    fi
+}
+report_failure() {
+    printf '\n' >&2
+    print_error "RESULT: Configuration stopped"
+    print_kv 'Failed step' "${UI_PHASE:-initialization} (line $2, exit $1)" >&2
+    print_info "Completed steps remain applied. Errors are shown above; no log file is required."
+    if [ "${BUFFER_CHOICE_SAVED:-0}" -eq 1 ]; then print_info 'Your buffer choice is saved; rerun to finish applying it.'; fi
+}
+
+refresh_apt_indexes() {
+    if [ "$APT_INDEX_READY" -eq 0 ]; then
+        run_step 'Refreshing package indexes' apt-get update -qq || return 1
+        APT_INDEX_READY=1
+    fi
+}
+
+# Persistent choices are data, never sourced as shell code. Config files
+# remain fully generated; this state only records the user's selection.
+BUFFER_STATE_FILE="/var/lib/debian-init/buffer-profile.conf"
+KERNEL_RESET_FILE="/var/lib/debian-init/kernel-reset.boot-id"
+BUFFER_PROFILE="default"
+BUFFER_TARGET_MBPS="unknown"
+BUFFER_RTT_MS="unknown"
+BUFFER_STATE_LOADED=0
+BUFFER_REASSESS=0
+BUFFER_CLI_PROFILE=""
+BUFFER_CLI_MBPS=""
+PROBE_TARGETS=()
+KERNEL_RESET_REQUIRED=0
+
+print_usage() {
+    cat <<'USAGE'
+Debian initialization
+Usage: bash debian_init.sh [options]
+  --reassess-buffers          Measure and choose a buffer profile again
+  --buffer-profile PROFILE   Explicit choice: default, 32m or 64m
+  --target-mbps RATE          Target rate for one TCP connection (1..100000)
+  --probe-target HOST         Business peer to probe; may be repeated (max 5)
+  --help                     Show this help without changing the system
+Exit status: 0 completed, 2 completed with optional tool failures; other nonzero values indicate a stopped run.
+Existing choices are reused unless reassessment or a profile is requested.
+Without a terminal, a first run uses system-default buffers unless explicitly set.
+USAGE
+}
+
+valid_target_rate() {
+    [[ "$1" =~ ^[1-9][0-9]{0,5}$ ]] && [ "$1" -le 100000 ]
+}
+
+parse_args() {
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --reassess-buffers) BUFFER_REASSESS=1; shift ;;
+            --buffer-profile|--target-mbps|--probe-target)
+                [ "$#" -ge 2 ] || { print_error "Missing value for $1"; return 1; }
+                case "$1" in
+                    --buffer-profile)
+                        case "$2" in default|32m|64m) BUFFER_CLI_PROFILE="$2" ;; *) print_error "Profile must be default, 32m or 64m."; return 1 ;; esac ;;
+                    --target-mbps)
+                        valid_target_rate "$2" || { print_error "Target rate must be 1..100000 Mbps."; return 1; }
+                        BUFFER_CLI_MBPS="$2" ;;
+                    --probe-target)
+                        [[ "$2" =~ ^[a-zA-Z0-9:][a-zA-Z0-9.:%_-]*$ ]] || { print_error "Invalid probe target: $2"; return 1; }
+                        [ "${#PROBE_TARGETS[@]}" -lt 5 ] || { print_error "At most five probe targets are allowed."; return 1; }
+                        PROBE_TARGETS+=("$2") ;;
+                esac
+                shift 2 ;;
+            --help|-h) print_usage; exit 0 ;;
+            *) print_error "Unknown option: $1"; print_usage; return 1 ;;
+        esac
+    done
+    if [ -n "$BUFFER_CLI_MBPS" ] || [ "${#PROBE_TARGETS[@]}" -gt 0 ]; then BUFFER_REASSESS=1; fi
+}
+
+can_prompt() { { : < /dev/tty; } 2>/dev/null; }
+
+read_tty_value() {
+    local __dest="$1" __prompt="$2" __input
+    printf '    %s%s%s ' "$CYAN" "$__prompt" "$RESET"
+    if ! { read -r __input < /dev/tty; } 2>/dev/null; then
+        print_warning "Terminal input ended; keeping the previous choice."
+        return 1
+    fi
+    printf -v "$__dest" '%s' "$__input"
+}
+
+load_buffer_state() {
+    [ -f "$BUFFER_STATE_FILE" ] || return 0
+    local key value profile="" rate="unknown" rtt="unknown"
+    while IFS='=' read -r key value || [ -n "$key" ]; do
+        case "$key" in
+            profile) profile="$value" ;;
+            target_mbps) rate="$value" ;;
+            rtt_ms) rtt="$value" ;;
+            ''|'#'*) ;;
+            *) print_error "Invalid buffer state field: $key"; return 1 ;;
+        esac
+    done < "$BUFFER_STATE_FILE"
+    case "$profile" in default|32m|64m) ;; *) print_error "Invalid saved buffer profile; supply --buffer-profile to replace it."; return 1 ;; esac
+    [ "$rate" = unknown ] || valid_target_rate "$rate" || return 1
+    [[ "$rtt" == unknown || "$rtt" =~ ^[0-9]+([.][0-9]+)?$ ]] || return 1
+    BUFFER_PROFILE="$profile"; BUFFER_TARGET_MBPS="$rate"; BUFFER_RTT_MS="$rtt"
+    BUFFER_STATE_LOADED=1
+}
+
+save_buffer_state() {
+    local staged
+    mkdir -p "$(dirname "$BUFFER_STATE_FILE")" || return 1
+    staged=$(mktemp "${BUFFER_STATE_FILE}.tmp.XXXXXX") || return 1
+    if ! printf 'profile=%s\ntarget_mbps=%s\nrtt_ms=%s\n' "$BUFFER_PROFILE" "$BUFFER_TARGET_MBPS" "$BUFFER_RTT_MS" > "$staged" ||
+       ! chmod 600 "$staged" || ! chown root:root "$staged" || ! mv -fT "$staged" "$BUFFER_STATE_FILE"; then
+        rm -f "$staged"; print_error "Cannot save buffer profile."; return 1
+    fi
+}
+
+profile_allowed() {
+    local mem_mb=$((MEM_KB / 1024))
+    case "$1" in
+        default) return 0 ;;
+        32m) [ "$mem_mb" -ge 1024 ] ;;
+        64m) [ "$mem_mb" -ge 2048 ] ;;
+        *) return 1 ;;
+    esac
+}
+
+buffer_profile_label() {
+    case "$BUFFER_PROFILE" in
+        default) printf 'System default' ;;
+        32m) printf 'Long-distance transfer / 32 MiB' ;;
+        64m) printf 'Long-distance transfer / 64 MiB' ;;
+    esac
+}
+
+# Coarse sizing heuristic, not a performance guarantee: 2 x bandwidth-delay
+# product, rounded up to a supported cap. A low BDP needs no raised cap.
+recommend_buffer_profile() {
+    local rate="$1" rtt="$2" mem_mb="$3" need
+    if [ "$rate" = unknown ] || [ "$rtt" = unknown ] || [ "$mem_mb" -lt 1024 ]; then echo default; return; fi
+    need=$(awk -v rate="$rate" -v rtt="$rtt" 'BEGIN { printf "%.3f", 2 * rate * rtt / 8 / 1048.576 }')
+    if awk -v n="$need" 'BEGIN { exit !(n <= 6) }'; then echo default
+    elif awk -v n="$need" 'BEGIN { exit !(n <= 32) }'; then echo 32m
+    elif [ "$mem_mb" -ge 2048 ]; then echo 64m
+    else echo 32m
+    fi
+}
+
+probe_buffer_targets() {
+    local target file samples median loss jitter received count=0 best="unknown"
+    if [ "${#PROBE_TARGETS[@]}" -eq 0 ]; then
+        PROBE_TARGETS=(www.baidu.com www.qq.com www.aliyun.com)
+        print_info "Reference destinations in China; these may not match your actual proxy route."
+    else
+        print_info "Using the specified business peers as the RTT reference."
+    fi
+    printf '\n    %-24s %8s %13s %12s %12s\n' 'Target' 'Replies' 'Median RTT' 'Probe loss' 'Jitter'
+    for target in "${PROBE_TARGETS[@]}"; do
+        count=$((count + 1)); file="${TEMP_DIR}/probe-${count}.log"
+        # Bound DNS lookup as well as echo replies; ping's own deadline
+        # alone does not reliably bound name resolution.
+        LC_ALL=C timeout -k 1s 8s ping -n -c 5 -i 0.2 -W 1 -w 6 -- "$target" > "$file" 2>&1 || true
+        samples=$(sed -nE 's/.*time[=<]([0-9]+([.][0-9]+)?).*/\1/p' "$file" | sort -n)
+        received=$(printf '%s\n' "$samples" | awk 'NF { n++ } END { print n+0 }')
+        loss=$(sed -nE 's/.* ([0-9]+([.][0-9]+)?)% packet loss.*/\1/p' "$file" | tail -n1)
+        jitter=$(awk -F' = ' '/^(rtt|round-trip)/ { split($2,a,"/"); split(a[4],b," "); print b[1] }' "$file")
+        if [ "$received" -lt 3 ] || [ -z "$loss" ]; then
+            printf '    %-24s %8s %13s %12s %12s\n' "$target" "$received / 5" 'Unusable' "${loss:-?}%" '-'
+            continue
+        fi
+        median=$(printf '%s\n' "$samples" | awk 'NF { a[++n]=$1 } END { if (n%2) printf "%.2f",a[(n+1)/2]; else printf "%.2f",(a[n/2]+a[n/2+1])/2 }')
+        printf '    %-24s %8s %13s %12s %12s\n' "$target" "$received / 5" "$median ms" "$loss%" "${jitter:-?} ms"
+        # ICMP loss is only a probe result, not a TCP loss measurement.
+        # Incomplete probes inform the report but not buffer sizing.
+        if awk -v loss="$loss" 'BEGIN { exit !(loss <= 20) }'; then
+            if [ "$best" = unknown ] || awk -v a="$median" -v b="$best" 'BEGIN { exit !(a>b) }'; then best="$median"; fi
+        fi
+    done
+    BUFFER_MEASURED_RTT="$best"
+    print_info "ICMP results are advisory; they do not measure TCP loss or available bandwidth."
+
+}
+
+configure_buffers() {
+    if [ -z "$BUFFER_CLI_PROFILE" ]; then load_buffer_state || return 1; fi
+    if [ -n "$BUFFER_CLI_PROFILE" ]; then
+        BUFFER_PROFILE="$BUFFER_CLI_PROFILE"
+        BUFFER_TARGET_MBPS="${BUFFER_CLI_MBPS:-unknown}"
+        BUFFER_RTT_MS=unknown
+        print_info "Using the explicitly requested profile."
+    elif [ "$BUFFER_STATE_LOADED" -eq 1 ] && [ "$BUFFER_REASSESS" -eq 0 ]; then
+        print_info "Using the saved choice; no measurement or automatic profile change."
+    elif ! can_prompt; then
+        print_info "No interactive terminal; using the saved choice or system-default buffers."
+    else
+        local answer rate="${BUFFER_CLI_MBPS:-unknown}" recommended choice peer=""
+
+        if [ "${#PROBE_TARGETS[@]}" -eq 0 ]; then
+            if ! read_tty_value peer 'Business peer host/IP [Enter: reference sites in China]:'; then return 0; fi
+            if [ -n "$peer" ]; then
+                [[ "$peer" =~ ^[a-zA-Z0-9:][a-zA-Z0-9.:%_-]*$ ]] || { print_error "Invalid peer address."; return 1; }
+                PROBE_TARGETS=("$peer")
+            fi
+        fi
+        probe_buffer_targets
+        if [ "$BUFFER_MEASURED_RTT" = unknown ]; then
+            print_warning "No usable RTT reference; keeping the saved profile or system defaults."
+            return 0
+        fi
+        if [ -z "$BUFFER_CLI_MBPS" ]; then
+            print_subsection 'Target rate per TCP connection'
+            printf '    1) Unknown — system-default recommendation\n    2) 100 Mbps\n    3) 200 Mbps\n    4) 500 Mbps\n    5) 1000 Mbps\n    6) Custom\n' 
+            while true; do
+                if ! read_tty_value answer 'Target [1]:'; then return 0; fi
+                case "$answer" in
+                    ''|1) rate=unknown; break ;;
+                    2) rate=100; break ;;
+                    3) rate=200; break ;;
+                    4) rate=500; break ;;
+                    5) rate=1000; break ;;
+                    6)
+                        if ! read_tty_value answer 'Custom target in Mbps (1..100000):'; then return 0; fi
+                        if valid_target_rate "$answer"; then rate="$answer"; break; fi
+                        print_warning "Enter a whole number from 1 to 100000." ;;
+                    *) print_warning "Choose 1, 2, 3, 4, 5 or 6." ;;
+                esac
+            done
+        fi
+        recommended=$(recommend_buffer_profile "$rate" "$BUFFER_MEASURED_RTT" "$((MEM_KB / 1024))")
+        if [ "$BUFFER_MEASURED_RTT" = unknown ]; then print_kv 'Reference RTT' 'Not measured reliably'; else print_kv 'Reference RTT' "${BUFFER_MEASURED_RTT} ms"; fi
+        if [ "$rate" = unknown ]; then print_kv 'Target per connection' 'Not specified'; else print_kv 'Target per connection' "$rate Mbps"; fi
+        print_kv 'Recommended profile' "${GREEN}${recommended}${RESET}"
+        if [ "$recommended" = default ]; then print_info "Insufficient sizing evidence, low BDP or limited RAM: prefer system defaults."; fi
+        if [ "$BUFFER_MEASURED_RTT" != unknown ] && [ "$rate" != unknown ]; then
+            local need
+            need=$(awk -v r="$rate" -v t="$BUFFER_MEASURED_RTT" 'BEGIN { printf "%.1f",2*r*t/8/1048.576 }')
+            print_kv '2 x BDP allowance' "$need MiB"
+            if awk -v n="$need" 'BEGIN { exit !(n > 64) }'; then print_warning "The estimate exceeds 64 MiB; this script's profiles cannot promise the target rate."; fi
+        fi
+        local suggested=1
+        case "$recommended" in 32m) suggested=2 ;; 64m) suggested=3 ;; esac
+        printf '\n    1) System default\n    2) 32 MiB\n    3) 64 MiB\n'
+        while true; do
+            if ! read_tty_value choice "Select [$suggested, ? for explanation]:"; then return 0; fi
+            choice=${choice:-$suggested}
+            case "$choice" in
+                1|default) choice=default ;;
+                2|32m) choice=32m ;;
+                3|64m) choice=64m ;;
+                '?')
+                    print_info 'Sizing uses the highest reliable median RTT and a coarse 2× bandwidth-delay allowance.'
+                    print_info 'Targets with fewer than 3 replies or ICMP loss above 20% are excluded.'
+                    print_info 'Caps permit growth, not preallocation. They do not guarantee throughput or safety under high concurrency.'
+                    print_info '32 MiB requires at least 1 GiB RAM; 64 MiB requires at least 2 GiB. Unknown bandwidth recommends defaults.'
+                    continue ;;
+                *) print_warning 'Choose 1, 2, 3 or ?.'; continue ;;
+            esac
+            if profile_allowed "$choice"; then break; fi
+            print_warning 'This profile exceeds the script RAM guard; choose a smaller profile.'
+        done
+        BUFFER_PROFILE="$choice"; BUFFER_TARGET_MBPS="$rate"; BUFFER_RTT_MS="$BUFFER_MEASURED_RTT"
+    fi
+    profile_allowed "$BUFFER_PROFILE" || { print_error "Saved/requested buffer profile exceeds the script's RAM guard; reassess it."; return 1; }
+    print_kv 'Selected profile' "$(buffer_profile_label)"
+
+}
+
+track_kernel_default_reset() {
+    local boot previous="" removed=0
+    boot=$(cat /proc/sys/kernel/random/boot_id) || return 1
+    if [ -f "$KERNEL_RESET_FILE" ]; then
+        previous=$(cat "$KERNEL_RESET_FILE") || return 1
+        if [ "$previous" != "$boot" ]; then rm -f "$KERNEL_RESET_FILE" || return 1; previous=""; fi
+    fi
+    if [ -f "$SYSCTL_NETWORK_FILE" ]; then
+        if grep -qE '^[[:space:]]*net\.ipv4\.tcp_mem[[:space:]]*=' "$SYSCTL_NETWORK_FILE"; then removed=1; fi
+        if [ "$BUFFER_PROFILE" = default ] && grep -qE '^[[:space:]]*(net\.core\.[rw]mem_max|net\.ipv4\.tcp_[rw]mem)[[:space:]]*=' "$SYSCTL_NETWORK_FILE"; then removed=1; fi
+    fi
+    if [ "$removed" -eq 1 ]; then
+        mkdir -p "$(dirname "$KERNEL_RESET_FILE")" || return 1
+        printf '%s\n' "$boot" > "$KERNEL_RESET_FILE" || return 1
+        previous="$boot"
+    fi
+    if [ "$previous" = "$boot" ]; then
+        KERNEL_RESET_REQUIRED=1
+        print_warning "Previous TCP memory/buffer overrides are being removed. Reboot is required to restore boot-calculated defaults."
+    fi
 }
 
 require_root() {
@@ -112,19 +448,44 @@ require_debian() {
 }
 
 ensure_basic_tools() {
-    print_section "${ICON_PKG} Preparing prerequisites"
-    apt-get update -qq >/dev/null 2>&1 || true
-    apt-get install $APT_INSTALL_OPTS curl wget >/dev/null 2>&1 || true
-    if ! command -v curl >/dev/null || ! command -v wget >/dev/null; then
-        print_error "Failed to install curl or wget. Please check network or mirrors."
-        exit 1
+    local cmd missing=0
+    for cmd in curl wget ping ip python3; do command -v "$cmd" >/dev/null 2>&1 || missing=1; done
+    if [ "$missing" -eq 1 ]; then
+        refresh_apt_indexes || return 1
+        run_step 'Installing prerequisites' apt-get install $APT_INSTALL_OPTS curl wget iputils-ping iproute2 python3 || return 1
     fi
-    print_success "Base utilities ready (curl, wget)"
+    for cmd in curl wget ping ip python3; do
+        command -v "$cmd" >/dev/null 2>&1 || { print_error "Missing required command: $cmd"; return 1; }
+    done
+}
+
+normalize_public_ip() {
+    # Accept only one public address of the requested family. Reject HTML,
+    # banners, private/loopback addresses, zones and multiline payloads.
+    [ "${#2}" -le 128 ] || return 1
+    python3 - "$1" "$2" <<'PY_IP'
+import ipaddress
+import sys
+try:
+    text = sys.argv[2].strip()
+    if '%' in text:
+        raise ValueError('scoped address')
+    address = ipaddress.ip_address(text)
+    if (address.version != int(sys.argv[1]) or not address.is_global
+            or address.is_multicast or address.is_unspecified
+            or address.is_loopback or address.is_link_local
+            or (address.version == 6 and address.ipv4_mapped is not None)):
+        raise ValueError('not a public address of the requested family')
+    print(address.compressed)
+except ValueError:
+    sys.exit(1)
+PY_IP
 }
 
 fetch_ipinfo() {
-    local raw
-    raw=$(curl -s --max-time 5 ipinfo.io 2>/dev/null || true)
+    local raw tmp_ip normalized
+    GITHUB_ALLOWED=1
+    raw=$(curl -fsSL --proto "=https" --proto-redir "=https" --connect-timeout 3 --max-time 5 https://ipinfo.io/json 2>/dev/null || true)
     IP_CITY=$(echo "$raw" | grep -oP '"city":\s*"\K[^"]+' || true)
     IP_REGION=$(echo "$raw" | grep -oP '"region":\s*"\K[^"]+' || true)
     IP_COUNTRY=$(echo "$raw" | grep -oP '"country":\s*"\K[^"]+' || true)
@@ -132,10 +493,10 @@ fetch_ipinfo() {
     IP_TZ=$(echo "$raw" | grep -oP '"timezone":\s*"\K[^"]+' || true)
     IPV4_ADDR="N/A"
     for attempt in 1 2; do
-        for api in "ip.sb" "api.ipify.org" "ifconfig.me" "ipinfo.io/ip"; do
-            tmp_ip=$(curl -fsSL --max-time 5 -4 "$api" 2>/dev/null || true)
-            if [ -n "$tmp_ip" ]; then
-                IPV4_ADDR="$tmp_ip"
+        for api in "https://ip.sb" "https://api.ipify.org" "https://ifconfig.me/ip" "https://ipinfo.io/ip"; do
+            tmp_ip=$(curl -fsSL --proto "=https" --proto-redir "=https" --connect-timeout 3 --max-time 5 -4 "$api" 2>/dev/null || true)
+            if normalized=$(normalize_public_ip 4 "$tmp_ip"); then
+                IPV4_ADDR="$normalized"
                 break 2
             fi
         done
@@ -145,10 +506,10 @@ fetch_ipinfo() {
     done
 
     IPV6_ADDR="N/A"
-    for api in "ip.sb" "ifconfig.co" "icanhazip.com" "ident.me"; do
-        tmp_ip=$(curl -fsSL --max-time 5 -6 "$api" 2>/dev/null || true)
-        if [ -n "$tmp_ip" ]; then
-            IPV6_ADDR="$tmp_ip"
+    for api in "https://ip.sb" "https://ifconfig.co/ip" "https://icanhazip.com" "https://ident.me"; do
+        tmp_ip=$(curl -fsSL --proto "=https" --proto-redir "=https" --connect-timeout 3 --max-time 5 -6 "$api" 2>/dev/null || true)
+        if normalized=$(normalize_public_ip 6 "$tmp_ip"); then
+            IPV6_ADDR="$normalized"
             break
         fi
     done
@@ -167,9 +528,9 @@ fetch_ipinfo() {
             has_ipv6_addr=$(echo "$has_ipv6_addr" | tr -d '[:space:]')
             has_ipv6_addr=${has_ipv6_addr:-0}
             if [ "$has_ipv6_addr" -gt 0 ] 2>/dev/null; then
-                IPV6_STATUS="address assigned but external unreachable"
+                IPV6_STATUS="address assigned; external connectivity unconfirmed"
             else
-                IPV6_STATUS="not assigned by provider"
+                IPV6_STATUS="no global IPv6 address detected"
             fi
         fi
     fi
@@ -177,9 +538,10 @@ fetch_ipinfo() {
     # IPv6-only fallback: use ifconfig.co/json to populate IP and region fields
     if { [ -z "${IPV4_ADDR:-}" ] || [ "${IPV4_ADDR}" = "N/A" ]; } && [ "${IPV6_ADDR:-N/A}" != "N/A" ]; then
         local raw6
-        raw6=$(curl -s --max-time 8 -6 ifconfig.co/json 2>/dev/null || true)
+        raw6=$(curl -fsSL --proto "=https" --proto-redir "=https" --connect-timeout 3 --max-time 8 -6 https://ifconfig.co/json 2>/dev/null || true)
         if [ -n "$raw6" ]; then
-            IPV6_ADDR=$(echo "$raw6" | grep -oP '"ip":\s*"\K[^"]+' || echo "$IPV6_ADDR")
+            tmp_ip=$(echo "$raw6" | grep -oP '"ip":\s*"\K[^"]+' || true)
+            if normalized=$(normalize_public_ip 6 "$tmp_ip"); then IPV6_ADDR="$normalized"; fi
             IP_CITY=$(echo "$raw6" | grep -oP '"city":\s*"\K[^"]+' || echo "${IP_CITY:-}")
             IP_REGION=$(echo "$raw6" | grep -oP '"region":\s*"\K[^"]+' || echo "${IP_REGION:-}")
             IP_COUNTRY=$(echo "$raw6" | grep -oP '"country_iso":\s*"\K[^"]+' || echo "${IP_COUNTRY:-}")
@@ -220,7 +582,7 @@ download_file() {
 
 ensure_unzip() {
     if ! command_exists unzip; then
-        apt-get install -qq -y unzip >/dev/null 2>&1 || true
+        run_step "Install packages" apt-get install -qq -y unzip >/dev/null 2>&1 || true
     fi
     if ! command_exists unzip; then
         print_error "unzip install failed"
@@ -231,7 +593,7 @@ ensure_unzip() {
 
 ensure_xz() {
     if ! command_exists xz; then
-        apt-get install -qq -y xz-utils >/dev/null 2>&1 || true
+        run_step "Install packages" apt-get install -qq -y xz-utils >/dev/null 2>&1 || true
     fi
     if ! command_exists xz; then
         print_error "xz-utils install failed"
@@ -242,7 +604,7 @@ ensure_xz() {
 
 ensure_bzip2() {
     if ! command_exists bzip2; then
-        apt-get install -qq -y bzip2 >/dev/null 2>&1 || true
+        run_step "Install packages" apt-get install -qq -y bzip2 >/dev/null 2>&1 || true
     fi
     if ! command_exists bzip2; then
         print_error "bzip2 install failed"
@@ -297,7 +659,6 @@ detect_system() {
 }
 
 show_detection() {
-    print_section "${ICON_INFO} Environment check"
     print_kv "IPv4" "${IPV4_ADDR:-N/A}"
     if [ "${IPV6_ADDR:-N/A}" != "N/A" ] && [ -n "$IPV6_ADDR" ]; then
         print_kv "IPv6" "$IPV6_ADDR"
@@ -373,6 +734,7 @@ tool_skip_check() {
     latest_tag=$(get_github_latest_version "$repo")
     if [ -z "$latest_tag" ]; then
         print_warning "${label} v${local_ver} installed; couldn't check latest release, skipping update."
+        TOOL_CHECK_UNVERIFIED=1
         return 0
     fi
     latest_ver=$(echo "$latest_tag" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' || true)
@@ -388,169 +750,89 @@ tool_skip_check() {
 
 install_cf_speedtest() {
     if [ "$GITHUB_ALLOWED" -eq 0 ]; then
-        print_warning "IPv6-only detected: skipping Cloudflare Speedtest CLI (GitHub download required)."
-        return
+        print_warning 'CF Speedtest download skipped: GitHub access is unavailable for this profile.'
+        return 2
     fi
-    if tool_skip_check cloudflare-speed-cli "kavehtehrani/cloudflare-speed-cli" "CF Speedtest"; then
-        return
-    fi
-    print_info "Installing Cloudflare Speedtest CLI..."
-
-    local arch_url=""
-    if [ "$ARCH" = "x86_64" ]; then
-        arch_url="https://github.com/kavehtehrani/cloudflare-speed-cli/releases/latest/download/cloudflare-speed-cli-x86_64-unknown-linux-musl.tar.xz"
-    elif [ "$ARCH" = "aarch64" ]; then
-        arch_url="https://github.com/kavehtehrani/cloudflare-speed-cli/releases/latest/download/cloudflare-speed-cli-aarch64-unknown-linux-musl.tar.xz"
-    else
-        print_warning "Unsupported architecture for Cloudflare Speedtest CLI: $ARCH"
-        return
-    fi
-
-    if download_file "$arch_url" "${TEMP_DIR}/cfspeed.tar.xz"; then
-        if extract_archive "${TEMP_DIR}/cfspeed.tar.xz" "$TEMP_DIR"; then
-            local binpath
-            binpath=$(find "$TEMP_DIR" -type f -name "cloudflare-speed-cli*" -executable -print -quit 2>/dev/null || true)
-            if [ -z "$binpath" ]; then
-                binpath=$(find "$TEMP_DIR" -type f -name "cloudflare-speed-cli*" -print -quit 2>/dev/null || true)
-            fi
-
-            if [ -n "$binpath" ]; then
-                install -m 755 "$binpath" /usr/local/bin/cloudflare-speed-cli
-                cat > /etc/profile.d/cfspeed-alias.sh <<'EOF'
-# Generated by: debian_init.sh
-# Do not edit manually - changes may be overwritten
-alias cf='cloudflare-speed-cli'
-EOF
-                chmod 644 /etc/profile.d/cfspeed-alias.sh
-                print_success "Cloudflare Speedtest CLI installed (alias: cf)"
-            else
-                print_error "Binary not found in archive"
-            fi
-        else
-            print_error "Failed to extract archive"
-        fi
-        rm -f "${TEMP_DIR}/cfspeed.tar.xz"
-    else
-        print_error "Failed to download Cloudflare Speedtest CLI"
-    fi
+    if tool_skip_check cloudflare-speed-cli "kavehtehrani/cloudflare-speed-cli" "CF Speedtest"; then return 0; fi
+    local url="https://github.com/kavehtehrani/cloudflare-speed-cli/releases/latest/download/cloudflare-speed-cli-${ARCH}-unknown-linux-musl.tar.xz" binpath
+    print_info 'Installing Cloudflare Speedtest CLI...'
+    download_file "$url" "${TEMP_DIR}/cfspeed.tar.xz" || { print_error 'CF Speedtest download failed.'; return 1; }
+    extract_archive "${TEMP_DIR}/cfspeed.tar.xz" "$TEMP_DIR" || { print_error 'CF Speedtest extraction failed.'; return 1; }
+    binpath=$(find "$TEMP_DIR" -type f -name 'cloudflare-speed-cli*' ! -name '*.tar.*' -print -quit) || return 1
+    [ -n "$binpath" ] || { print_error 'CF Speedtest binary missing from archive.'; return 1; }
+    chmod 755 "$binpath" || return 1
+    "$binpath" --version >/dev/null 2>&1 || { print_error 'Downloaded CF Speedtest binary cannot run.'; return 1; }
+    install -m 755 "$binpath" /usr/local/bin/cloudflare-speed-cli || return 1
+    rm -f "${TEMP_DIR}/cfspeed.tar.xz" || return 1
+    print_success 'CF Speedtest installed.'
+    return 0
 }
 
 apt_refresh() {
-    print_section "${ICON_PKG} System update"
-    apt-get update -qq || true
-    apt-get upgrade $APT_INSTALL_OPTS || true
-    apt-get autoremove $APT_INSTALL_OPTS || true
-    apt-get clean || true
-    print_success "System update completed"
+    print_subsection 'System packages'
+    refresh_apt_indexes || return 1
+    run_step 'Applying package upgrades' apt-get upgrade $APT_INSTALL_OPTS || return 1
+    run_step 'Removing unused packages' apt-get autoremove $APT_INSTALL_OPTS || return 1
+    run_step --silent 'Cleaning package cache' apt-get clean || return 1
 }
 
 install_helix() {
     if [ "$GITHUB_ALLOWED" -eq 0 ]; then
-        print_warning "IPv6-only detected: skipping Helix (GitHub download required)."
-        return
+        print_warning 'Helix download skipped: GitHub access is unavailable for this profile.'
+        return 2
     fi
-    if tool_skip_check hx "helix-editor/helix" "Helix"; then
-        return
+    if tool_skip_check hx "helix-editor/helix" "Helix"; then return 0; fi
+    local tag ver url="" helix_dir
+    print_info 'Installing Helix...'
+    tag=$(get_github_latest_version 'helix-editor/helix')
+    ver=$(printf '%s' "$tag" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' || true)
+    if [ -n "$tag" ] && [ -n "$ver" ]; then url="https://github.com/helix-editor/helix/releases/download/${tag}/helix-${ver}-${ARCH}-linux.tar.xz"; fi
+    if [ -z "$url" ] || ! download_file "$url" "${TEMP_DIR}/helix.tar.xz"; then
+        url=$(get_github_api_asset_url 'helix-editor/helix' "helix-.*-${ARCH}-linux\\.tar\\.xz$")
+        [ -n "$url" ] || { print_error 'Helix download URL could not be determined.'; return 1; }
+        download_file "$url" "${TEMP_DIR}/helix.tar.xz" || { print_error 'Helix download failed.'; return 1; }
     fi
-    print_info "Installing Helix..."
-
-    local tag="" ver="" url=""
-
-    tag=$(get_github_latest_version "helix-editor/helix")
-    if [ -n "$tag" ]; then
-        ver=$(echo "$tag" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' || true)
-        [ -n "$ver" ] && url="https://github.com/helix-editor/helix/releases/download/${tag}/helix-${ver}-${ARCH}-linux.tar.xz"
-    fi
-
-    # Fallback to API if tag/url construction failed
-    if [ -z "$url" ]; then
-        url=$(get_github_api_asset_url "helix-editor/helix" "helix-.*-${ARCH}-linux\\.tar\\.xz$")
-    fi
-
-    if [ -z "$url" ]; then
-        print_error "Unable to get Helix download URL"
-        return
-    fi
-
-    if download_file "$url" "${TEMP_DIR}/helix.tar.xz"; then
-        if extract_archive "${TEMP_DIR}/helix.tar.xz" "$TEMP_DIR"; then
-            local helix_dir
-            helix_dir=$(find "$TEMP_DIR" -maxdepth 1 -type d -name "helix-*" -print -quit)
-
-            if [ -n "$helix_dir" ] && [ -f "${helix_dir}/hx" ]; then
-                install -m 755 "${helix_dir}/hx" /usr/local/bin/hx
-                mkdir -p /usr/local/lib/helix
-                rm -rf /usr/local/lib/helix/runtime
-                [ -d "${helix_dir}/runtime" ] && cp -r "${helix_dir}/runtime" /usr/local/lib/helix/
-
-                cat > /etc/profile.d/helix-alias.sh <<'EOF'
-# Generated by: debian_init.sh
-# Do not edit manually - changes may be overwritten
-export HELIX_RUNTIME=/usr/local/lib/helix/runtime
-alias vi='hx'
-alias vim='hx'
-EOF
-                chmod 644 /etc/profile.d/helix-alias.sh
-                print_success "Helix installed (aliases: vi, vim, hx)"
-            else
-                print_error "Helix binary or directory structure not found in archive"
-            fi
-        else
-            print_error "Failed to extract Helix archive"
-        fi
-        rm -f "${TEMP_DIR}/helix.tar.xz"
-        rm -rf "${TEMP_DIR}/helix-"* 2>/dev/null || true
-    else
-        print_error "Helix download failed"
-    fi
+    extract_archive "${TEMP_DIR}/helix.tar.xz" "$TEMP_DIR" || { print_error 'Helix extraction failed.'; return 1; }
+    helix_dir=$(find "$TEMP_DIR" -maxdepth 1 -type d -name 'helix-*' -print -quit) || return 1
+    [ -n "$helix_dir" ] && [ -f "${helix_dir}/hx" ] && [ -d "${helix_dir}/runtime" ] || {
+        print_error 'Helix binary or runtime missing from archive.'; return 1;
+    }
+    chmod 755 "${helix_dir}/hx" || return 1
+    "${helix_dir}/hx" --version >/dev/null 2>&1 || { print_error 'Downloaded Helix binary cannot run.'; return 1; }
+    install -m 755 "${helix_dir}/hx" /usr/local/bin/hx || return 1
+    mkdir -p /usr/local/lib/helix || return 1
+    rm -rf /usr/local/lib/helix/runtime || return 1
+    cp -r "${helix_dir}/runtime" /usr/local/lib/helix/ || return 1
+    rm -f "${TEMP_DIR}/helix.tar.xz" || return 1
+    rm -rf "$helix_dir" || return 1
+    print_success 'Helix installed.'
+    return 0
 }
 
 install_nexttrace() {
     if [ "$GITHUB_ALLOWED" -eq 0 ]; then
-        print_warning "IPv6-only detected: skipping Nexttrace (GitHub download required)."
-        return
+        print_warning 'Nexttrace download skipped: GitHub access is unavailable for this profile.'
+        return 2
     fi
-    if tool_skip_check nexttrace "nxtrace/NTrace-core" "Nexttrace"; then
-        return
-    fi
-    print_info "Installing Nexttrace..."
-    # nexttrace_linux_amd64 or nexttrace_linux_arm64
-    local arch_suffix
-    if [ "$ARCH" = "x86_64" ]; then
-        arch_suffix="amd64"
-    else
-        arch_suffix="arm64"
-    fi
-
-    local url="https://github.com/nxtrace/NTrace-core/releases/latest/download/nexttrace_linux_${arch_suffix}"
-
-    if download_file "$url" "${TEMP_DIR}/nexttrace"; then
-        install -m 755 "${TEMP_DIR}/nexttrace" /usr/local/bin/nexttrace
-        cat > /etc/profile.d/nexttrace-alias.sh <<'EOF'
-# Generated by: debian_init.sh
-# Do not edit manually - changes may be overwritten
-alias nt='nexttrace'
-EOF
-        chmod 644 /etc/profile.d/nexttrace-alias.sh
-        print_success "Nexttrace installed (alias: nt)"
-        rm -f "${TEMP_DIR}/nexttrace"
-    else
-        print_error "Nexttrace download failed"
-    fi
+    if tool_skip_check nexttrace 'nxtrace/NTrace-core' 'Nexttrace'; then return 0; fi
+    local suffix=arm64 url
+    [ "$ARCH" != x86_64 ] || suffix=amd64
+    url="https://github.com/nxtrace/NTrace-core/releases/latest/download/nexttrace_linux_${suffix}"
+    print_info 'Installing Nexttrace...'
+    download_file "$url" "${TEMP_DIR}/nexttrace" || { print_error 'Nexttrace download failed.'; return 1; }
+    chmod 755 "${TEMP_DIR}/nexttrace" || return 1
+    "${TEMP_DIR}/nexttrace" --version >/dev/null 2>&1 || { print_error 'Downloaded Nexttrace binary cannot run.'; return 1; }
+    install -m 755 "${TEMP_DIR}/nexttrace" /usr/local/bin/nexttrace || return 1
+    rm -f "${TEMP_DIR}/nexttrace" || return 1
+    print_success 'Nexttrace installed.'
+    return 0
 }
 
 MANIFEST_FILE="/var/lib/debian-init/manifest"
-# Hidden backup directory under the root user's home
-BACKUP_DIR="/root/.init-bak"
 GENERATED_MARKER="Generated by: debian_init.sh"
 CONFIG_TARGETS=()
-
-# True when the file was created by this script (carries the marker header).
-# Such files are refreshed on every run - never backed up.
-is_script_generated() {
-    [ -f "$1" ] || return 1
-    grep -qF "$GENERATED_MARKER" "$1" 2>/dev/null
-}
+RETIRED_CONFIGS=("/etc/systemd/system/disable-transparent-huge-pages.service")
+STALE_RUNTIME_CONFIG=0
 
 collect_config_targets() {
     CONFIG_TARGETS=(
@@ -559,12 +841,13 @@ collect_config_targets() {
         "/etc/modules-load.d/network-optimized.conf"
         "/etc/modules-load.d/tcp_bbr.conf"
         "/etc/systemd/journald.conf.d/99-limit.conf"
-        "/etc/systemd/system/disable-transparent-huge-pages.service"
+        "/etc/systemd/system/debian-init-thp.service"
         "/etc/profile.d/helix-alias.sh"
         "/etc/profile.d/nexttrace-alias.sh"
         "/etc/profile.d/cfspeed-alias.sh"
         "/etc/profile.d/eza-alias.sh"
         "/etc/profile.d/update-alias.sh"
+        "/usr/local/bin/update-tools"
         "/etc/profile.d/bat-alias.sh"
         "/etc/chrony/chrony.conf"
         "/etc/fail2ban/jail.local"
@@ -573,104 +856,118 @@ collect_config_targets() {
     )
 }
 
-# Back up ONLY files this script did not generate (user-managed ones).
-# Files with our marker are regenerated from scratch, so the "latest wins"
-# philosophy applies and no backup is needed for them.
-# Backups live in BACKUP_DIR (mirroring the original path) and keep only
-# the most recent copy - older ones are replaced, never accumulated.
-backup_config() {
-    local f="$1"
-    [ -f "$f" ] || return 0
-    is_script_generated "$f" && return 0
-    local rel="${f#/}"
-    local bak="${BACKUP_DIR}/${rel}.bak"
-    mkdir -p "$(dirname "$bak")"
-    rm -f "$bak"
-    if cp -a "$f" "$bak" 2>/dev/null; then
-        print_info "User file backed up: $f -> $bak (latest only)"
-    else
-        print_warning "Failed to back up $f (continuing without backup)"
+# All listed paths belong to this script. Replace their complete content,
+# regardless of markers or manual changes; never merge or create backups.
+record_managed_path() {
+    local path="$1"
+    mkdir -p "$(dirname "$MANIFEST_FILE")" || return 1
+    touch "$MANIFEST_FILE" || return 1
+    grep -qxF "$path" "$MANIFEST_FILE" || printf '%s\n' "$path" >> "$MANIFEST_FILE"
+}
+
+validate_managed_config() {
+    local staged="$1" dest="$2"
+    [ -s "$staged" ] || { print_error "Empty generated configuration: $dest" >&2; return 1; }
+    case "$dest" in
+        /etc/profile.d/*.sh|/usr/local/bin/update-tools) bash -n "$staged" ;;
+        /etc/chrony/chrony.conf) chronyd -p -f "$staged" >/dev/null ;;
+        /etc/apt/apt.conf.d/*) apt-config -c "$staged" dump >/dev/null ;;
+        *) return 0 ;;
+    esac
+}
+
+write_managed_config() {
+    local dest="$1" mode="${2:-644}" staged
+    mkdir -p "$(dirname "$dest")" || return 1
+    # APT silently ignores .disabled staging files during directory scans.
+    staged=$(mktemp --suffix=.disabled "${dest}.tmp.XXXXXX") || return 1
+    if ! cat > "$staged" || ! run_step --silent "Validate ${dest##*/}" validate_managed_config "$staged" "$dest"; then
+        rm -f "$staged"
+        print_error "Configuration generation/validation failed: $dest" >&2
+        return 1
+    fi
+    # Record ownership before replacement so an interrupted run can still
+    # clean up any new path when a later version retires it.
+    if ! record_managed_path "$dest" || ! chmod "$mode" "$staged" ||
+       ! chown root:root "$staged" || ! mv -fT -- "$staged" "$dest"; then
+        rm -f "$staged"
+        print_error "Configuration replacement failed: $dest" >&2
+        return 1
     fi
 }
 
-# Remove leftovers from older script versions (tracked via manifest), so
-# that only the state of the current version stays active.
+# Only known configuration namespaces are eligible for automated cleanup.
+# The manifest is authoritative even if the old file was manually changed.
+is_cleanup_path() {
+    [[ "$1" != *'/../'* && "$1" != *'/./'* && "$1" != *$'\n'* ]] || return 1
+    case "$1" in
+        /etc/sysctl.d/*.conf|/etc/modules-load.d/*.conf|/etc/profile.d/*.sh|\
+        /etc/systemd/journald.conf.d/*.conf|/etc/systemd/system/*.service|\
+        /etc/chrony/*.conf|/etc/fail2ban/*.local|/etc/apt/apt.conf.d/*|\
+        /usr/local/bin/update-tools) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 cleanup_stale_configs() {
-    [ -f "$MANIFEST_FILE" ] || return 0
-    print_section "${ICON_INFO} Stale config cleanup"
-    local f removed=0
+    local candidates="${TEMP_DIR}/managed-candidates" f t keep unit removed=0 reload=0
+    : > "$candidates"
+    [ ! -f "$MANIFEST_FILE" ] || cat "$MANIFEST_FILE" >> "$candidates"
+    for f in "${RETIRED_CONFIGS[@]}"; do printf '%s\n' "$f" >> "$candidates"; done
+    # Migrate files produced before a manifest existed, using the exact
+    # script marker within the namespaces this script manages.
+    local dir
+    for dir in /etc/sysctl.d /etc/modules-load.d /etc/profile.d \
+               /etc/systemd/journald.conf.d /etc/systemd/system \
+               /etc/chrony /etc/fail2ban /etc/apt/apt.conf.d; do
+        [ -d "$dir" ] || continue
+        while IFS= read -r -d '' f; do
+            if grep -qF "$GENERATED_MARKER" "$f"; then printf '%s\n' "$f" >> "$candidates"; fi
+        done < <(find "$dir" -maxdepth 1 -type f -print0)
+    done
+    sort -u "$candidates" -o "$candidates" || return 1
     while IFS= read -r f; do
         [ -n "$f" ] || continue
-        local t keep=0
+        keep=0
         for t in "${CONFIG_TARGETS[@]}"; do
-            if [ "$f" = "$t" ]; then
-                keep=1
-                break
-            fi
+            if [ "$f" = "$t" ]; then keep=1; break; fi
         done
-        [ "$keep" -eq 1 ] && continue
-        [ -e "$f" ] || continue
-        if is_script_generated "$f"; then
-            rm -f "$f"
-            print_warning "Removed stale config from a previous run: $f"
-            removed=$((removed + 1))
-        else
-            print_warning "Manifest lists $f but it was modified outside this script - keeping it"
+        [ "$keep" -eq 0 ] || continue
+        is_cleanup_path "$f" || { print_warning "Ignoring out-of-scope manifest path: $f"; continue; }
+        [ -e "$f" ] || [ -L "$f" ] || continue
+        if [[ "$f" == /etc/systemd/system/*.service ]]; then
+            unit=${f##*/}
+            if systemctl is-active --quiet "$unit"; then run_step "Stop retired service" systemctl stop "$unit" || return 1; fi
+            if systemctl is-enabled --quiet "$unit"; then run_step "Disable retired service" systemctl disable "$unit" || return 1; fi
+            reload=1
         fi
-    done < "$MANIFEST_FILE"
-    if [ "$removed" -eq 0 ]; then
-        print_success "No stale configs found"
+        rm -f -- "$f" || { print_error "Cannot remove retired config: $f"; return 1; }
+        [ ! -e "$f" ] && [ ! -L "$f" ] || return 1
+        case "$f" in /etc/sysctl.d/*|/etc/modules-load.d/*) STALE_RUNTIME_CONFIG=1 ;; esac
+        print_kv 'Removed retired file' "$f"
+        removed=$((removed + 1))
+    done < "$candidates"
+    if [ "$reload" -eq 1 ]; then run_step "Reload service definitions" systemctl daemon-reload || return 1; fi
+    print_success "Retired configuration cleanup complete ($removed removed)"
+    if [ "$STALE_RUNTIME_CONFIG" -eq 1 ]; then
+        print_warning "Retired kernel settings/modules can remain in memory until reboot; their old files have been removed."
     fi
 }
 
 save_manifest() {
-    mkdir -p "$(dirname "$MANIFEST_FILE")"
-    : > "$MANIFEST_FILE"
-    local t
+    local staged="${TEMP_DIR}/manifest" t
+    : > "$staged"
     for t in "${CONFIG_TARGETS[@]}"; do
-        [ -e "$t" ] && echo "$t" >> "$MANIFEST_FILE"
+        if [ -e "$t" ] || [ -L "$t" ]; then printf '%s\n' "$t" >> "$staged"; fi
     done
+    sort -u "$staged" -o "$staged" || return 1
+    mkdir -p "$(dirname "$MANIFEST_FILE")" || return 1
+    install -m 644 "$staged" "$MANIFEST_FILE" || return 1
 }
 
 preflight_config() {
     collect_config_targets
-    mkdir -p /etc/sysctl.d
-    print_section "${ICON_INFO} Config pre-check"
-    print_info "Files this script will write (NEW / REFRESH / USER FILE):"
-
-    local f new_count=0 refresh_count=0 user_count=0
-    for f in "${CONFIG_TARGETS[@]}"; do
-        if [ ! -e "$f" ]; then
-            printf "  ${GREEN}%-10s${RESET} %s\n" "NEW" "$f"
-            new_count=$((new_count + 1))
-        elif is_script_generated "$f"; then
-            printf "  ${CYAN}%-10s${RESET} %s\n" "REFRESH" "$f"
-            refresh_count=$((refresh_count + 1))
-        else
-            printf "  ${YELLOW}%-10s${RESET} %s\n" "USER FILE" "$f"
-            printf "      ${DIM}(not created by this script; backed up before overwriting)${RESET}\n"
-            user_count=$((user_count + 1))
-        fi
-    done
-
-    # Other files in sysctl.d are NOT touched, but will be applied together.
-    local others
-    others=$(find /etc/sysctl.d -maxdepth 1 -name '*.conf' -type f 2>/dev/null \
-        | grep -vE "$(basename "$SYSCTL_NETWORK_FILE")|$(basename "$SYSCTL_IPV6_FILE")" || true)
-    if [ -n "$others" ]; then
-        print_info "Other configs in /etc/sysctl.d (kept, applied together):"
-        while IFS= read -r f; do
-            printf "  ${DIM}%s${RESET}\n" "$f"
-        done <<< "$others"
-    fi
-
-    echo ""
-    print_info "${new_count} new, ${refresh_count} refreshed (script-managed), ${user_count} user-managed"
-    if [ "$user_count" -gt 0 ]; then
-        print_info "User-managed files are overwritten directly; latest copy kept in ${BACKUP_DIR}"
-    else
-        print_success "No user-managed files affected"
-    fi
+    print_kv 'Configuration policy' 'Full replacement; no merge or backup'
 }
 
 ask_yes_no() {
@@ -681,24 +978,35 @@ ask_yes_no() {
         *) default="n" ;;
     esac
     local choice
+    if ! can_prompt; then
+        print_info "No interactive terminal; skipped: $prompt"
+        return 1
+    fi
     while true; do
-        printf "${CYAN}${BOLD}>>> %s [default: %s] (y/yes, n/no): ${RESET}" "$prompt" "$default"
-        read -r choice
+        local hint='y/N'
+        [ "$default" != y ] || hint='Y/n'
+        printf '    %s%s [%s]:%s ' "$CYAN" "$prompt" "$hint" "$RESET"
+        # Read from the terminal, never from piped script text. EOF is not
+        # consent, even when an optional action has a default of yes.
+        if ! { read -r choice < /dev/tty; } 2>/dev/null; then
+            print_warning "Input ended; current state retained."
+            return 1
+        fi
         case "$choice" in
             y|Y|yes|Yes)
-                print_info "Selected: y"
+
                 return 0
                 ;;
             n|N|no|No)
-                print_info "Selected: n"
+
                 return 1
                 ;;
             "")
                 if [ "$default" = "y" ]; then
-                    print_info "Selected: y (default)"
+
                     return 0
                 fi
-                print_info "Selected: n (default)"
+
                 return 1
                 ;;
             *) echo "Please enter y/yes or n/no." ;;
@@ -706,18 +1014,6 @@ ask_yes_no() {
     done
 }
 
-show_docker_status() {
-    print_info "Checking Docker status..."
-    if command_exists docker; then
-        local docker_ver
-        docker_ver=$(docker --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 || echo "?")
-        print_kv "Docker" "${GREEN}already installed${RESET} (v${docker_ver})"
-        return 1
-    else
-        print_kv "Docker" "${YELLOW}not installed${RESET}"
-        return 0
-    fi
-}
 
 install_docker() {
     print_info "Installing Docker..."
@@ -726,7 +1022,8 @@ install_docker() {
         return
     fi
 
-    if curl -fsSL https://get.docker.com | sh; then
+    local docker_script="${TEMP_DIR}/get-docker.sh"
+    if download_file https://get.docker.com "$docker_script" && run_step "Install Docker" sh "$docker_script"; then
         print_success "Docker installed successfully"
         local docker_user="${SUDO_USER:-${USER:-}}"
         if [ -n "$docker_user" ] && [ "$docker_user" != "root" ]; then
@@ -735,274 +1032,128 @@ install_docker() {
         fi
     else
         print_error "Failed to install Docker"
+        return 1
     fi
 }
 
-# Returns 0 (ask user) when THP is not already disabled
-show_thp_status() {
-    print_info "Checking Transparent Huge Pages (THP) status..."
-    local thp_enabled thp_defrag
-    thp_enabled=$(cat /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null | grep -oE '\[[^]]+\]' | tr -d '[]' || echo "unknown")
-    thp_defrag=$(cat /sys/kernel/mm/transparent_hugepage/defrag 2>/dev/null | grep -oE '\[[^]]+\]' | tr -d '[]' || echo "unknown")
-    print_kv "THP enabled" "$thp_enabled"
-    print_kv "THP defrag" "$thp_defrag"
 
-    if [ "$thp_enabled" = "never" ]; then
-        print_success "THP already disabled"
-        return 1
-    fi
-    if [ "$thp_enabled" = "unknown" ]; then
-        print_warning "Cannot read THP status (not supported on this kernel?)"
-        return 1
-    fi
+
+install_tools() {
+    local installer label status
+    for installer in install_helix install_cf_speedtest install_nexttrace; do
+        case "$installer" in install_helix) label=Helix ;; install_cf_speedtest) label='CF Speedtest' ;; *) label=Nexttrace ;; esac
+        TOOL_CHECK_UNVERIFIED=0
+        if "$installer"; then
+            if [ "$TOOL_CHECK_UNVERIFIED" -eq 1 ]; then OPTIONAL_TOOL_UNVERIFIED+=("$label"); fi
+        else
+            status=$?
+            if [ "$status" -eq 2 ]; then
+                OPTIONAL_TOOL_SKIPS+=("$label")
+            else
+                OPTIONAL_TOOL_FAILURES+=("$label")
+                OPTIONAL_TOOLS_EXIT=2
+                print_warning "$label failed; remaining configuration will continue."
+            fi
+        fi
+    done
+    # This generated configuration is mandatory even when a tool download fails.
+    generate_update_tools_script || return 1
     return 0
 }
 
-disable_thp() {
-    print_info "Disabling Transparent Huge Pages..."
-    # sysfs values reset on reboot; persist via a systemd oneshot service.
-    cat > /etc/systemd/system/disable-transparent-huge-pages.service <<'EOF'
-# Generated by: debian_init.sh
-# Do not edit manually - changes may be overwritten
-[Unit]
-Description=Disable Transparent Huge Pages (THP)
-DefaultDependencies=no
-After=sysinit.target local-fs.target
-[Service]
-Type=oneshot
-ExecStart=/bin/sh -c 'echo never > /sys/kernel/mm/transparent_hugepage/enabled; echo never > /sys/kernel/mm/transparent_hugepage/defrag'
-[Install]
-WantedBy=basic.target
-EOF
-    systemctl daemon-reload
-    systemctl enable disable-transparent-huge-pages 2>/dev/null || true
-    systemctl start disable-transparent-huge-pages 2>/dev/null || true
-    print_success "THP disabled (persistent via systemd service)"
-}
-
-install_tools() {
-    print_section "${ICON_TOOL} Tools setup"
-    install_helix
-    install_cf_speedtest
-    install_nexttrace
-    generate_update_tools_script
-}
-
 generate_update_tools_script() {
-    cat > /usr/local/bin/update-tools <<'SCRIPT_EOF'
+    local staged="${TEMP_DIR}/update-tools" helper
+    cat > "$staged" <<'SCRIPT_EOF'
 #!/bin/bash
-# Generated by debian_init.sh - updates GitHub-sourced tools (Helix, Nexttrace, CF Speedtest)
-# Runs independently; invoked by the system-wide "update" alias.
-set -euo pipefail
-
+# Generated by: debian_init.sh
+# Update installed GitHub tools using the same checked functions as initialization.
+set -Eeuo pipefail
 export DEBIAN_FRONTEND=noninteractive
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-DIM='\033[2m'
-RESET='\033[0m'
-
+APT_INSTALL_OPTS="-y -qq -o=Dpkg::Use-Pty=0 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
 TEMP_DIR=$(mktemp -d -p /var/tmp)
 trap 'rm -rf "$TEMP_DIR"' EXIT
-
-# Architecture detection (self-contained)
+UI_DETAIL=0
+RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'; CYAN=$'\033[0;36m'; BOLD=$'\033[1m'; RESET=$'\033[0m'
+if [ ! -t 1 ] || [ -n "${NO_COLOR+x}" ] || [ "${TERM:-}" = dumb ]; then RED= GREEN= YELLOW= CYAN= BOLD= RESET=; fi
 case "$(uname -m)" in
-    x86_64|amd64)  SYS_ARCH="x86_64"; ARCH_SUFFIX="amd64" ;;
-    aarch64|arm64) SYS_ARCH="aarch64"; ARCH_SUFFIX="arm64" ;;
-    *) echo "Unsupported architecture"; exit 1 ;;
+    x86_64|amd64) ARCH=x86_64 ;;
+    aarch64|arm64) ARCH=aarch64 ;;
+    *) printf '[FAIL] Unsupported architecture\n' >&2; exit 1 ;;
 esac
-
-# ---- helpers ----
-cmd_ok() { command -v "$1" >/dev/null 2>&1; }
-get_ver() { "$@" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 || true; }
-
-download_file() {
-    curl -fsSL --connect-timeout 10 --max-time 300 --retry 3 --retry-delay 2 \
-        "$1" -o "$2" 2>/dev/null && [ -s "$2" ] && return 0
-    rm -f "$2"
-    return 1
-}
-
-ensure_xz()   { cmd_ok xz   || apt-get install -qq -y xz-utils >/dev/null 2>&1 || true; }
-ensure_bzip2(){ cmd_ok bzip2|| apt-get install -qq -y bzip2 >/dev/null 2>&1 || true; }
-ensure_unzip(){ cmd_ok unzip|| apt-get install -qq -y unzip >/dev/null 2>&1 || true; }
-
-extract_archive() {
-    case "$1" in
-        *.tar.xz|*.txz)       ensure_xz    && tar -xJf "$1" -C "$2" ;;
-        *.tar.gz|*.tgz)       tar -xzf "$1" -C "$2" ;;
-        *.tar.bz2|*.tbz|*.tbz2) ensure_bzip2 && tar -xjf "$1" -C "$2" ;;
-        *.zip)                ensure_unzip && unzip -q -o "$1" -d "$2" ;;
-        *) return 1 ;;
-    esac
-}
-
-github_latest_tag() {
-    curl -sL --connect-timeout 5 --max-time 15 --retry 3 --retry-delay 1 \
-        -o /dev/null -w '%{url_effective}' \
-        "https://github.com/$1/releases/latest" 2>/dev/null \
-        | grep -oE 'tag/[^/]+$' | sed 's#tag/##' || true
-}
-
-github_asset_url() {
-    curl -sL --connect-timeout 5 --max-time 20 --retry 3 --retry-delay 1 \
-        "https://api.github.com/repos/$1/releases/latest" 2>/dev/null \
-        | grep -oE '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]+"' \
-        | sed -E 's/.*"([^"]+)"$/\1/' | grep -E "$2" | head -n1 || true
-}
-
-# ---- update functions ----
-
-update_helix() {
-    echo -e "${CYAN}[HELIX]${RESET} Checking..."
-    local local_ver latest_tag latest_ver url
-    if cmd_ok hx; then
-        local_ver=$(get_ver hx --version)
-        echo -e "  ${DIM}Installed:${RESET} ${local_ver:-?}"
-    else
-        echo -e "  ${YELLOW}Not installed, skipping${RESET}"
-        return
-    fi
-
-    latest_tag=$(github_latest_tag "helix-editor/helix")
-    latest_ver=$(echo "$latest_tag" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' || true)
-    if [ -z "$latest_tag" ] || [ -z "$latest_ver" ]; then
-        echo -e "  ${YELLOW}Failed to check latest version${RESET}"
-        return
-    fi
-
-    if [ "$local_ver" = "$latest_ver" ]; then
-        echo -e "  ${GREEN}Already up to date (${latest_ver})${RESET}"
-        return
-    fi
-
-    echo -e "  ${BOLD}Updating: ${local_ver:-?} → ${latest_ver}${RESET}"
-    url="https://github.com/helix-editor/helix/releases/download/${latest_tag}/helix-${latest_ver}-${SYS_ARCH}-linux.tar.xz"
-    if [ -z "$url" ] || ! download_file "$url" "${TEMP_DIR}/helix.tar.xz"; then
-        url=$(github_asset_url "helix-editor/helix" "helix-.*-${SYS_ARCH}-linux\\.tar\\.xz\$")
-        [ -z "$url" ] && { echo -e "  ${RED}No download URL found${RESET}"; return; }
-        download_file "$url" "${TEMP_DIR}/helix.tar.xz" || { echo -e "  ${RED}Download failed${RESET}"; return; }
-    fi
-
-    extract_archive "${TEMP_DIR}/helix.tar.xz" "$TEMP_DIR" || { echo -e "  ${RED}Extract failed${RESET}"; return; }
-    local helix_dir
-    helix_dir=$(find "$TEMP_DIR" -maxdepth 1 -type d -name "helix-*" -print -quit)
-    if [ -n "$helix_dir" ] && [ -f "${helix_dir}/hx" ]; then
-        install -m 755 "${helix_dir}/hx" /usr/local/bin/hx
-        [ -d "${helix_dir}/runtime" ] && rm -rf /usr/local/lib/helix/runtime && mkdir -p /usr/local/lib/helix && cp -r "${helix_dir}/runtime" /usr/local/lib/helix/
-        echo -e "  ${GREEN}Updated to ${latest_ver}${RESET}"
-    else
-        echo -e "  ${RED}Binary not found in archive${RESET}"
-    fi
-}
-
-update_nexttrace() {
-    echo -e "${CYAN}[NEXTTRACE]${RESET} Checking..."
-    local local_ver latest_tag url
-    if cmd_ok nexttrace; then
-        local_ver=$(get_ver nexttrace --version)
-        echo -e "  ${DIM}Installed:${RESET} ${local_ver:-?}"
-    else
-        echo -e "  ${YELLOW}Not installed, skipping${RESET}"
-        return
-    fi
-
-    latest_tag=$(github_latest_tag "nxtrace/NTrace-core")
-    if [ -z "$latest_tag" ]; then
-        echo -e "  ${YELLOW}Failed to check latest version${RESET}"
-        return
-    fi
-
-    # Compare version strings; skip if same
-    local latest_ver
-    latest_ver=$(echo "$latest_tag" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' || true)
-    if [ -n "$latest_ver" ] && [ "$local_ver" = "$latest_ver" ]; then
-        echo -e "  ${GREEN}Already up to date (${latest_ver})${RESET}"
-        return
-    fi
-
-    echo -e "  ${BOLD}Updating: ${local_ver:-?} → ${latest_ver:-latest}${RESET}"
-    url="https://github.com/nxtrace/NTrace-core/releases/latest/download/nexttrace_linux_${ARCH_SUFFIX}"
-    if download_file "$url" "${TEMP_DIR}/nexttrace"; then
-        install -m 755 "${TEMP_DIR}/nexttrace" /usr/local/bin/nexttrace
-        echo -e "  ${GREEN}Updated to ${latest_ver:-latest}${RESET}"
-    else
-        echo -e "  ${RED}Download failed${RESET}"
-    fi
-}
-
-update_cf_speedtest() {
-    echo -e "${CYAN}[CF-SPEED]${RESET} Checking..."
-    local local_ver latest_tag latest_ver url
-    if cmd_ok cloudflare-speed-cli; then
-        local_ver=$(get_ver cloudflare-speed-cli --version)
-        echo -e "  ${DIM}Installed:${RESET} ${local_ver:-?}"
-    else
-        echo -e "  ${YELLOW}Not installed, skipping${RESET}"
-        return
-    fi
-
-    latest_tag=$(github_latest_tag "kavehtehrani/cloudflare-speed-cli")
-    if [ -z "$latest_tag" ]; then
-        echo -e "  ${YELLOW}Failed to check latest version${RESET}"
-        return
-    fi
-    # Release tags are prefixed with 'v' (e.g. v0.6.2); strip it for comparison.
-    latest_ver=$(echo "$latest_tag" | sed -E 's/^v//' | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' || true)
-
-    if [ -n "$latest_ver" ] && [ "$local_ver" = "$latest_ver" ]; then
-        echo -e "  ${GREEN}Already up to date (${latest_ver})${RESET}"
-        return
-    fi
-
-    echo -e "  ${BOLD}Updating: ${local_ver:-?} → ${latest_ver:-latest}${RESET}"
-    url="https://github.com/kavehtehrani/cloudflare-speed-cli/releases/latest/download/cloudflare-speed-cli-${SYS_ARCH}-unknown-linux-musl.tar.xz"
-    if download_file "$url" "${TEMP_DIR}/cfspeed.tar.xz"; then
-        extract_archive "${TEMP_DIR}/cfspeed.tar.xz" "$TEMP_DIR" || { echo -e "  ${RED}Extract failed${RESET}"; return; }
-        local binpath
-        binpath=$(find "$TEMP_DIR" -type f -name "cloudflare-speed-cli*" -executable -print -quit 2>/dev/null || true)
-        [ -z "$binpath" ] && binpath=$(find "$TEMP_DIR" -type f -name "cloudflare-speed-cli*" -print -quit 2>/dev/null || true)
-        if [ -n "$binpath" ]; then
-            install -m 755 "$binpath" /usr/local/bin/cloudflare-speed-cli
-            echo -e "  ${GREEN}Updated to ${latest_ver:-latest}${RESET}"
-        else
-            echo -e "  ${RED}Binary not found in archive${RESET}"
-        fi
-    else
-        echo -e "  ${YELLOW}Download failed (may already be latest)${RESET}"
-    fi
-}
-
-# ---- main ----
-echo ""
-echo -e "${BOLD}${CYAN}▶ GitHub Tools Update${RESET}"
-echo ""
-
-update_helix
-echo ""
-update_nexttrace
-echo ""
-update_cf_speedtest
-
-echo ""
-echo -e "${GREEN}Done.${RESET}"
-
-rm -rf "$TEMP_DIR"
+GITHUB_ALLOWED=1
+IPV4_ADDR=''
+TOOL_CHECK_UNVERIFIED=0
 SCRIPT_EOF
-    chmod 755 /usr/local/bin/update-tools
-    print_success "update-tools script generated (/usr/local/bin/update-tools)"
+    # Serialize shared functions instead of maintaining a second installer.
+    for helper in print_status print_success print_warning print_error print_info print_subsection run_step \
+                  command_exists download_file ensure_unzip ensure_xz ensure_bzip2 extract_archive \
+                  get_github_latest_version get_github_api_asset_url tool_skip_check \
+                  install_helix install_cf_speedtest install_nexttrace; do
+        declare -f "$helper" >> "$staged" || return 1
+    done
+    cat >> "$staged" <<'SCRIPT_FOOTER'
+printf '%sGitHub tool updates%s\n' "$BOLD" "$RESET"
+failed=(); unverified=()
+for command in hx cloudflare-speed-cli nexttrace; do
+    case "$command" in hx) installer=install_helix; label=Helix ;; cloudflare-speed-cli) installer=install_cf_speedtest; label='CF Speedtest' ;; *) installer=install_nexttrace; label=Nexttrace ;; esac
+    if ! command_exists "$command"; then print_info "$label is not installed; skipped."; continue; fi
+    TOOL_CHECK_UNVERIFIED=0
+    if "$installer"; then
+        if [ "$TOOL_CHECK_UNVERIFIED" -eq 1 ]; then unverified+=("$label"); fi
+    else
+        failed+=("$label")
+    fi
+done
+if [ "${#failed[@]}" -gt 0 ]; then
+    print_warning "RESULT: Tool updates completed with failures: ${failed[*]}"
+    exit 2
+fi
+if [ "${#unverified[@]}" -gt 0 ]; then
+    print_warning "RESULT: Latest versions could not be verified: ${unverified[*]}"
+else
+    print_success 'RESULT: Installed tool update checks completed.'
+fi
+SCRIPT_FOOTER
+    write_managed_config /usr/local/bin/update-tools 755 < "$staged" || return 1
+}
+
+configure_tool_aliases() {
+    if command_exists hx; then
+        write_managed_config /etc/profile.d/helix-alias.sh <<'EOF'
+# Generated by: debian_init.sh
+export HELIX_RUNTIME=/usr/local/lib/helix/runtime
+alias vi='hx'
+alias vim='hx'
+EOF
+    else
+        rm -f /etc/profile.d/helix-alias.sh || return 1
+    fi
+    if command_exists nexttrace; then
+        write_managed_config /etc/profile.d/nexttrace-alias.sh <<'EOF'
+# Generated by: debian_init.sh
+alias nt='nexttrace'
+EOF
+    else
+        rm -f /etc/profile.d/nexttrace-alias.sh || return 1
+    fi
+    if command_exists cloudflare-speed-cli; then
+        write_managed_config /etc/profile.d/cfspeed-alias.sh <<'EOF'
+# Generated by: debian_init.sh
+alias cf='cloudflare-speed-cli'
+EOF
+    else
+        rm -f /etc/profile.d/cfspeed-alias.sh || return 1
+    fi
 }
 
 configure_eza_aliases() {
     if ! command_exists eza; then
-        print_warning "eza not found, skipping eza aliases"
+        print_warning "eza not found, removing obsolete eza aliases"
+        rm -f /etc/profile.d/eza-alias.sh || return 1
         return
     fi
 
-    cat > /etc/profile.d/eza-alias.sh <<'EOF'
+    write_managed_config /etc/profile.d/eza-alias.sh <<'EOF'
 # Generated by: debian_init.sh
 # Do not edit manually - changes may be overwritten
 # Keep system ls behavior unchanged for compatibility in scripts and automation.
@@ -1012,23 +1163,22 @@ alias ll='eza -l --icons --group-directories-first --git'
 alias la='eza -al --icons --group-directories-first --git'
 alias lt='eza -T --icons --level=2'
 EOF
-    chmod 644 /etc/profile.d/eza-alias.sh
-    print_success "Eza aliases configured (ll, la, lt; ls kept native)"
+
+
 }
 
 configure_update_alias() {
-    cat > /etc/profile.d/update-alias.sh <<'EOF'
+    write_managed_config /etc/profile.d/update-alias.sh <<'EOF'
 # Generated by: debian_init.sh
 # Do not edit manually - changes may be overwritten
 # System-wide alias: apt update + upgrade + autoremove + GitHub tools refresh
 alias update='apt update && apt upgrade && apt autoremove -y && update-tools'
 EOF
-    chmod 644 /etc/profile.d/update-alias.sh
-    print_success "Update alias configured (update -> apt update && apt upgrade && apt autoremove -y && update-tools)"
+
+
 }
 
 configure_chrony() {
-    print_section "${ICON_TIME} Time sync & timezone"
     # Choose NTP pool based on IP
     local region_prefix=""
     case "${IP_TZ:-}" in
@@ -1047,8 +1197,8 @@ configure_chrony() {
     esac
     CHRONY_CONF="/etc/chrony/chrony.conf"
     mkdir -p /etc/chrony
-    backup_config "$CHRONY_CONF"
-    cat > "$CHRONY_CONF" <<EOF
+
+    write_managed_config "$CHRONY_CONF" <<EOF
 # Generated by: debian_init.sh
 # Do not edit manually - changes may be overwritten
 server 0.${region_prefix}pool.ntp.org iburst
@@ -1061,13 +1211,10 @@ rtcsync
 log tracking measurements statistics
 logdir /var/log/chrony
 EOF
-    systemctl enable --now chrony 2>/dev/null || true
-    print_success "chrony configured (${region_prefix:-global} pool)"
+    run_step 'Restarting Chrony' activate_service chrony || return 1
+    print_kv 'NTP pool' "${region_prefix:-global}pool.ntp.org"
 
     CURRENT_TZ=$(timedatectl show --property=Timezone --value 2>/dev/null || echo "Unknown")
-    print_kv "Current timezone" "$CURRENT_TZ"
-    print_kv "Suggested timezone" "${IP_TZ:-Unknown}"
-    echo ""
 
     # Timezone: Auto-set to IP_TZ if available and different
     if [ -n "${IP_TZ:-}" ] && [ "$IP_TZ" != "$CURRENT_TZ" ]; then
@@ -1078,46 +1225,44 @@ EOF
         else
             print_error "Failed to set timezone; keeping current."
         fi
-    else
-        print_info "Timezone already matches detection or no detection available ($CURRENT_TZ)."
     fi
     TIMEZONE_FINAL="$CURRENT_TZ"
+    print_kv 'Timezone' "$TIMEZONE_FINAL"
 }
 
 ensure_kernel_modules() {
-    print_section "${ICON_TOOL} Kernel modules"
     local modules_conf="/etc/modules-load.d/network-optimized.conf"
-    backup_config "$modules_conf"
-    echo "# Generated by: debian_init.sh" > "$modules_conf"
+
+    local staged="${TEMP_DIR}/network-modules.conf"
+    echo "# Generated by: debian_init.sh" > "$staged"
 
     # nf_conntrack must be loaded BEFORE the sysctl config is written:
     # filter_sysctl_file drops keys that aren't visible in /proc/sys yet,
     # so without this step all net.netfilter.* keys would be skipped.
-    if modprobe nf_conntrack >/dev/null 2>&1 || [ -d /proc/sys/net/netfilter ]; then
-        echo "nf_conntrack" >> "$modules_conf"
-        print_success "nf_conntrack ready (conntrack tuning will apply)"
+    if modprobe nf_conntrack >/dev/null 2>&1 || [ -r /proc/sys/net/netfilter/nf_conntrack_max ]; then
+        echo "nf_conntrack" >> "$staged"
+        print_kv 'nf_conntrack' 'Loaded'
     else
         print_warning "nf_conntrack unavailable; conntrack tuning keys will be skipped"
     fi
 
     # TLS offload (optional; only persisted when the module exists)
     if modprobe tls >/dev/null 2>&1; then
-        echo "tls" >> "$modules_conf"
-        print_success "tls module loaded (optional)"
+        echo "tls" >> "$staged"
+        print_kv 'tls' 'Loaded'
     else
         print_info "tls module not available (optional, skipped)"
     fi
+    write_managed_config "$modules_conf" < "$staged"
 }
 
 configure_journald() {
-    print_section "${ICON_TOOL} Journald limits"
     local conf_dir="/etc/systemd/journald.conf.d"
     mkdir -p "$conf_dir"
-    backup_config "${conf_dir}/99-limit.conf"
-    # Cap journal growth to keep the system partition small.
-    # rsyslog (installed by this script) keeps the full history in /var/log,
-    # so nothing is lost by restricting journald itself.
-    cat > "${conf_dir}/99-limit.conf" <<'EOF'
+
+    # Keep a longer troubleshooting window, bounded by disk usage. Rsyslog
+    # is not a complete archive of journal fields or all service output.
+    write_managed_config "${conf_dir}/99-limit.conf" <<'EOF'
 # Generated by: debian_init.sh
 # Do not edit manually - changes may be overwritten
 [Journal]
@@ -1127,11 +1272,13 @@ SystemMaxFiles=3
 RuntimeMaxUse=256M
 RuntimeMaxFileSize=128M
 RuntimeMaxFiles=3
-MaxRetentionSec=86400
+MaxRetentionSec=1209600
 MaxFileSec=259200
 EOF
-    systemctl restart systemd-journald 2>/dev/null || true
-    print_success "journald capped (384M / 1 day; rsyslog keeps full history)"
+    run_step 'Restarting journald' systemctl restart systemd-journald || return 1
+    systemctl is-active --quiet systemd-journald || return 1
+    print_kv 'Journal limits' '384 MiB disk / 256 MiB runtime / up to 14 days'
+    print_info 'Size limits may shorten journal retention.' 
 }
 
 is_sysctl_supported() {
@@ -1182,14 +1329,6 @@ detect_slaac_nics() {
 
 generate_sysctl_content() {
     local mem_mb=$((MEM_KB / 1024))
-
-    # tcp_mem is expressed in pages; scale with RAM (12% / 50% / 70% of total pages)
-    local page_size total_pages tcp_mem_min tcp_mem_pressure tcp_mem_max
-    page_size=$(getconf PAGESIZE 2>/dev/null || echo 4096)
-    total_pages=$((MEM_KB * 1024 / page_size))
-    tcp_mem_min=$((total_pages / 100 * 12))
-    tcp_mem_pressure=$((total_pages / 100 * 50))
-    tcp_mem_max=$((total_pages / 100 * 70))
 
     # Conntrack table sized by RAM (each entry costs ~300-350 bytes)
     local conntrack_max
@@ -1259,47 +1398,45 @@ net.ipv4.conf.all.rp_filter = 2
 net.ipv4.conf.default.rp_filter = 2
 
 # ============================================================================
-# Fast Failover (aggressive dead-connection detection, proxy-friendly)
+# Connection Reliability (tolerate transient loss on cross-region links)
 # ============================================================================
 # Reboot 1s after kernel panic instead of hanging
 kernel.panic = 1
-# Detect dead peers within ~126s (120s idle + 2 probes * 3s)
-net.ipv4.tcp_keepalive_time = 120
-net.ipv4.tcp_keepalive_intvl = 3
-net.ipv4.tcp_keepalive_probes = 2
-# Fail fast on unresponsive hosts
-net.ipv4.tcp_syn_retries = 2
-net.ipv4.tcp_synack_retries = 2
-net.ipv4.tcp_retries1 = 2
-net.ipv4.tcp_retries2 = 2
+# Keepalive defaults for sockets that enable SO_KEEPALIVE (applications may override).
+net.ipv4.tcp_keepalive_time = 600
+net.ipv4.tcp_keepalive_intvl = 30
+net.ipv4.tcp_keepalive_probes = 5
+# Retain standard TCP retransmission tolerance; application deadlines handle fast failover.
+net.ipv4.tcp_syn_retries = 6
+net.ipv4.tcp_synack_retries = 5
+net.ipv4.tcp_retries1 = 3
+net.ipv4.tcp_retries2 = 15
 
-# ============================================================================
-# TCP Memory (auto-scaled to RAM: 12% / 50% / 70% of total pages)
-# ============================================================================
-net.ipv4.tcp_mem = ${tcp_mem_min} ${tcp_mem_pressure} ${tcp_mem_max}
+# TCP global memory thresholds are calculated by the kernel at boot.
+# This script intentionally does not override net.ipv4.tcp_mem.
 
 # ============================================================================
 # Conntrack (requires nf_conntrack module; loaded before this config is written)
 # ============================================================================
 net.netfilter.nf_conntrack_max = ${conntrack_max}
-# Aggressive expiry keeps the table small on busy NAT/proxy boxes
-net.netfilter.nf_conntrack_tcp_timeout_established = 600
-net.netfilter.nf_conntrack_tcp_timeout_time_wait = 15
-net.netfilter.nf_conntrack_tcp_timeout_close = 5
-net.netfilter.nf_conntrack_tcp_timeout_close_wait = 5
-net.netfilter.nf_conntrack_tcp_timeout_fin_wait = 30
-net.netfilter.nf_conntrack_tcp_timeout_last_ack = 5
-net.netfilter.nf_conntrack_tcp_timeout_max_retrans = 5
-net.netfilter.nf_conntrack_tcp_timeout_syn_recv = 5
-net.netfilter.nf_conntrack_tcp_timeout_syn_sent = 5
-net.netfilter.nf_conntrack_tcp_timeout_unacknowledged = 5
-net.netfilter.nf_conntrack_udp_timeout = 5
-net.netfilter.nf_conntrack_udp_timeout_stream = 60
-net.netfilter.nf_conntrack_icmp_timeout = 5
-net.netfilter.nf_conntrack_icmpv6_timeout = 5
-net.netfilter.nf_conntrack_generic_timeout = 10
-net.netfilter.nf_conntrack_gre_timeout = 5
-net.netfilter.nf_conntrack_gre_timeout_stream = 30
+# Use Linux 6.12 default protocol timeouts to preserve NAT/conntrack state during loss or idle periods.
+net.netfilter.nf_conntrack_tcp_timeout_established = 432000
+net.netfilter.nf_conntrack_tcp_timeout_time_wait = 120
+net.netfilter.nf_conntrack_tcp_timeout_close = 10
+net.netfilter.nf_conntrack_tcp_timeout_close_wait = 60
+net.netfilter.nf_conntrack_tcp_timeout_fin_wait = 120
+net.netfilter.nf_conntrack_tcp_timeout_last_ack = 30
+net.netfilter.nf_conntrack_tcp_timeout_max_retrans = 300
+net.netfilter.nf_conntrack_tcp_timeout_syn_recv = 60
+net.netfilter.nf_conntrack_tcp_timeout_syn_sent = 120
+net.netfilter.nf_conntrack_tcp_timeout_unacknowledged = 300
+net.netfilter.nf_conntrack_udp_timeout = 30
+net.netfilter.nf_conntrack_udp_timeout_stream = 120
+net.netfilter.nf_conntrack_icmp_timeout = 30
+net.netfilter.nf_conntrack_icmpv6_timeout = 30
+net.netfilter.nf_conntrack_generic_timeout = 600
+net.netfilter.nf_conntrack_gre_timeout = 30
+net.netfilter.nf_conntrack_gre_timeout_stream = 180
 
 SYSCTL
 
@@ -1336,19 +1473,13 @@ SYSCTL
         # < 1GB RAM Profile: Aggressive response, tighter buffers
         cat <<SYSCTL
 # ============================================================================
-# Profile: < 1GB RAM (Aggressive Response)
+# VM settings: < 1GB RAM
 # ============================================================================
 
 # --- Core: Aggressive Response Speed ---
 # Disable slow start after idle to ensure full speed immediately
 net.ipv4.tcp_slow_start_after_idle = 0
 
-# --- Buffers: Tight Configuration (32MB) ---
-# 1Gbps@200ms needs ~25MB. 32MB covers jitter without OOM risk on 512MB RAM.
-net.core.rmem_max = 33554432
-net.core.wmem_max = 33554432
-net.ipv4.tcp_rmem = 8192 87380 33554432
-net.ipv4.tcp_wmem = 8192 65536 33554432
 
 # --- Congestion Control Tuning ---
 # Very low notsent threshold to reduce latency
@@ -1365,25 +1496,19 @@ net.ipv4.tcp_fastopen = 3
 net.ipv4.tcp_mtu_probing = 1
 # Aggressive connection recycling for small memory
 net.ipv4.tcp_fin_timeout = 15
-net.ipv4.tcp_tw_reuse = 1
+net.ipv4.tcp_tw_reuse = 2
 SYSCTL
     else
         # >= 1GB RAM Profile: Performance & Stability
         cat <<SYSCTL
 # ============================================================================
-# Profile: >= 1GB RAM (Performance & Stability)
+# VM settings: >= 1GB RAM
 # ============================================================================
 
 # --- Core: Aggressive Response Speed ---
 # Disable slow start after idle
 net.ipv4.tcp_slow_start_after_idle = 0
 
-# --- Buffers: Luxury Configuration (64MB) ---
-# Can handle 400ms+ jitter at Gigabit speeds. Safe for >1GB RAM.
-net.core.rmem_max = 67108864
-net.core.wmem_max = 67108864
-net.ipv4.tcp_rmem = 8192 262144 67108864
-net.ipv4.tcp_wmem = 8192 262144 67108864
 
 # --- Congestion Control Tuning ---
 net.ipv4.tcp_notsent_lowat = 16384
@@ -1397,35 +1522,51 @@ vm.panic_on_oom = 0
 net.ipv4.tcp_fastopen = 3
 net.ipv4.tcp_mtu_probing = 1
 net.ipv4.tcp_fin_timeout = 15
-net.ipv4.tcp_tw_reuse = 1
+net.ipv4.tcp_tw_reuse = 2
 # Increased queue depth for high concurrency
 net.core.somaxconn = 4096
 net.ipv4.tcp_max_syn_backlog = 4096
 SYSCTL
     fi
+    if [ "$BUFFER_PROFILE" != default ]; then
+        local cap=33554432
+        [ "$BUFFER_PROFILE" != 64m ] || cap=67108864
+        cat <<SYSCTL
+
+# Selected transfer buffer profile: ${BUFFER_PROFILE}
+# Initial buffers stay small; limits allow automatic growth as needed.
+net.ipv4.tcp_moderate_rcvbuf = 1
+net.core.rmem_max = ${cap}
+net.core.wmem_max = ${cap}
+net.ipv4.tcp_rmem = 4096 131072 ${cap}
+net.ipv4.tcp_wmem = 4096 16384 ${cap}
+SYSCTL
+    fi
 }
 
 apply_network_sysctl() {
-    print_section "${ICON_INFO} Network tuning"
 
     local tmpfile
     tmpfile="${TEMP_DIR}/sysctl_network.conf"
 
+    track_kernel_default_reset || return 1
     generate_sysctl_content > "$tmpfile"
 
     mkdir -p /etc/sysctl.d
-    backup_config "$SYSCTL_NETWORK_FILE"
-    : > "$SYSCTL_NETWORK_FILE"
-    filter_sysctl_file "$tmpfile" "$SYSCTL_NETWORK_FILE"
 
-    print_success "Network tuning config written to $SYSCTL_NETWORK_FILE"
+    local filtered="${TEMP_DIR}/sysctl_filtered.conf"
+    : > "$filtered"
+    filter_sysctl_file "$tmpfile" "$filtered"
+    write_managed_config "$SYSCTL_NETWORK_FILE" < "$filtered"
+
+
 }
 
 apply_ipv6_sysctl() {
     mkdir -p /etc/sysctl.d
     if [ "$DISABLE_IPV6" -eq 1 ]; then
-        backup_config "$SYSCTL_IPV6_FILE"
-        cat > "$SYSCTL_IPV6_FILE" <<'EOF'
+
+        write_managed_config "$SYSCTL_IPV6_FILE" <<'EOF'
 # ============================================================================
 # Generated by: debian_init.sh
 # Do not edit manually - changes may be overwritten
@@ -1436,23 +1577,92 @@ net.ipv6.conf.all.disable_ipv6 = 1
 net.ipv6.conf.default.disable_ipv6 = 1
 net.ipv6.conf.lo.disable_ipv6 = 1
 EOF
-        print_success "IPv6 disabled ($SYSCTL_IPV6_FILE)"
+        print_kv 'IPv6 protocol' 'Disabled'
     else
         # Enable IPv6 immediately (kernel defaults to 0 = enabled)
-        sysctl -w net.ipv6.conf.all.disable_ipv6=0 >/dev/null 2>&1 || true
-        sysctl -w net.ipv6.conf.default.disable_ipv6=0 >/dev/null 2>&1 || true
-        sysctl -w net.ipv6.conf.lo.disable_ipv6=0 >/dev/null 2>&1 || true
+        sysctl -w net.ipv6.conf.all.disable_ipv6=0 >/dev/null || return 1
+        sysctl -w net.ipv6.conf.default.disable_ipv6=0 >/dev/null || return 1
+        sysctl -w net.ipv6.conf.lo.disable_ipv6=0 >/dev/null || return 1
         # Remove IPv6 disable config if exists
         if [ -f "$SYSCTL_IPV6_FILE" ]; then
             rm -f "$SYSCTL_IPV6_FILE"
         fi
-        print_success "IPv6 enabled"
+        print_kv 'IPv6 protocol' 'Enabled'
     fi
 }
 
+configure_ipv6_choice() {
+    local disabled ssh_peer
+    disabled=$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null) || {
+        print_info "IPv6 sysctl unavailable; skipping IPv6 options."
+        return 0
+    }
+    if [ "$disabled" = "1" ]; then
+        # A disabled stack cannot pass an external IPv6 probe. Still offer
+        # recovery, and preserve the old state if input is unavailable.
+        if ask_yes_no "Enable IPv6?"; then
+            DISABLE_IPV6=0
+            apply_ipv6_sysctl || return 1
+            IPV6_ADDR="N/A"
+            IPV6_STATUS="enabled; external connectivity not rechecked"
+        fi
+        return 0
+    fi
+
+    local local_addresses
+    if ! local_addresses=$(ipv6_usable_addresses); then
+        print_info 'IPv6 address state could not be checked; keeping the stack unchanged.'
+        return 0
+    fi
+    if [ -z "$local_addresses" ]; then
+        print_info 'No usable global IPv6 address detected; disable prompt skipped.'
+        return 0
+    fi
+
+    # Require both a previously successful IPv4 probe and an IPv4 route.
+    # Failure is conservative: leave the working network unchanged.
+    if [ -z "${IPV4_ADDR:-}" ] || [ "$IPV4_ADDR" = "N/A" ] ||
+       ! ip -4 route get 1.1.1.1 >/dev/null 2>&1; then
+        print_warning "IPv4 connectivity not confirmed; IPv6 disabling is unavailable."
+        return 0
+    fi
+    ssh_peer=${SSH_CONNECTION:-}
+    ssh_peer=${ssh_peer%% *}
+    if [[ "$ssh_peer" == *:* ]]; then
+        print_warning "Current SSH connection uses IPv6; keeping IPv6 enabled."
+        return 0
+    fi
+    if ask_yes_no "Disable IPv6?"; then
+        DISABLE_IPV6=1
+        apply_ipv6_sysctl || return 1
+        sysctl -p "$SYSCTL_IPV6_FILE" >/dev/null || return 1
+        [ "$(sysctl -n net.ipv6.conf.all.disable_ipv6)" = "1" ] || return 1
+    fi
+}
+
+ipv6_usable_addresses() {
+    ip -6 -o addr show scope global 2>/dev/null | awk '
+        /inet6/ && $0 !~ /(^|[[:space:]])(tentative|dadfailed)([[:space:]]|$)/ {
+            for (i=1; i<NF; i++) if ($i == "inet6") { print $(i+1); break }
+        }'
+}
+
 show_ipv6_status() {
-    print_info "Checking IPv6 status..."
-    print_kv "IPv6" "$(ipv6_status_text)"
+    local addresses first
+    # Refresh local configuration before presenting an action; a failed
+    # external lookup must not be described as a provider assignment fact.
+    if addresses=$(ipv6_usable_addresses); then
+        if [ -z "$addresses" ]; then
+            IPV6_ADDR="N/A"
+            IPV6_STATUS='no global IPv6 address detected'
+        elif [ "${IPV6_ADDR:-N/A}" = N/A ] ||
+             ! awk -F/ '{print $1}' <<< "$addresses" | grep -iqxF "${IPV6_ADDR:-N/A}"; then
+            first=${addresses%%$'\n'*}
+            IPV6_ADDR="N/A"
+            IPV6_STATUS="address assigned (${first%/*}); external connectivity unconfirmed"
+        fi
+    fi
+    print_kv 'Current state' "$(ipv6_status_text)"
 }
 
 # Populates CURRENT_KERNEL / LATEST_KERNEL (latest installed vs running).
@@ -1474,71 +1684,145 @@ ipv6_status_text() {
     elif [ -n "${IPV6_STATUS:-}" ]; then
         echo "${YELLOW}${IPV6_STATUS}${RESET}"
     else
-        echo "${YELLOW}not assigned by provider${RESET}"
+        echo "${YELLOW}no global IPv6 address detected${RESET}"
     fi
 }
 
 show_kernel_info() {
-    print_info "Checking kernel status..."
-
-    # Cloud Kernel is tailored for virtualized environments and omits many
-    # hardware drivers; warn before installing on bare metal.
-    local virt
-    virt=$(systemd-detect-virt 2>/dev/null || echo "unknown")
-    if [ "$virt" = "none" ] || [ "$virt" = "unknown" ]; then
-        print_warning "Detected bare-metal/unknown environment ($virt). Cloud Kernel omits many hardware drivers and may break networking/storage on physical machines."
-    fi
-
-    local current_kernel latest_kernel
+    local package="linux-image-cloud-${ARCH_DEB}" record status installed="" candidate policy
+    record=$(dpkg-query -W -f='${Status}\n${Version}' "$package" 2>/dev/null || true)
+    status=${record%%$'\n'*}
+    if [[ "$status" == *' ok installed' ]]; then installed=${record#*$'\n'}; fi
+    policy=$(LC_ALL=C apt-cache policy "$package" 2>/dev/null || true)
+    candidate=$(awk '$1 == "Candidate:" { print $2; exit }' <<< "$policy")
     detect_kernel_versions
-    current_kernel="$CURRENT_KERNEL"
-    latest_kernel="$LATEST_KERNEL"
-
-    print_kv "Current Kernel" "$current_kernel"
-    if [ -n "$latest_kernel" ] && [ "$latest_kernel" != "$current_kernel" ]; then
-        print_kv "Latest Installed" "$latest_kernel (will load on reboot)"
+    if [ -n "$installed" ]; then print_kv 'Package' 'Installed'; else print_kv 'Package' 'Not installed'; fi
+    print_kv 'Running version' "$CURRENT_KERNEL"
+    print_kv 'Latest installed' "${LATEST_KERNEL:-Not detected}"
+    # Compare APT package versions, not uname strings or /boot filenames.
+    # Equal running/installed image names do not prove the repository is current.
+    CLOUD_KERNEL_ACTION=unknown
+    if [ -z "$candidate" ] || [ "$candidate" = '(none)' ]; then
+        print_kv 'Source candidate' 'Unavailable'
+        print_warning 'Cannot determine an installable cloud-kernel candidate; no install/update is offered.'
+        return 0
     fi
-
-    # Check if cloud kernel package is already installed
-    if dpkg -l "linux-image-cloud-${ARCH_DEB}" 2>/dev/null | grep -q "^ii"; then
-        print_success "Cloud Kernel already installed"
-        return 1
+    if [ -n "$installed" ]; then
+        print_kv 'Package installed / candidate' "$installed / $candidate"
+        if dpkg --compare-versions "$candidate" gt "$installed"; then
+            CLOUD_KERNEL_ACTION=update
+        else
+            CLOUD_KERNEL_ACTION=none
+        fi
+    else
+        print_kv 'Source candidate' "$candidate"
+        CLOUD_KERNEL_ACTION=install
     fi
-    return 0
+}
+
+configure_cloud_kernel_choice() {
+    print_subsection 'Cloud kernel'
+    show_kernel_info || return 1
+    case "$CLOUD_KERNEL_ACTION" in
+        none)
+            print_success 'No cloud-kernel update is offered by the current package sources.'
+            if [ -n "$LATEST_KERNEL" ] && [ "$LATEST_KERNEL" != "$CURRENT_KERNEL" ]; then
+                print_info 'An installed kernel differs from the running one; check the selected kernel after a planned reboot.'
+            fi
+            ;;
+        install|update)
+            local virt prompt
+            virt=$(systemd-detect-virt 2>/dev/null || true)
+            if [ -z "$virt" ] || [ "$virt" = none ]; then
+                print_warning 'Cloud kernels omit hardware drivers; verify suitability before installing on bare metal.'
+            fi
+            if [ "$CLOUD_KERNEL_ACTION" = install ]; then prompt='Install cloud kernel?'; else prompt='Update cloud kernel to the source candidate?'; fi
+            if ask_yes_no "$prompt" n; then
+                install_cloud_kernel || return 1
+            else
+                print_info 'No additional kernel installation requested; boot configuration is unchanged here.'
+            fi
+            ;;
+        unknown) : ;;
+    esac
 }
 
 install_cloud_kernel() {
-    echo ""
-    print_info "Installing Cloud Kernel..."
-    if apt-get install $APT_INSTALL_OPTS "linux-image-cloud-${ARCH_DEB}"; then
-        print_success "Cloud Kernel installed"
-        print_info "Updating GRUB..."
-        update-grub 2>/dev/null || true
+    run_step 'Installing/updating cloud kernel' apt-get install $APT_INSTALL_OPTS "linux-image-cloud-${ARCH_DEB}" || return 1
+    if command_exists update-grub; then
+        run_step 'Updating GRUB configuration' update-grub || return 1
     else
-        print_error "Failed to install Cloud Kernel"
+        print_warning 'No GRUB update command found; verify your bootloader before rebooting.'
     fi
+    detect_kernel_versions
+    if [ -n "$LATEST_KERNEL" ] && [ "$LATEST_KERNEL" != "$CURRENT_KERNEL" ]; then KERNEL_BOOT_PENDING=1; fi
+    print_info 'Kernel installation does not reboot the server. Check uname -r after reboot.'
+}
+
+detect_ssh_ports() {
+    local config ports
+    # Effective daemon configuration includes Include files. An existing
+    # service may also use socket activation or command-line overrides;
+    # include its live listening ports when sshd owns the socket.
+    config=$(sshd -T) || return 1
+    ports=$(
+        {
+            awk '$1 == "port" && $2 ~ /^[0-9]+$/ { print $2 }' <<< "$config"
+            ss -H -ltnp 2>/dev/null | awk '/"sshd"/ { n = split($4, a, ":"); if (a[n] ~ /^[0-9]+$/) print a[n] }'
+        } | sort -nu | paste -sd, -
+    ) || return 1
+    [ -n "$ports" ] || { print_error "Unable to determine SSH ports." >&2; return 1; }
+    printf '%s\n' "$ports"
 }
 
 install_base_packages() {
-    print_section "${ICON_PKG} Installing base packages"
-    apt-get install -y -o=Dpkg::Use-Pty=0 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold rsyslog openssl gnupg cron chrony fail2ban python3-systemd logrotate nano vnstat nload htop unzip unattended-upgrades eza duf bat zoxide || print_warning "Some base packages failed to install"
-
-    # Debian ships bat as batcat on some releases; expose it through a shell alias.
-    cat > /etc/profile.d/bat-alias.sh <<'EOF'
+    print_subsection 'Required packages'
+    local package status missing=()
+    local packages=(rsyslog openssl gnupg cron chrony fail2ban python3-systemd logrotate nano vnstat nload htop unzip unattended-upgrades eza duf bat zoxide)
+    for package in "${packages[@]}"; do
+        status=$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null || true)
+        [[ "$status" == *' ok installed' ]] || missing+=("$package")
+    done
+    if [ "${#missing[@]}" -gt 0 ]; then
+        run_step 'Installing missing packages' apt-get install $APT_INSTALL_OPTS "${missing[@]}" || return 1
+    else
+        print_success "All ${#packages[@]} required packages are installed."
+    fi
+    write_managed_config /etc/profile.d/bat-alias.sh <<'EOF'
 # Generated by: debian_init.sh
-# Do not edit manually - changes may be overwritten
-# Only alias bat to batcat when the real `bat` binary is not installed.
 command -v bat >/dev/null 2>&1 || alias bat='batcat'
 EOF
-    chmod 644 /etc/profile.d/bat-alias.sh
-    print_success "bat alias configured (bat -> batcat)"
+}
 
+activate_service() {
+    local service="$1"
+    systemctl enable "$service" || return 1
+    systemctl restart "$service" || return 1
+    systemctl is-active --quiet "$service"
+}
+
+restart_fail2ban() {
+    activate_service fail2ban || return 1
+    local attempt
+    for attempt in {1..10}; do
+        if fail2ban-client status sshd >/dev/null 2>&1; then return 0; fi
+        sleep 1
+    done
+    print_error 'Fail2Ban SSH jail did not become ready.'
+    return 1
+}
+
+configure_fail2ban() {
+    print_subsection 'SSH protection'
     # Ensure rsyslog is enabled and started
-    systemctl enable --now rsyslog 2>/dev/null || true
+    run_step 'Starting rsyslog' systemctl enable --now rsyslog || return 1
+    systemctl is-active --quiet rsyslog || return 1
 
     # Configure Fail2Ban (systemd backend)
-    backup_config /etc/fail2ban/jail.local
-    cat > /etc/fail2ban/jail.local <<EOF
+    local ssh_ports
+    ssh_ports=$(detect_ssh_ports) || return 1
+
+    write_managed_config /etc/fail2ban/jail.local <<EOF
 # Generated by: debian_init.sh
 # Do not edit manually - changes may be overwritten
 [DEFAULT]
@@ -1550,10 +1834,16 @@ maxretry = 5
 enabled = true
 backend = systemd
 mode = normal
-port = ssh
+port = ${ssh_ports}
 EOF
-    systemctl enable --now fail2ban 2>/dev/null || true
+    run_step --silent "Validate Fail2Ban" fail2ban-client -t || { print_error "Fail2Ban configuration validation failed."; return 1; }
+    run_step 'Restarting Fail2Ban and checking SSH jail' restart_fail2ban || return 1
+    print_kv 'Protected SSH ports' "$ssh_ports"
 
+}
+
+configure_auto_updates() {
+    print_subsection 'Automatic updates'
     # Configure unattended-upgrades for security updates only.
     # The Origins-Pattern must reference the real suite (e.g. trixie-security);
     # a literal ${...} placeholder would silently match nothing, so the
@@ -1561,8 +1851,8 @@ EOF
     local distro_codename
     distro_codename=$(. /etc/os-release 2>/dev/null && echo "${VERSION_CODENAME:-}")
     distro_codename=${distro_codename:-trixie}
-    backup_config /etc/apt/apt.conf.d/50unattended-upgrades
-    cat > /etc/apt/apt.conf.d/50unattended-upgrades <<EOF
+
+    write_managed_config /etc/apt/apt.conf.d/50unattended-upgrades <<EOF
 // Generated by: debian_init.sh
 // Do not edit manually - changes may be overwritten
 Unattended-Upgrade::Origins-Pattern {
@@ -1575,8 +1865,8 @@ Unattended-Upgrade::Remove-Unused-Dependencies "true";
 EOF
 
     # Enable automatic updates
-    backup_config /etc/apt/apt.conf.d/20auto-upgrades
-    cat > /etc/apt/apt.conf.d/20auto-upgrades <<'EOF'
+
+    write_managed_config /etc/apt/apt.conf.d/20auto-upgrades <<'EOF'
 // Generated by: debian_init.sh
 // Do not edit manually - changes may be overwritten
 APT::Periodic::Update-Package-Lists "1";
@@ -1584,194 +1874,362 @@ APT::Periodic::Unattended-Upgrade "1";
 APT::Periodic::AutocleanInterval "7";
 EOF
 
-    print_success "Base packages installed"
+    run_step 'Enabling security update timers' systemctl enable --now apt-daily.timer apt-daily-upgrade.timer || return 1
+    systemctl is-active --quiet apt-daily.timer || return 1
+    systemctl is-active --quiet apt-daily-upgrade.timer || return 1
+    print_kv 'Update scope' 'Debian security updates'
+    print_kv 'Update timers' 'Active'
+}
+
+verify_sysctl_file() {
+    local file="$1" line key expected actual failed=0
+    [ -f "$file" ] || return 0
+    while IFS= read -r line || [ -n "$line" ]; do
+        line=${line%%#*}
+        [[ "$line" == *'='* ]] || continue
+        key=$(printf '%s' "${line%%=*}" | xargs)
+        expected=$(printf '%s' "${line#*=}" | xargs)
+        if ! actual=$(sysctl -n "$key"); then
+            print_error "Cannot read applied sysctl: $key" >&2
+            failed=1
+            continue
+        fi
+        actual=$(printf '%s' "$actual" | xargs)
+        if [ "$actual" != "$expected" ]; then
+            print_error "$key: expected '$expected', got '$actual'; check other sysctl files for overrides." >&2
+            failed=1
+        fi
+    done < "$file"
+    [ "$failed" -eq 0 ]
 }
 
 apply_all_sysctl() {
-    # Ensure BBR module is available before applying congestion control settings.
     modprobe tcp_bbr 2>/dev/null || true
-    backup_config /etc/modules-load.d/tcp_bbr.conf
-    { echo "# Generated by: debian_init.sh"; echo "tcp_bbr"; } > /etc/modules-load.d/tcp_bbr.conf 2>/dev/null || true
+    printf '# Generated by: debian_init.sh\ntcp_bbr\n' | write_managed_config /etc/modules-load.d/tcp_bbr.conf
+    run_step --quiet 'Applying kernel parameters' sysctl --system || return 1
+    run_step --quiet 'Reading back TCP parameters' verify_network_state || return 1
+    print_kv 'TCP data retries' "$(sysctl -n net.ipv4.tcp_retries1) / $(sysctl -n net.ipv4.tcp_retries2)"
+    print_kv 'SYN retries' "$(sysctl -n net.ipv4.tcp_syn_retries) / $(sysctl -n net.ipv4.tcp_synack_retries)"
+    print_kv 'Keepalive (s / s / probes)' "$(sysctl -n net.ipv4.tcp_keepalive_time) / $(sysctl -n net.ipv4.tcp_keepalive_intvl) / $(sysctl -n net.ipv4.tcp_keepalive_probes)"
+    print_kv 'TIME_WAIT reuse' 'Loopback only'
+    print_kv 'Connection tracking' 'Standard protocol timeouts'
+    print_kv 'Selected buffer profile' "$(buffer_profile_label)"
+    print_kv 'Current receive / send caps' "$(current_buffer_caps)"
+    print_kv 'TCP global memory override' 'Removed; kernel-managed after any required reboot'
+    if [ "$KERNEL_RESET_REQUIRED" -eq 1 ]; then print_warning 'Reboot is required to clear previous TCP memory/buffer overrides.'; fi
+}
 
-    # Sanity check: with IPv6 forwarding enabled, every SLAAC NIC must carry
-    # its own accept_ra=2 (conf/all and conf/default never propagate to
-    # interfaces that already exist, e.g. eth0).
-    if [ "$(sysctl -n net.ipv6.conf.all.forwarding 2>/dev/null || echo 0)" = "1" ]; then
-        local nic nic_ra
-        for nic in $(detect_slaac_nics); do
-            nic_ra=$(sysctl -n "net.ipv6.conf.${nic}.accept_ra" 2>/dev/null || echo "?")
-            if [ "$nic_ra" != "2" ]; then
-                print_warning "${nic}: accept_ra=${nic_ra} while IPv6 forwarding is on; SLAAC IPv6 will break after reboot"
+verify_network_state() {
+    verify_sysctl_file "$SYSCTL_NETWORK_FILE" || return 1
+    verify_sysctl_file "$SYSCTL_IPV6_FILE"
+}
+
+current_buffer_caps() {
+    local receive send
+    receive=$(sysctl -n net.ipv4.tcp_rmem | awk '{printf "%.1f",$3/1048576}') || return 1
+    send=$(sysctl -n net.ipv4.tcp_wmem | awk '{printf "%.1f",$3/1048576}') || return 1
+    printf '%s MiB / %s MiB' "$receive" "$send"
+}
+
+verify_managed_state() {
+    local f line module apt_state journal_state key expected actual
+    for module in chrony fail2ban rsyslog systemd-journald apt-daily.timer apt-daily-upgrade.timer; do
+        systemctl is-active --quiet "$module" || { print_error "Required service is not active: $module"; return 1; }
+    done
+    fail2ban-client status sshd >/dev/null || return 1
+    if [ "$DOCKER_ACTION" = start ]; then
+        systemctl is-active --quiet docker.service || return 1
+        systemctl is-enabled --quiet docker.service || return 1
+    elif [ "$DOCKER_ACTION" = stop ]; then
+        local unit
+        while IFS= read -r unit; do
+            if systemctl is-active --quiet "$unit" || systemctl is-enabled --quiet "$unit"; then return 1; fi
+        done < <(docker_units)
+    fi
+    if [ -n "$THP_SELECTED" ]; then
+        [ "$(read_thp_mode /sys/kernel/mm/transparent_hugepage/enabled)" = "$THP_SELECTED" ] || return 1
+        [ "$(read_thp_mode /sys/kernel/mm/transparent_hugepage/defrag)" = "$THP_DEFRAG_SELECTED" ] || return 1
+        systemctl is-enabled --quiet debian-init-thp.service || return 1
+    fi
+    verify_sysctl_file "$SYSCTL_NETWORK_FILE" || return 1
+    verify_sysctl_file "$SYSCTL_IPV6_FILE" || return 1
+    for f in /etc/modules-load.d/network-optimized.conf /etc/modules-load.d/tcp_bbr.conf; do
+        while IFS= read -r line || [ -n "$line" ]; do
+            module=$(printf '%s' "${line%%#*}" | xargs)
+            [ -n "$module" ] || continue
+            [ -d "/sys/module/${module//-/_}" ] || { print_error "Configured module is not loaded: $module"; return 1; }
+        done < "$f"
+    done
+    apt_state=$(apt-config dump) || return 1
+    for key in Update-Package-Lists Unattended-Upgrade; do
+        grep -qxF "APT::Periodic::${key} \"1\";" <<< "$apt_state" || {
+            print_error "APT periodic setting is not effective: $key"; return 1;
+        }
+    done
+    # Inspect the merged journal configuration so later drop-ins cannot
+    # silently override settings while the summary reports success.
+    journal_state=$(systemd-analyze cat-config systemd/journald.conf) || return 1
+    while read -r key expected; do
+        actual=$(awk -F= -v key="$key" '
+            /^[[:space:]]*\[/ { section=$0; gsub(/[[:space:]]/, "", section) }
+            section == "[Journal]" && $0 !~ /^[[:space:]]*[#;]/ {
+                name=$1; gsub(/[[:space:]]/, "", name)
+                if (name == key) { value=$2; gsub(/[[:space:]]/, "", value) }
+            }
+            END { print value }' <<< "$journal_state")
+        [ "$actual" = "$expected" ] || { print_error "Effective journald $key: expected $expected, got $actual"; return 1; }
+    done <<'SETTINGS'
+SystemMaxUse 384M
+SystemMaxFileSize 128M
+SystemMaxFiles 3
+RuntimeMaxUse 256M
+RuntimeMaxFileSize 128M
+RuntimeMaxFiles 3
+MaxRetentionSec 1209600
+MaxFileSec 259200
+SETTINGS
+
+}
+
+docker_units() {
+    printf '%s\n' docker.service
+    if systemctl cat docker.socket >/dev/null 2>&1; then printf '%s\n' docker.socket; fi
+}
+
+set_docker_state() {
+    local action="$1" unit units=()
+    if [ "$action" = start ]; then
+        systemctl enable --now docker.service || return 1
+        systemctl is-active --quiet docker.service || return 1
+        systemctl is-enabled --quiet docker.service || return 1
+    else
+        while IFS= read -r unit; do units+=("$unit"); done < <(docker_units)
+        systemctl disable --now "${units[@]}" || return 1
+        for unit in "${units[@]}"; do
+            if systemctl is-active --quiet "$unit" || systemctl is-enabled --quiet "$unit"; then
+                print_error "$unit did not stop/disable as requested."
+                return 1
             fi
         done
     fi
+    DOCKER_ACTION="$action"
+}
 
-    local err
-    err=$(sysctl --system 2>&1 >/dev/null || true)
-    if [ -n "$err" ]; then
-        print_warning "sysctl reported issues (may be harmless on this kernel):"
-        echo "$err" | sed 's/^/    /'
+configure_docker_choice() {
+    print_subsection 'Docker'
+    if ! command_exists docker; then
+        print_kv 'Package' 'Not installed'
+        if ask_yes_no 'Install Docker?' n; then install_docker || return 1; else return 0; fi
     fi
-    BBR_APPLIED=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "unknown")
-    QDISC_APPLIED=$(sysctl -n net.core.default_qdisc 2>/dev/null || echo "unknown")
-    print_success "sysctl applied (BBR: $BBR_APPLIED, qdisc: $QDISC_APPLIED)"
-    if [ "$BBR_APPLIED" != "bbr" ]; then
-        print_warning "BBR not active (got: $BBR_APPLIED). Kernel may lack tcp_bbr module."
+    local version state startup choice
+    version=$(docker --version 2>/dev/null || true)
+    state=$(systemctl is-active docker.service 2>/dev/null || true)
+    startup=$(systemctl is-enabled docker.service 2>/dev/null || true)
+    print_kv 'Version' "${version:-Unknown}"
+    print_kv 'Service' "${state:-Unknown}"
+    print_kv 'Start at boot' "${startup:-Unknown}"
+    if ! can_prompt; then print_info 'No terminal; Docker state retained.'; return 0; fi
+    printf '\n    1) Keep current state\n    2) Start Docker and enable it at boot\n    3) Stop Docker and disable it at boot\n'
+    while true; do
+        if ! read_tty_value choice 'Select [1]:'; then return 0; fi
+        case "$choice" in
+            ''|1) print_info 'Docker state retained.'; return 0 ;;
+            2) run_step 'Starting/enabling Docker' set_docker_state start; return $? ;;
+            3)
+                print_warning 'Stopping Docker can interrupt running containers and dependent services.'
+                if ask_yes_no 'Stop Docker and disable startup? Confirm' n; then
+                    run_step 'Stopping/disabling Docker' set_docker_state stop || return 1
+                else
+                    print_info 'Docker state retained.'
+                fi
+                return 0 ;;
+            *) print_warning 'Choose 1, 2 or 3.' ;;
+        esac
+    done
+}
+
+read_thp_mode() {
+    local file="$1"
+    sed -nE 's/.*\[([^]]+)\].*/\1/p' "$file" 2>/dev/null
+}
+
+verify_thp_unit() {
+    local unit="$1" isolated target status=0
+    isolated=$(mktemp -d "${TEMP_DIR}/thp-verify.XXXXXX") || return 1
+    cp "$unit" "$isolated/debian-init-thp.service" || { rm -rf "$isolated"; return 1; }
+    for target in sysinit.target local-fs.target basic.target; do
+        printf '[Unit]\nDescription=THP syntax validation target\nDefaultDependencies=no\n' > "$isolated/$target" || { rm -rf "$isolated"; return 1; }
+    done
+    SYSTEMD_UNIT_PATH="$isolated" systemd-analyze verify --generators=no --man=no --recursive-errors=no "$isolated/debian-init-thp.service" || status=$?
+    rm -rf "$isolated"
+    return "$status"
+}
+
+apply_thp_mode() {
+    local mode="$1" defrag="$2" unit=/etc/systemd/system/debian-init-thp.service
+    case "$mode" in always|madvise|never) ;; *) return 1 ;; esac
+    case "$defrag" in always|defer|defer+madvise|madvise|never) ;; *) return 1 ;; esac
+    write_managed_config "$unit" <<EOF || return 1
+# Generated by: debian_init.sh
+[Unit]
+Description=Apply selected Transparent Huge Pages mode
+DefaultDependencies=no
+After=sysinit.target local-fs.target
+ConditionPathIsReadWrite=/sys/kernel/mm/transparent_hugepage/enabled
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'echo ${mode} > /sys/kernel/mm/transparent_hugepage/enabled && echo ${defrag} > /sys/kernel/mm/transparent_hugepage/defrag'
+[Install]
+WantedBy=basic.target
+EOF
+    verify_thp_unit "$unit" || return 1
+    systemctl daemon-reload || return 1
+    systemctl enable debian-init-thp.service || return 1
+    systemctl restart debian-init-thp.service || return 1
+    [ "$(read_thp_mode /sys/kernel/mm/transparent_hugepage/enabled)" = "$mode" ] || return 1
+    [ "$(read_thp_mode /sys/kernel/mm/transparent_hugepage/defrag)" = "$defrag" ] || return 1
+    THP_SELECTED="$mode"
+    THP_DEFRAG_SELECTED="$defrag"
+}
+
+configure_thp_choice() {
+    print_subsection 'Transparent Huge Pages'
+    local mode defrag
+    mode=$(read_thp_mode /sys/kernel/mm/transparent_hugepage/enabled || true)
+    defrag=$(read_thp_mode /sys/kernel/mm/transparent_hugepage/defrag || true)
+    case "$mode" in always|madvise|never) ;; *) print_info 'THP is not supported; skipped.'; return 0 ;; esac
+    case "$defrag" in always|defer|defer+madvise|madvise|never) ;; *) print_warning 'Unknown THP defrag mode; leaving THP unchanged.'; return 0 ;; esac
+    print_kv 'Current mode' "$mode"
+    print_kv 'Defragmentation' "$defrag"
+    if [ "$mode" = never ]; then
+        if ask_yes_no 'Enable THP in madvise mode?' n; then mode=madvise; defrag=madvise; fi
+    else
+        if ask_yes_no 'Disable THP?' n; then mode=never; defrag=never; fi
     fi
+    run_step 'Persisting selected THP mode' apply_thp_mode "$mode" "$defrag" || return 1
+    print_kv 'Selected mode' "$THP_SELECTED"
+}
+
+configure_optional_components() {
+    configure_cloud_kernel_choice || return 1
+    configure_docker_choice || return 1
+    configure_thp_choice || return 1
+    print_subsection 'IPv6'
+    show_ipv6_status
+    configure_ipv6_choice || return 1
 }
 
 show_report() {
-    print_section "${ICON_DONE} Summary"
-
-    print_subsection "Network"
-    print_kv "BBR" "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo '?')"
-    print_kv "Queueing" "$(sysctl -n net.core.default_qdisc 2>/dev/null || echo '?')"
-    local ct_count ct_max
-    ct_count=$(cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null || echo "-")
-    ct_max=$(cat /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null || echo "-")
-    print_kv "Conntrack" "${ct_count} / ${ct_max}"
-    local thp_mode
-    thp_mode=$(cat /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null | grep -oE '\[[^]]+\]' | tr -d '[]' || echo "?")
-    print_kv "THP" "$thp_mode"
-
-    print_kv "IPv6" "$(ipv6_status_text)"
-    echo ""
-
-    print_subsection "Sysctl configs"
-    print_info "sysctl configs:"
-    [ -f "$SYSCTL_NETWORK_FILE" ] && echo -e "  ${GREEN}*${RESET} $SYSCTL_NETWORK_FILE"
-    [ -f "$SYSCTL_IPV6_FILE" ] && echo -e "  ${GREEN}*${RESET} $SYSCTL_IPV6_FILE"
-    print_info "Config backups (user files, latest only):"
-    echo -e "  ${GREEN}*${RESET} $BACKUP_DIR"
-    echo ""
-
-    print_subsection "Services"
-    print_kv "Chrony" "$(systemctl is-active chrony 2>/dev/null || echo '?')"
-    print_kv "Fail2Ban" "$(systemctl is-active fail2ban 2>/dev/null || echo '?')"
-    print_kv "Timezone" "${TIMEZONE_FINAL:-unknown}"
-
-    print_subsection "Auto updates"
-    local auto_updates=""
-    if [ -f /etc/apt/apt.conf.d/50unattended-upgrades ] && \
-       grep -q 'codename=.*-security' /etc/apt/apt.conf.d/50unattended-upgrades 2>/dev/null; then
-        auto_updates="security"
-    fi
-    if [ -n "$auto_updates" ]; then
-        print_kv "Auto-updates" "${GREEN}${auto_updates}${RESET}"
+    printf '\n'
+    local needs_reboot=0
+    if [ "$KERNEL_RESET_REQUIRED" -eq 1 ] || [ "$STALE_RUNTIME_CONFIG" -eq 1 ] || [ "$KERNEL_BOOT_PENDING" -eq 1 ]; then needs_reboot=1; fi
+    if [ "${#OPTIONAL_TOOL_FAILURES[@]}" -gt 0 ] || [ "${#OPTIONAL_TOOL_UNVERIFIED[@]}" -gt 0 ] || [ "${#OPTIONAL_TOOL_SKIPS[@]}" -gt 0 ]; then
+        if [ "$needs_reboot" -eq 1 ]; then print_warning 'RESULT: Configuration completed with tool issues — reboot required'; else print_warning 'RESULT: Configuration completed with tool issues'; fi
+        print_subsection 'Tool results requiring attention'
+        if [ "${#OPTIONAL_TOOL_FAILURES[@]}" -gt 0 ]; then print_kv 'Failed to install/update' "${OPTIONAL_TOOL_FAILURES[*]}"; fi
+        if [ "${#OPTIONAL_TOOL_UNVERIFIED[@]}" -gt 0 ]; then print_kv 'Latest version not verified' "${OPTIONAL_TOOL_UNVERIFIED[*]}"; fi
+        if [ "${#OPTIONAL_TOOL_SKIPS[@]}" -gt 0 ]; then print_kv 'Download skipped' "${OPTIONAL_TOOL_SKIPS[*]}"; fi
+    elif [ "$needs_reboot" -eq 1 ]; then
+        print_warning 'RESULT: Configuration completed — reboot required'
     else
-        print_kv "Auto-updates" "${YELLOW}not configured${RESET}"
+        print_success 'RESULT: Configuration completed'
     fi
-    echo ""
-
-    print_subsection "Tools"
-    print_info "Installed tools:"
-    get_ver() {
-        "$@" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 || true
-    }
-
-    local tools=""
-    command -v eza >/dev/null && tools+="  eza $(get_ver eza --version)\n"
-    command -v hx >/dev/null && tools+="  helix $(get_ver hx --version)\n"
-    command -v cloudflare-speed-cli >/dev/null && tools+="  cloudflare-speed-cli $(get_ver cloudflare-speed-cli --version)\n"
-    command -v duf >/dev/null && tools+="  duf $(get_ver duf --version)\n"
-    if command -v bat >/dev/null; then
-        tools+="  bat $(get_ver bat --version)\n"
-    elif command -v batcat >/dev/null; then
-        tools+="  bat $(get_ver batcat --version)\n"
+    print_subsection 'Active now'
+    print_kv 'Saved buffer profile' "$(buffer_profile_label)"
+    if [ "$BUFFER_TARGET_MBPS" = unknown ]; then print_kv 'Target per connection' 'Not specified'; else print_kv 'Target per connection' "$BUFFER_TARGET_MBPS Mbps"; fi
+    print_kv 'Receive / send caps' "$(current_buffer_caps)"
+    print_kv 'Congestion / default qdisc' "$(sysctl -n net.ipv4.tcp_congestion_control) / $(sysctl -n net.core.default_qdisc)"
+    print_kv 'IPv6' "$(ipv6_status_text)"
+    if command_exists docker; then
+        print_kv 'Docker service / startup' "$(systemctl is-active docker.service 2>/dev/null || true) / $(systemctl is-enabled docker.service 2>/dev/null || true)"
     fi
-    command -v zoxide >/dev/null && tools+="  zoxide $(get_ver zoxide --version)\n"
-    command -v nexttrace >/dev/null && tools+="  nexttrace $(get_ver nexttrace --version)\n"
-    [ -n "$tools" ] && echo -e "$tools" || echo "  (none)"
-    echo ""
-
-    print_subsection "Kernel"
-    detect_kernel_versions
-    print_kv "Current Kernel" "$CURRENT_KERNEL"
-    if [ -n "$LATEST_KERNEL" ] && [ "$LATEST_KERNEL" != "$CURRENT_KERNEL" ]; then
-        print_kv "Latest Kernel" "$LATEST_KERNEL (will load on reboot)"
+    print_kv 'THP mode' "$(read_thp_mode /sys/kernel/mm/transparent_hugepage/enabled || echo unavailable)"
+    if [ "$KERNEL_RESET_REQUIRED" -eq 1 ] || [ "$STALE_RUNTIME_CONFIG" -eq 1 ] || [ "$KERNEL_BOOT_PENDING" -eq 1 ]; then
+        print_subsection 'Action required'
+        if [ "$KERNEL_RESET_REQUIRED" -eq 1 ] || [ "$STALE_RUNTIME_CONFIG" -eq 1 ]; then
+            print_warning 'Reboot when a service interruption is acceptable to clear retired kernel settings.'
+            print_info 'Selected buffer caps are already applied; boot-calculated defaults may still be pending.'
+        fi
+        if [ "$KERNEL_BOOT_PENDING" -eq 1 ]; then
+            print_warning 'A different kernel is installed; reboot and verify the selected kernel to complete the change.'
+        fi
+        printf '\n    After reboot:\n      uname -r\n'
+        if [ "$KERNEL_RESET_REQUIRED" -eq 1 ]; then printf '      sysctl net.ipv4.tcp_mem net.ipv4.tcp_rmem net.ipv4.tcp_wmem\n'; fi
     fi
-    echo ""
-
-    print_success "All steps complete. Reboot recommended for full effect."
-    echo ""
-
-    # Source aliases
-    # shellcheck disable=SC1090
-    for f in /etc/profile.d/*.sh; do
-        [ -r "$f" ] && . "$f" 2>/dev/null || true
-    done
-    print_info "If aliases (cf, nt, vi, ll etc.) don't work, run: ${BOLD}source /etc/profile${RESET} or re-login."
+    print_subsection 'Next steps'
+    print_info 'Re-login to load shell shortcuts. Check the running kernel after any planned reboot.'
+    print_info 'To reassess buffers, this command also works when launched through Script Hub:'
+    printf '    curl -fsSL https://raw.githubusercontent.com/aoaim/luanqi_bazao/main/linux_script/debian_init.sh | bash -s -- --reassess-buffers\n'
 }
 
 main() {
-    # clear fails when TERM is unset (e.g. running via curl | bash with no
-    # TTY); under set -e that would abort the script before anything runs.
-    clear || true
+    parse_args "$@"
     require_root
     require_debian
+    init_ui
+
+    print_section 'Environment'
     ensure_basic_tools
     fetch_ipinfo
     detect_system
     show_detection
 
-    preflight_config
-    cleanup_stale_configs
+    print_section 'Transfer buffers'
+    configure_buffers
+    profile_allowed "$BUFFER_PROFILE" || { print_error 'Buffer profile is not allowed on this host.'; return 1; }
+    save_buffer_state || return 1
+    BUFFER_CHOICE_SAVED=1
 
+    print_section 'Packages and tools'
     apt_refresh
-    install_tools
     install_base_packages
+    print_subsection 'Additional tools'
+    install_tools
+    configure_tool_aliases
     configure_eza_aliases
     configure_update_alias
+    print_subsection 'Shell shortcuts'
+    if command_exists hx; then print_kv 'vi / vim' 'Helix'; fi
+    if command_exists cloudflare-speed-cli; then print_kv 'cf' 'Cloudflare Speedtest'; fi
+    if command_exists nexttrace; then print_kv 'nt' 'Nexttrace'; fi
+    if command_exists eza; then print_kv 'll / la / lt' 'Eza listings'; fi
+    print_kv 'update' 'Package and tool updates'
+
+    print_section 'System configuration'
+    preflight_config
+    cleanup_stale_configs
+    print_subsection 'Time synchronization'
     configure_chrony
-    ensure_kernel_modules
-    apply_network_sysctl
+    configure_fail2ban
+    configure_auto_updates
+    print_subsection 'Journal retention'
     configure_journald
+    print_subsection 'Kernel modules'
+    ensure_kernel_modules
 
-    if [ -n "${IPV6_ADDR:-}" ] && [ "${IPV6_ADDR}" != "N/A" ]; then
-        apply_ipv6_sysctl
-    else
-        print_info "IPv6 not detected, skipping IPv6 configuration."
-    fi
-
+    print_section 'Network configuration'
+    apply_network_sysctl
+    case "$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null || echo unavailable)" in
+        0) apply_ipv6_sysctl ;;
+        1) DISABLE_IPV6=1; apply_ipv6_sysctl ;;
+        *) print_info 'IPv6 sysctl unavailable; IPv6 configuration skipped.' ;;
+    esac
     apply_all_sysctl
 
-    print_section "${ICON_TOOL} Optional components"
+    print_section 'Optional components'
+    configure_optional_components
 
-    # Show kernel info first, then ask
-    if show_kernel_info; then
-        if ask_yes_no "Install Cloud Kernel?"; then
-            install_cloud_kernel
-        fi
-    fi
-
-    # Show docker status first, then ask
-    if show_docker_status; then
-        if ask_yes_no "Install Docker?"; then
-            install_docker
-        fi
-    fi
-
-    # Show THP status first, then ask (default: disable)
-    if show_thp_status; then
-        if ask_yes_no "Disable Transparent Huge Pages (THP)?" y; then
-            disable_thp
-        fi
-    fi
-
-    # Show IPv6 status first, then ask
-    show_ipv6_status
-    if [ -n "${IPV6_ADDR:-}" ] && [ "${IPV6_ADDR}" != "N/A" ]; then
-        if ask_yes_no "Disable IPv6?"; then
-            DISABLE_IPV6=1
-            print_info "Disabling IPv6..."
-            apply_ipv6_sysctl
-            sysctl --system >/dev/null 2>&1 || true
-        fi
-    fi
-
+    print_section 'Verification and result'
+    run_step --quiet 'Verifying configuration and services' verify_managed_state
     save_manifest
-
     show_report
 }
 
 main "$@"
+# Exit 2 reports optional tool failures after the rest of configuration completes.
+exit "$OPTIONAL_TOOLS_EXIT"
+
+
+
+
